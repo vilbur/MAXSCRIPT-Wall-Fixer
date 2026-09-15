@@ -1,7 +1,36 @@
-/*
+﻿/*
 WallMeshCleaner
 Slices selected wall objects and propagates wall-junction cuts.
-Version 0.47
+Version 0.54
+
+Changes from 0.53:
+- Moved Restart from the bottom of the main rollout to a compact top-right button.
+- Reduced the main dialog height so Restart no longer adds a full bottom row.
+- Kept all cleaner sub-rollout widths and tool behavior unchanged.
+
+Changes from 0.52:
+- Reduced the Face Slicer Angle spinner width from 90 px to 45 px.
+- Expanded the Cut by edge radio-button area and relaxed the Horizontal offset so the full All label is visible.
+- Kept the compact Face Slicer row and original dialog size unchanged.
+
+Changes from 0.51:
+- Restored the dialog and child-rollout widths to the pre-0.51 size.
+- Removed the visible Cut by edge label to free horizontal space.
+- Kept All / Horizontal / Vertical and Angle on one row.
+- Used radiobutton offsets so the All column is visually narrower while preserving one native radio group.
+
+Changes from 0.50:
+- Kept Cut by edge as All / Horizontal / Vertical radio buttons and moved the Angle spinner onto the same row.
+- Renamed the user-facing N-gon cleanup action to Fix N-gons.
+
+Changes from 0.49:
+- Restart now prefers the versioned script beside the running file, for example WallMeshCleaner_0.50.ms.
+- If the versioned script does not exist, Restart falls back to WallMeshCleaner.ms.
+- Restart reports an error without closing the UI if neither file exists.
+
+Changes from 0.48:
+- Replaced the Face Slicer "Cut by edge" dropdown with All / Horizontal / Vertical radio buttons.
+- Preserved the existing CutMode INI values: 1 = All, 2 = Horizontal, 3 = Vertical.
 
 Changes from 0.46:
 - Fix Angles now uses all currently selected vertices, regardless of edge connectivity.
@@ -59,7 +88,7 @@ Changes from 0.33:
 
 Changes from 0.32:
 - Reorganized cleaner UI into sub-rollouts.
-- Added Face Cleaner as the first cleaner sub-rollout and moved Cut N-gons into it.
+- Added Face Cleaner as the first cleaner sub-rollout and moved Fix N-gons into it.
 - Added Vertex Cleaner as the second cleaner sub-rollout and moved border-angle / duplicate-vertex controls into it.
 - Cleaner functionality and persisted settings remain unchanged.
 
@@ -159,13 +188,13 @@ Changes from 0.05:
 - Fixed INI dialog-position loader.
   readIniIntFromSection() was referenced before that struct method existed,
   which resolved to undefined in MaxScript. The helper is now declared first.
-- "Auto Smooth" checkbutton moved above "Cut N-gons".
+- "Auto Smooth" checkbutton moved above "Fix N-gons".
 - When Auto Smooth is checked, Auto Smooth is forced before N-gon cutting.
 - Auto Smooth is applied with all faces temporarily selected, then the previous
   face selection is restored.
 - The selected node list is reused directly so Auto Smooth definitely runs on
   the same objects that are about to be cut.
-- Added cleanup after "Cut N-gons":
+- Added cleanup after "Fix N-gons":
   1. Weld all possible border vertices with weldThreshold = 0.0.
   2. Find vertices connected to exactly two straight edges.
   3. Remove those redundant vertices with EditablePoly.Remove.
@@ -174,10 +203,10 @@ Changes from 0.05:
   cleanupAfterNgonCut() now appears after autoSmoothNode(), so the call resolves
   correctly instead of evaluating autoSmoothNode as undefined.
 - Moved Weld Vertices + Threshold controls into a shared "Options" section.
-- Cut N-gons now uses the same Weld Vertices checkbox and Weld Threshold.
+- Fix N-gons now uses the same Weld Vertices checkbox and Weld Threshold.
 - Auto Smooth is now a checkbox instead of a checkbutton.
 - Added "Smooth" button next to Auto Smooth for manual Auto Smooth.
-- When Auto Smooth is checked, Auto Smooth runs before Cut N-gons and is
+- When Auto Smooth is checked, Auto Smooth runs before Fix N-gons and is
   reapplied after cleanup.
 */
 
@@ -196,10 +225,13 @@ global WallMeshCleanerOptionsRollout
 global WallMeshCleanerFaceSlicerRollout
 global WallMeshCleanerFaceCleanerRollout
 global WallMeshCleanerVertexCleanerRollout
+global WallMeshCleanerScriptPath
+
+WallMeshCleanerScriptPath = getSourceFileName()
 
 struct WallMeshCleaner_v
 (
-    version = "0.48",
+    version = "0.54",
     temp_id_start = 60000,
     epsilon = 0.001,
     collinear_dot_limit = 0.9999,
@@ -220,6 +252,31 @@ struct WallMeshCleaner_v
         (
             base_obj = node.baseObject
             ((classOf base_obj) == Editable_Poly)
+        )
+        -- return
+    ),
+
+    /*
+    Returns the preferred script path for Restart.
+    The matching versioned file is preferred; WallMeshCleaner.ms is the fallback.
+    */
+    function getRestartScriptPath source_script_path =
+    (
+        script_dir = getFilenamePath source_script_path
+        versioned_script_path = script_dir + "WallMeshCleaner_" + version + ".ms"
+        unversioned_script_path = script_dir + "WallMeshCleaner.ms"
+
+        if doesFileExist versioned_script_path then
+        (
+            versioned_script_path
+        )
+        else if doesFileExist unversioned_script_path then
+        (
+            unversioned_script_path
+        )
+        else
+        (
+            undefined
         )
         -- return
     ),
@@ -2488,11 +2545,11 @@ struct WallMeshCleaner_v
         (
             total_slices = 0
 
-            undo "WallMeshCleaner - Cut N-gons" on
+            undo "WallMeshCleaner - Fix N-gons" on
             (
                 if auto_smooth then
                 (
-                    format "WallMeshCleaner: Auto Smooth before Cut N-gons...\n"
+                    format "WallMeshCleaner: Auto Smooth before Fix N-gons...\n"
 
                     for node in selected_nodes do
                     (
@@ -2505,7 +2562,7 @@ struct WallMeshCleaner_v
                     total_slices += propagateAutomaticJunctionCuts node cut_mode:cut_mode angle_threshold:angle_threshold
                 )
 
-                format "WallMeshCleaner: Post Cut N-gons cleanup...\n"
+                format "WallMeshCleaner: Post Fix N-gons cleanup...\n"
 
                 for node in selected_nodes do
                 (
@@ -3380,7 +3437,7 @@ saved_border_angle_threshold = WallMeshCleaner.readIniFloat "BorderAngleThreshol
 saved_double_vert_threshold = WallMeshCleaner.readIniFloat "DoubleVertThreshold" 1.0
 saved_dialog_position = WallMeshCleaner.loadDialogPosition()
 
-rollout WallMeshCleanerOptionsRollout "Options" width:310 height:176
+rollout WallMeshCleanerOptionsRollout "Options" width:310 height:142
 (
     checkbox weld_checkbox "Weld Vertices" pos:[8,13] width:110 height:20 checked:saved_weld_enabled tooltip:"Enable vertex welding.\n\nUses Weld Threshold."
     label weld_threshold_label "Threshold:" pos:[140,15] width:62 height:18
@@ -3396,22 +3453,12 @@ rollout WallMeshCleanerOptionsRollout "Options" width:310 height:176
         pos:[166,38] width:136 height:26 \
         tooltip:"Apply Auto Smooth.\n\nUses the current smoothing threshold."
 
-    label cut_mode_label "Cut by edge:" pos:[8,75] width:86 height:18
-    dropdownlist cut_mode_dropdown "" pos:[96,71] width:128 height:21 \
-        items:#("All", "Horizontal", "Vertical") selection:saved_cut_mode_index \
-        tooltip:"Choose slicing direction.\n\nAll: Vertical first, then Horizontal."
-
-    label angle_label "Angle:" pos:[232,75] width:40 height:18
-    spinner angle_spinner "" pos:[270,71] width:32 height:20 \
-        range:[0.0,45.0,saved_angle_threshold] type:#float scale:1.0 \
-        tooltip:"Orientation tolerance.\n\nUnits: degrees."
-
     checkbutton hidden_edges_checkbutton "Display Hidden Edges" \
-        pos:[8,104] width:142 height:26 checked:saved_display_hidden_edges \
+        pos:[8,75] width:142 height:26 checked:saved_display_hidden_edges \
         tooltip:"Toggle hidden edge display.\n\nAffects selected wall objects."
 
     checkbutton double_side_checkbutton "Double Side" \
-        pos:[160,104] width:142 height:26 checked:saved_double_side \
+        pos:[160,75] width:142 height:26 checked:saved_double_side \
         tooltip:"Toggle double-sided display.\n\nDisables backface culling when enabled."
 
     on weld_checkbox changed state do
@@ -3425,16 +3472,6 @@ rollout WallMeshCleanerOptionsRollout "Options" width:310 height:176
     )
 
     on auto_smooth_checkbox changed state do
-    (
-        ::WallMeshCleanerRollout.saveUiSettings()
-    )
-
-    on cut_mode_dropdown selected item do
-    (
-        ::WallMeshCleanerRollout.saveUiSettings()
-    )
-
-    on angle_spinner changed value do
     (
         ::WallMeshCleanerRollout.saveUiSettings()
     )
@@ -3457,9 +3494,28 @@ rollout WallMeshCleanerOptionsRollout "Options" width:310 height:176
     )
 )
 
-rollout WallMeshCleanerFaceSlicerRollout "Face Slicer" width:310 height:60
+rollout WallMeshCleanerFaceSlicerRollout "Face Slicer" width:310 height:86
 (
-    button slice_button "Slice Selected Walls" pos:[8,8] width:294 height:34 tooltip:"Slice selected wall faces.\n\nAll: Vertical first, then Horizontal."
+    radiobuttons cut_mode_radio "" pos:[8,8] width:243 height:20 \
+        labels:#("All", "Horizontal", "Vertical") default:saved_cut_mode_index columns:3 align:#left \
+        offsets:#([0,0],[-15,0],[0,0]) \
+        tooltip:"Choose slicing direction.\n\nAll: Vertical first, then Horizontal."
+
+    spinner angle_spinner "Angle:" pos:[257,8] width:45 height:20 \
+        range:[0.0,45.0,saved_angle_threshold] type:#float scale:1.0 \
+        tooltip:"Orientation tolerance.\n\nUnits: degrees."
+
+    button slice_button "Slice Selected Walls" pos:[8,40] width:294 height:34 tooltip:"Slice selected wall faces.\n\nAll: Vertical first, then Horizontal."
+
+    on cut_mode_radio changed state do
+    (
+        ::WallMeshCleanerRollout.saveUiSettings()
+    )
+
+    on angle_spinner changed value do
+    (
+        ::WallMeshCleanerRollout.saveUiSettings()
+    )
 
     on slice_button pressed do
     (
@@ -3469,7 +3525,7 @@ rollout WallMeshCleanerFaceSlicerRollout "Face Slicer" width:310 height:60
 
 rollout WallMeshCleanerFaceCleanerRollout "Face Cleaner" width:310 height:60
 (
-    button junction_button "Cut N-gons" pos:[8,8] width:294 height:34 tooltip:"Reduce wall N-gons.\n\nPrefer orthogonal clean cuts.\n\nRemove redundant dirty topology."
+    button junction_button "Fix N-gons" pos:[8,8] width:294 height:34 tooltip:"Reduce wall N-gons.\n\nPrefer orthogonal clean cuts.\n\nRemove redundant dirty topology."
 
     on junction_button pressed do
     (
@@ -3548,17 +3604,18 @@ rollout WallMeshCleanerVertexCleanerRollout "Vertex Cleaner" width:310 height:14
     )
 )
 
-rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.48" width:344 height:568
+rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.54" width:344 height:594
 (
-    subRollout tool_subrollout "Wall Mesh Cleaner 0.48" pos:[8,8] width:328 height:552
+    button restart_button "Restart" pos:[262,6] width:74 height:22 tooltip:"Reload the matching versioned script first.\nFallback: WallMeshCleaner.ms."
+    subRollout tool_subrollout "Wall Mesh Cleaner 0.54" pos:[8,32] width:328 height:554
 
     /*
-    Returns the requested face-slice orientation from the Options sub-rollout.
+    Returns the requested face-slice orientation from the Face Slicer sub-rollout.
     All performs vertical first and horizontal second in the slicer implementation.
     */
     function getCutMode =
     (
-        case WallMeshCleanerOptionsRollout.cut_mode_dropdown.selection of
+        case WallMeshCleanerFaceSlicerRollout.cut_mode_radio.state of
         (
             2: #horizontal
             3: #vertical
@@ -3579,8 +3636,8 @@ rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.48" width:344 height:568
             WallMeshCleanerOptionsRollout.hidden_edges_checkbutton.checked \
             WallMeshCleanerOptionsRollout.double_side_checkbutton.checked \
             WallMeshCleanerOptionsRollout.auto_smooth_checkbox.checked \
-            WallMeshCleanerOptionsRollout.cut_mode_dropdown.selection \
-            WallMeshCleanerOptionsRollout.angle_spinner.value \
+            WallMeshCleanerFaceSlicerRollout.cut_mode_radio.state \
+            WallMeshCleanerFaceSlicerRollout.angle_spinner.value \
             border_angle_threshold:WallMeshCleanerVertexCleanerRollout.border_angle_threshold_spinner.value \
             double_vert_threshold:WallMeshCleanerVertexCleanerRollout.double_vert_threshold_spinner.value
         -- return
@@ -3602,7 +3659,7 @@ rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.48" width:344 height:568
     )
 
     /*
-    Runs the main face slicer using controls stored in Options and Face Slicer.
+    Runs the main face slicer using shared Options and Face Slicer controls.
     Display options are applied before slicing and current settings are persisted.
     */
     function runFaceSlicer =
@@ -3615,7 +3672,7 @@ rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.48" width:344 height:568
             weld_vertices:WallMeshCleanerOptionsRollout.weld_checkbox.checked \
             weld_threshold:WallMeshCleanerOptionsRollout.weld_threshold_spinner.value \
             cut_mode:(getCutMode()) \
-            angle_threshold:WallMeshCleanerOptionsRollout.angle_spinner.value
+            angle_threshold:WallMeshCleanerFaceSlicerRollout.angle_spinner.value
         -- return
     )
 
@@ -3632,7 +3689,7 @@ rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.48" width:344 height:568
             weld_threshold:WallMeshCleanerOptionsRollout.weld_threshold_spinner.value \
             auto_smooth:WallMeshCleanerOptionsRollout.auto_smooth_checkbox.checked \
             cut_mode:(getCutMode()) \
-            angle_threshold:WallMeshCleanerOptionsRollout.angle_spinner.value
+            angle_threshold:WallMeshCleanerFaceSlicerRollout.angle_spinner.value
         -- return
     )
 
@@ -3734,6 +3791,25 @@ rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.48" width:344 height:568
         -- return
     )
 
+    on restart_button pressed do
+    (
+        script_path = WallMeshCleaner.getRestartScriptPath WallMeshCleanerScriptPath
+
+        if script_path != undefined then
+        (
+            saveUiSettings()
+            destroyDialog WallMeshCleanerRollout
+            fileIn script_path
+        )
+        else
+        (
+            messageBox (
+                "WallMeshCleaner restart failed.\n\n" +
+                "Neither the versioned script nor WallMeshCleaner.ms exists beside the running script."
+            )
+        )
+    )
+
     on WallMeshCleanerRollout open do
     (
         addSubRollout tool_subrollout WallMeshCleanerOptionsRollout
@@ -3761,8 +3837,8 @@ rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.48" width:344 height:568
             WallMeshCleanerOptionsRollout.hidden_edges_checkbutton.checked \
             WallMeshCleanerOptionsRollout.double_side_checkbutton.checked \
             WallMeshCleanerOptionsRollout.auto_smooth_checkbox.checked \
-            WallMeshCleanerOptionsRollout.cut_mode_dropdown.selection \
-            WallMeshCleanerOptionsRollout.angle_spinner.value \
+            WallMeshCleanerFaceSlicerRollout.cut_mode_radio.state \
+            WallMeshCleanerFaceSlicerRollout.angle_spinner.value \
             border_angle_threshold:WallMeshCleanerVertexCleanerRollout.border_angle_threshold_spinner.value \
             double_vert_threshold:WallMeshCleanerVertexCleanerRollout.double_vert_threshold_spinner.value \
             dialog_position:dialog_pos
@@ -3817,16 +3893,16 @@ D. Automatic junction propagation with cleanup:
 1. Select the architectural wall object.
 2. Configure Weld Vertices + Threshold in Options.
 3. Enable Auto Smooth if wanted.
-4. Press "Cut N-gons".
+4. Press "Fix N-gons".
 5. Expected order:
    - Auto Smooth when checked
-   - Cut N-gons
+   - Fix N-gons
    - weld using the Options threshold when Weld Vertices is checked
    - remove vertices with exactly two straight edges
    - Auto Smooth again when checked
 5. Listener should print:
-   WallMeshCleaner: Auto Smooth before Cut N-gons...
-   WallMeshCleaner: Post Cut N-gons cleanup...
+   WallMeshCleaner: Auto Smooth before Fix N-gons...
+   WallMeshCleaner: Post Fix N-gons cleanup...
 
 Cleanup-only test:
 WallMeshCleaner.cleanupAfterNgonCut $     weld_vertices:true     weld_threshold:1.0     reapply_auto_smooth:true
@@ -3875,7 +3951,7 @@ Manual regression checklist:
 - Rotate walls in XY: Horizontal remains relative to world Z.
 - Fresh copies for All, Horizontal and Vertical; test 4.9 and 5.1 degree edges.
 - Repeat with welding enabled/disabled and Auto Smooth enabled/disabled.
-- Cut N-gons removes redundant quad dividers; straight-vertex cleanup preserves faces.
+- Fix N-gons removes redundant quad dividers; straight-vertex cleanup preserves faces.
 - Original material IDs restored; unselected objects unchanged.
 - Rerun with rollout open, then close/reopen and verify INI settings/position.
 */
@@ -3900,7 +3976,7 @@ Manual regression checklist:
   incident edges must dissolve even if hidden incident edges also exist.
 - Repeat with Display Hidden Edges on/off: use stored edge visibility, not viewport state.
 - Retain a bent two-edge corner, a three-visible-edge T junction, and a folded wall junction.
-- Exercise main Slice and Cut N-gons; both call the shared per-cut cleanup.
+- Exercise main Slice and Fix N-gons; both call the shared per-cut cleanup.
 - Verify removed vertices dissolve surrounding polygons instead of deleting wall surfaces.
 - Recheck the 0.23 redundant quad-loop cases after vertex cleanup.
 */
@@ -4030,4 +4106,88 @@ WallMeshCleaner.fixNonOrthoBorderVerts use_high_z:false horizontal_mode:false
 WallMeshCleaner.fixNonOrthoBorderVerts use_high_z:true horizontal_mode:false
 WallMeshCleaner.fixNonOrthoBorderVerts use_high_z:false horizontal_mode:true
 WallMeshCleaner.fixNonOrthoBorderVerts use_high_z:true horizontal_mode:true
+*/
+
+
+/*
+CUT BY EDGE RADIO BUTTON TEST CODE
+
+1. Run WallMeshCleaner_0.54.ms.
+2. Face Slicer must show three radio buttons:
+   All | Horizontal | Vertical
+3. Select each radio button and verify this Listener code:
+
+format "Cut By Edge state: % | mode: %\n" \
+    WallMeshCleanerFaceSlicerRollout.cut_mode_radio.state \
+    WallMeshCleanerRollout.getCutMode()
+
+Expected mapping:
+1 = #all
+2 = #horizontal
+3 = #vertical
+
+4. Close and reopen the tool. The selected radio button must restore from
+   the existing [Settings] CutMode INI value without migration.
+*/
+
+/*
+FACE SLICER COMPACT ONE-ROW UI TEST CODE
+
+1. Open Face Slicer.
+2. There must be no visible "Cut by edge" label.
+3. Radio group must remain: All | Horizontal | Vertical.
+4. All / Horizontal / Vertical and Angle must stay on the same row.
+5. The full All label must be visible.
+6. Angle spinner must be about half its previous width (45 px).
+7. Main dialog width must remain 344 px.
+8. Face Cleaner button text must read "Fix N-gons".
+9. Verify UI control positions in Listener:
+
+format "Cut mode pos: % | Angle pos: % | Angle width: % | Dialog size: %\n" \
+    WallMeshCleanerFaceSlicerRollout.cut_mode_radio.pos \
+    WallMeshCleanerFaceSlicerRollout.angle_spinner.pos \
+    WallMeshCleanerFaceSlicerRollout.angle_spinner.width \
+    (getDialogSize WallMeshCleanerRollout)
+
+Expected:
+- Cut mode pos = [8,8]
+- Angle pos = [257,8]
+- Angle width = 45
+- Dialog width = 344
+*/
+
+/*
+RESTART FILE PRIORITY TEST CODE
+
+Listener test:
+restart_path = WallMeshCleaner.getRestartScriptPath WallMeshCleanerScriptPath
+format "Restart source: %\n" WallMeshCleanerScriptPath
+format "Restart target: %\n" restart_path
+
+Expected behavior:
+1. If WallMeshCleaner_0.54.ms exists beside the running script, restart_path must point to it.
+2. Rename or remove WallMeshCleaner_0.54.ms while WallMeshCleaner.ms exists.
+   Run the Listener test again; restart_path must point to WallMeshCleaner.ms.
+3. If neither file exists, restart_path must be undefined and pressing Restart must keep the UI open and show an error.
+*/
+
+/*
+RESTART TOP-UI LAYOUT TEST CODE
+
+1. Open WallMeshCleaner_0.54.ms.
+2. Restart must be visible at the top-right of the main UI.
+3. There must be no Restart row below Vertex Cleaner.
+4. Verify the compact layout in Listener:
+
+format "Restart pos: % | size: [% x %] | Dialog size: %\n" \
+    WallMeshCleanerRollout.restart_button.pos \
+    WallMeshCleanerRollout.restart_button.width \
+    WallMeshCleanerRollout.restart_button.height \
+    (getDialogSize WallMeshCleanerRollout)
+
+Expected:
+- Restart pos = [262,6]
+- Restart size = [74 x 22]
+- Dialog width = 344
+- Dialog height is smaller than 626 px
 */
