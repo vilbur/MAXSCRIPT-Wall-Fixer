@@ -1,0 +1,1 @@
+PASS: Make 1 Slice completed without an undefined Point3.

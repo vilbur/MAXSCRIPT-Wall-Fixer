@@ -1,0 +1,10 @@
+COMPILED
+PASS rotation:0 existing Edit Poly:false baked:false door:false mesh base:false | V:16 E:24 F:8 | base unchanged
+PASS rotation:37 existing Edit Poly:false baked:false door:false mesh base:false | V:16 E:24 F:8 | base unchanged
+PASS rotation:91 existing Edit Poly:true baked:false door:false mesh base:false | V:16 E:24 F:8 | base unchanged
+PASS rotation:37 existing Edit Poly:true baked:true door:false mesh base:false | V:16 E:24 F:8 | base unchanged
+PASS rotation:37 existing Edit Poly:false baked:false door:true mesh base:false | V:30 E:48 F:18 | base unchanged
+PASS rotation:37 existing Edit Poly:true baked:false door:false mesh base:true | V:16 E:24 F:8 | base unchanged
+PASS genuine sloping boundary preserved
+PASS required material diagonal retained
+PASS nonplanar rejection and modifier rollback

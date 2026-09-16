@@ -1,0 +1,85 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="510" viewBox="0 0 1100 510">
+<rect width="1100" height="510" fill="#f6f7f9"/>
+<text x="45" y="37" font-family="sans-serif" font-size="24" fill="#17202a">Before</text>
+<text x="45" y="62" font-family="sans-serif" font-size="14" fill="#52606d">4 polygons; redundant boundary vertices</text>
+<polygon points="45.0,435.0 255.0,435.0 465.0,435.0 325.0,330.0 185.0,330.0" fill="#dbeafe"/>
+<polygon points="465.0,435.0 465.0,85.0 325.0,190.0 325.0,330.0" fill="#dbeafe"/>
+<polygon points="465.0,85.0 255.0,85.0 45.0,85.0 185.0,190.0 325.0,190.0" fill="#dbeafe"/>
+<polygon points="45.0,85.0 45.0,435.0 185.0,330.0 185.0,190.0" fill="#dbeafe"/>
+<line x1="45.0" y1="435.0" x2="255.0" y2="435.0" stroke="#17202a" stroke-width="2"/>
+<line x1="465.0" y1="435.0" x2="255.0" y2="435.0" stroke="#17202a" stroke-width="2"/>
+<line x1="465.0" y1="435.0" x2="325.0" y2="330.0" stroke="#d97706" stroke-width="2" stroke-dasharray="6 4"/>
+<line x1="185.0" y1="330.0" x2="325.0" y2="330.0" stroke="#17202a" stroke-width="2"/>
+<line x1="45.0" y1="435.0" x2="185.0" y2="330.0" stroke="#d97706" stroke-width="2" stroke-dasharray="6 4"/>
+<line x1="465.0" y1="435.0" x2="465.0" y2="85.0" stroke="#17202a" stroke-width="2"/>
+<line x1="465.0" y1="85.0" x2="325.0" y2="190.0" stroke="#d97706" stroke-width="2" stroke-dasharray="6 4"/>
+<line x1="325.0" y1="330.0" x2="325.0" y2="190.0" stroke="#17202a" stroke-width="2"/>
+<line x1="465.0" y1="85.0" x2="255.0" y2="85.0" stroke="#17202a" stroke-width="2"/>
+<line x1="45.0" y1="85.0" x2="255.0" y2="85.0" stroke="#17202a" stroke-width="2"/>
+<line x1="45.0" y1="85.0" x2="185.0" y2="190.0" stroke="#d97706" stroke-width="2" stroke-dasharray="6 4"/>
+<line x1="325.0" y1="190.0" x2="185.0" y2="190.0" stroke="#17202a" stroke-width="2"/>
+<line x1="45.0" y1="435.0" x2="45.0" y2="85.0" stroke="#17202a" stroke-width="2"/>
+<line x1="185.0" y1="330.0" x2="185.0" y2="190.0" stroke="#17202a" stroke-width="2"/>
+<circle cx="45.0" cy="435.0" r="3.5" fill="#17202a"/>
+<circle cx="465.0" cy="435.0" r="3.5" fill="#17202a"/>
+<circle cx="465.0" cy="85.0" r="3.5" fill="#17202a"/>
+<circle cx="45.0" cy="85.0" r="3.5" fill="#17202a"/>
+<circle cx="185.0" cy="330.0" r="3.5" fill="#17202a"/>
+<circle cx="325.0" cy="330.0" r="3.5" fill="#17202a"/>
+<circle cx="325.0" cy="190.0" r="3.5" fill="#17202a"/>
+<circle cx="185.0" cy="190.0" r="3.5" fill="#17202a"/>
+<circle cx="255.0" cy="435.0" r="3.5" fill="#17202a"/>
+<circle cx="255.0" cy="85.0" r="3.5" fill="#17202a"/>
+<text x="45" y="475" font-family="sans-serif" font-size="15" fill="#52606d">V 10  /  E 14  /  F 4</text>
+<text x="610" y="37" font-family="sans-serif" font-size="24" fill="#17202a">After</text>
+<text x="610" y="62" font-family="sans-serif" font-size="14" fill="#52606d">8 rectangular regions; original opening retained</text>
+<polygon points="610.0,435.0 750.0,435.0 750.0,330.0 610.0,330.0" fill="#dbeafe"/>
+<polygon points="750.0,435.0 890.0,435.0 890.0,330.0 750.0,330.0" fill="#dbeafe"/>
+<polygon points="750.0,85.0 610.0,85.0 610.0,190.0 750.0,190.0" fill="#dbeafe"/>
+<polygon points="890.0,85.0 750.0,85.0 750.0,190.0 890.0,190.0" fill="#dbeafe"/>
+<polygon points="890.0,435.0 1030.0,435.0 1030.0,330.0 890.0,330.0" fill="#dbeafe"/>
+<polygon points="1030.0,330.0 1030.0,190.0 890.0,190.0 890.0,330.0" fill="#dbeafe"/>
+<polygon points="610.0,190.0 610.0,330.0 750.0,330.0 750.0,190.0" fill="#dbeafe"/>
+<polygon points="1030.0,190.0 1030.0,85.0 890.0,85.0 890.0,190.0" fill="#dbeafe"/>
+<line x1="610.0" y1="435.0" x2="750.0" y2="435.0" stroke="#17202a" stroke-width="2"/>
+<line x1="750.0" y1="330.0" x2="750.0" y2="435.0" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="750.0" y1="330.0" x2="610.0" y2="330.0" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="610.0" y1="435.0" x2="610.0" y2="330.0" stroke="#17202a" stroke-width="2"/>
+<line x1="750.0" y1="435.0" x2="890.0" y2="435.0" stroke="#17202a" stroke-width="2"/>
+<line x1="890.0" y1="330.0" x2="890.0" y2="435.0" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="750.0" y1="330.0" x2="890.0" y2="330.0" stroke="#17202a" stroke-width="2"/>
+<line x1="610.0" y1="85.0" x2="750.0" y2="85.0" stroke="#17202a" stroke-width="2"/>
+<line x1="610.0" y1="85.0" x2="610.0" y2="190.0" stroke="#17202a" stroke-width="2"/>
+<line x1="750.0" y1="190.0" x2="610.0" y2="190.0" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="750.0" y1="190.0" x2="750.0" y2="85.0" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="750.0" y1="85.0" x2="890.0" y2="85.0" stroke="#17202a" stroke-width="2"/>
+<line x1="890.0" y1="190.0" x2="750.0" y2="190.0" stroke="#17202a" stroke-width="2"/>
+<line x1="890.0" y1="190.0" x2="890.0" y2="85.0" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="1030.0" y1="435.0" x2="890.0" y2="435.0" stroke="#17202a" stroke-width="2"/>
+<line x1="1030.0" y1="435.0" x2="1030.0" y2="330.0" stroke="#17202a" stroke-width="2"/>
+<line x1="890.0" y1="330.0" x2="1030.0" y2="330.0" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="1030.0" y1="330.0" x2="1030.0" y2="190.0" stroke="#17202a" stroke-width="2"/>
+<line x1="890.0" y1="190.0" x2="1030.0" y2="190.0" stroke="#1d4ed8" stroke-width="2"/>
+<line x1="890.0" y1="330.0" x2="890.0" y2="190.0" stroke="#17202a" stroke-width="2"/>
+<line x1="610.0" y1="330.0" x2="610.0" y2="190.0" stroke="#17202a" stroke-width="2"/>
+<line x1="750.0" y1="330.0" x2="750.0" y2="190.0" stroke="#17202a" stroke-width="2"/>
+<line x1="1030.0" y1="85.0" x2="1030.0" y2="190.0" stroke="#17202a" stroke-width="2"/>
+<line x1="1030.0" y1="85.0" x2="890.0" y2="85.0" stroke="#17202a" stroke-width="2"/>
+<circle cx="610.0" cy="435.0" r="3.5" fill="#17202a"/>
+<circle cx="1030.0" cy="435.0" r="3.5" fill="#17202a"/>
+<circle cx="1030.0" cy="85.0" r="3.5" fill="#17202a"/>
+<circle cx="610.0" cy="85.0" r="3.5" fill="#17202a"/>
+<circle cx="750.0" cy="330.0" r="3.5" fill="#17202a"/>
+<circle cx="890.0" cy="330.0" r="3.5" fill="#17202a"/>
+<circle cx="890.0" cy="190.0" r="3.5" fill="#17202a"/>
+<circle cx="750.0" cy="190.0" r="3.5" fill="#17202a"/>
+<circle cx="750.0" cy="435.0" r="3.5" fill="#17202a"/>
+<circle cx="750.0" cy="85.0" r="3.5" fill="#17202a"/>
+<circle cx="890.0" cy="85.0" r="3.5" fill="#17202a"/>
+<circle cx="890.0" cy="435.0" r="3.5" fill="#17202a"/>
+<circle cx="1030.0" cy="330.0" r="3.5" fill="#17202a"/>
+<circle cx="610.0" cy="330.0" r="3.5" fill="#17202a"/>
+<circle cx="610.0" cy="190.0" r="3.5" fill="#17202a"/>
+<circle cx="1030.0" cy="190.0" r="3.5" fill="#17202a"/>
+<text x="610" y="475" font-family="sans-serif" font-size="15" fill="#52606d">V 16  /  E 24  /  F 8</text>
+</svg>

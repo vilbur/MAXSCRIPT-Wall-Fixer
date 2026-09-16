@@ -462,9 +462,55 @@ struct WMCWallSlicePipeline
         )
         result
     ),
+    fn performCutAtAnchor axis anchor =
+    (
+        local t = refreshTopology()
+        local region = componentAt t anchor
+        if region.numberSet == 0 do throw "Cannot remap a preserved corner anchor."
+        local spans = false
+        for f in region do
+        (
+            local low = 1e30
+            local high = -1e30
+            for v in t.faces[f] do
+            (
+                local value = dot(t.points[v]-anchor) axis
+                low = amin low value
+                high = amax high value
+            )
+            if low < -tolerance and high > tolerance do spans = true
+        )
+        if not spans then return 0
+        local tm = node.objectTransform
+        local localNormal = normalize [dot tm.row1 axis,dot tm.row2 axis,dot tm.row3 axis]
+        tm.row4 = [0,0,0]
+        ep.SetSlicePlane localNormal ((anchor * inverse tm) + referenceLocal)
+        t = applyOperation #Face region #SliceSelectedFaces
+        local currentRegion = componentAt t anchor
+        for f in currentRegion do
+        (
+            local low = 1e30
+            local high = -1e30
+            for v in t.faces[f] do
+            (
+                local value = dot(t.points[v]-anchor) axis
+                low = amin low value
+                high = amax high value
+            )
+            if low < -tolerance and high > tolerance do throw "Slice left a polygon crossing its requested plane."
+        )
+        for e = 1 to t.edges.count do
+        (
+            local s = segment t e
+            if abs(dot(s[1]-anchor) axis) <= tolerance and abs(dot(s[2]-anchor) axis) <= tolerance do append protectedSegments s
+        )
+        validateCleanTopology t
+        cuts += 1
+        for v = 1 to t.points.count do if distance t.points[v] anchor <= tolerance do return v
+        throw "Cannot select the slice-driving vertex after slicing."
+    ),
     fn performCuts axis =
     (
-        -- Deduplication is per connected component, identified geometrically.
         local done = #()
         for anchor in anchors do
         (
@@ -473,60 +519,52 @@ struct WMCWallSlicePipeline
             if region.numberSet == 0 do throw "Cannot remap a preserved corner anchor."
             local station = dot(anchor-origin) axis
             local duplicate = false
-            for item in done do
-                if abs(item[1]-station) <= tolerance and (componentAt t item[2]) == region do duplicate = true
+            for item in done do if abs(item[1]-station) <= tolerance and (componentAt t item[2]) == region do duplicate = true
             if not duplicate do
             (
                 append done #(station,anchor)
-                local spans = false
-                for f in region do
-                (
-                    local low = 1e30
-                    local high = -1e30
-                    for v in t.faces[f] do
-                    (
-                        local value = dot(t.points[v]-anchor) axis
-                        low = amin low value
-                        high = amax high value
-                    )
-                    if low < -tolerance and high > tolerance do spans = true
-                )
-                if spans do
-                (
-                    local tm = node.objectTransform
-                    -- Plane normals transform as covectors (also handles nonuniform scale).
-                    local localNormal = normalize [dot tm.row1 axis,dot tm.row2 axis,dot tm.row3 axis]
-                    tm.row4 = [0,0,0]
-                    ep.SetSlicePlane localNormal ((anchor * inverse tm) + referenceLocal)
-                    t = applyOperation #Face region #SliceSelectedFaces
-                    local currentRegion = componentAt t anchor
-                    for f in currentRegion do
-                    (
-                        local low = 1e30
-                        local high = -1e30
-                        for v in t.faces[f] do
-                        (
-                            local value = dot(t.points[v]-anchor) axis
-                            low = amin low value
-                            high = amax high value
-                        )
-                        if low < -tolerance and high > tolerance do throw "Slice left a polygon crossing its requested plane."
-                    )
-                    for e = 1 to t.edges.count do
-                    (
-                        local s = segment t e
-                        if abs(dot(s[1]-anchor) axis) <= tolerance and abs(dot(s[2]-anchor) axis) <= tolerance do
-                            append protectedSegments s
-                    )
-                    validateCleanTopology t
-                    cuts += 1
-                )
+                performCutAtAnchor axis anchor
             )
         )
         true
     ),
     fn performVerticalCuts = performCuts horizontal,
     fn performHorizontalCuts = performCuts vertical,
+    fn runOneSlice cutMode:#all =
+    (
+        local t = refreshTopology()
+        tolerance = units.decodeValue "0.001mm"
+        setFrame t
+        validateStructure t
+        corners = collectCornerVertices t
+        originalBorder = for e in t.border collect segment t e
+        originalDiagonals = for e = 1 to t.edges.count where not t.border[e] and edgeKind t e == #diagonal collect segment t e
+        protectedSegments = for e = 1 to t.edges.count where edgeKind t e != #diagonal collect segment t e
+        baseline = #(t.points.count-t.edges.count+t.faces.count,areaByMaterial t)
+        anchors = #()
+        for v = 1 to t.points.count do
+        (
+            local es = (t.vertexEdges[v]*t.border) as array
+            if es.count == 2 do
+            (
+                local k1 = edgeKind t es[1]
+                local k2 = edgeKind t es[2]
+                if (k1 == #horizontal and k2 == #vertical) or (k1 == #vertical and k2 == #horizontal) do append anchors t.points[v]
+            )
+        )
+        local axes = case cutMode of
+        (
+            #horizontal: #(vertical)
+            #vertical: #(horizontal)
+            default: #(horizontal,vertical)
+        )
+        for axis in axes do for anchor in anchors do
+        (
+            local selectedVertex = performCutAtAnchor axis anchor
+            if selectedVertex > 0 do return selectedVertex
+        )
+        throw "No boundary corner can produce a slice in the requested direction."
+    ),
     fn removeRedundantDiagonalEdges =
     (
         local t = refreshTopology()
@@ -992,7 +1030,7 @@ struct WallMeshCleaner_v
 
     /* Slice and Fix N-gons now share one native Edit Poly pipeline.
        Legacy weld keywords are accepted, but cleanup never welds borders. */
-    function processNode node cut_mode:#all angle_threshold:5.0 reset_clean_edges:true clear_clean_edges:true auto_smooth:false =
+    function processNode node cut_mode:#all angle_threshold:5.0 reset_clean_edges:true clear_clean_edges:true auto_smooth:false debug_one_slice:false =
     (
         last_slice_error = undefined
         last_slice_count = 0
@@ -1018,6 +1056,7 @@ struct WallMeshCleaner_v
         local success = false
         local failure = undefined
         local settings = undefined
+        local debug_vertex = 0
         try
         (
             -- An instanced object shares its whole evaluated modifier pipeline.
@@ -1062,7 +1101,14 @@ struct WallMeshCleaner_v
             modifier.useSoftSel = false
             modifier.remveEdgeCtrlKey = false
             local pipeline = WMCWallSlicePipeline node:node ep:modifier axisTolerance:(amin 45.0 (amax 0.0 angle_threshold))
-            pipeline.run cutMode:cut_mode
+            if debug_one_slice then
+            (
+                debug_vertex = pipeline.runOneSlice cutMode:cut_mode
+            )
+            else
+            (
+                pipeline.run cutMode:cut_mode
+            )
             if auto_smooth do
             (
                 local t = pipeline.refreshTopology()
@@ -1070,9 +1116,22 @@ struct WallMeshCleaner_v
                 t = pipeline.applyOperation #Face ids #Autosmooth
                 pipeline.validateStructure t
             )
-            modifier.SetSelection #Vertex #{} node:node
-            modifier.SetSelection #Edge #{} node:node
-            modifier.SetSelection #Face #{} node:node
+            if debug_one_slice then
+            (
+                local debug_selection = #{}
+                debug_selection[debug_vertex] = true
+                modifier.SetSelection #Edge #{} node:node
+                modifier.SetSelection #Face #{} node:node
+                modifier.SetSelection #Vertex debug_selection node:node
+                modifier.SetEPolySelLevel #Vertex
+                subObjectLevel = 1
+            )
+            else
+            (
+                modifier.SetSelection #Vertex #{} node:node
+                modifier.SetSelection #Edge #{} node:node
+                modifier.SetSelection #Face #{} node:node
+            )
             modifier.split = settings[1]
             modifier.useStackSelection = settings[2]
             modifier.useSoftSel = settings[3]
@@ -1094,13 +1153,44 @@ struct WallMeshCleaner_v
                 )
             )
         )
-        select oldSelection
-        if oldPanel == #modify and oldCurrent != undefined do
-            try (modPanel.setCurrentObject oldCurrent; subObjectLevel = oldLevel) catch ()
-        setCommandPanelTaskMode oldPanel
+        if success and debug_one_slice then
+        (
+            select node
+            max modify mode
+            modPanel.setCurrentObject modifier
+            modifier.SetPrimaryNode node
+            modifier.SetEPolySelLevel #Vertex
+            subObjectLevel = 1
+        )
+        else
+        (
+            select oldSelection
+            if oldPanel == #modify and oldCurrent != undefined do try (modPanel.setCurrentObject oldCurrent; subObjectLevel = oldLevel) catch ()
+            setCommandPanelTaskMode oldPanel
+        )
         last_slice_error = failure
         if failure != undefined do format "WallMeshCleaner: % | restored after failure: %\n" node.name failure
         success
+    ),
+    function makeOneSliceSelection cut_mode:#all angle_threshold:5.0 =
+    (
+        local selectedNodes = selection as array
+        last_slice_report = ""
+        if selectedNodes.count == 0 then
+        (
+            last_slice_report = "Select one wall before running this debug action."
+            return false
+        )
+        local node = selectedNodes[1]
+        local completed = false
+        undo "WallMeshCleaner - Make 1 Slice" on
+        (
+            completed = processNode node cut_mode:cut_mode angle_threshold:angle_threshold debug_one_slice:true
+        )
+        if completed then last_slice_report = node.name + ": completed one slice; driving vertex selected."
+        else last_slice_report = node.name + ": " + (last_slice_error as string)
+        completeRedraw()
+        completed
     ),
     function sliceSelection weld_vertices:false weld_threshold:1.0 cut_mode:#all angle_threshold:5.0 =
     (
@@ -2355,6 +2445,8 @@ rollout WallMeshCleanerFaceSlicerRollout "Face Slicer" width:310 height:136
     button slice_button "Slice Selected Walls" pos:[8,40] width:294 height:34 tooltip:"Clean redundant straight vertices and safe internal diagonals.\nPreserve boundary corners.\n\nAll: Vertical first, then Horizontal in the wall plane."
 
     groupBox debug_group "Debug" pos:[8,82] width:294 height:42
+    button make_one_slice_button "Make 1 Slice" pos:[16,98] width:278 height:20 \
+        tooltip:"Perform one slice from the first valid boundary corner.\n\nLeave the driving vertex selected."
 
     on cut_mode_radio changed state do
     (
@@ -2369,6 +2461,10 @@ rollout WallMeshCleanerFaceSlicerRollout "Face Slicer" width:310 height:136
     on slice_button pressed do
     (
         ::WallMeshCleanerRollout.runFaceSlicer()
+    )
+    on make_one_slice_button pressed do
+    (
+        ::WallMeshCleanerRollout.runDebugMakeOneSlice()
     )
 )
 
@@ -2533,6 +2629,18 @@ rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.58" width:344 height:594
         completed
     )
 
+    /* Runs exactly one slicer cut and leaves its driving vertex selected. */
+    function runDebugMakeOneSlice =
+    (
+        WallMeshCleaner.setSelectionDisplayHiddenEdges WallMeshCleanerOptionsRollout.hidden_edges_checkbutton.checked
+        WallMeshCleaner.setSelectionDoubleSide WallMeshCleanerOptionsRollout.double_side_checkbutton.checked
+        saveUiSettings()
+        local completed = WallMeshCleaner.makeOneSliceSelection \
+            cut_mode:(getCutMode()) \
+            angle_threshold:WallMeshCleanerFaceSlicerRollout.angle_spinner.value
+        if not completed do messageBox WallMeshCleaner.last_slice_report title:"Wall Mesh Cleaner - Debug"
+        completed
+    )
     /*
     Runs the face-cleaner N-gon post-process using the current shared options.
     The handler lives on the parent rollout so the sub-rollout stays UI-only.

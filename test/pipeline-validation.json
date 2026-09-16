@@ -1,0 +1,9 @@
+{
+  "vertices": 16,
+  "edges": 24,
+  "rectangular_faces": 8,
+  "boundary_loops": 2,
+  "surface_area": 104,
+  "outer_boundary_and_window_match_before": true,
+  "all_edges_orthogonal": true
+}
