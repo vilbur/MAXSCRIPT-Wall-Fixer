@@ -1,213 +1,12 @@
-﻿/*
-WallMeshCleaner
-Slices selected wall objects and propagates wall-junction cuts.
-Version 0.54
+/*
+WallMeshCleaner 0.58
+Native Edit Poly slicing: conservative collinear cleanup, preserved boundary
+corner anchors, wall-plane vertical pass, horizontal pass, safe original-diagonal
+removal, final collinear cleanup and geometric/topological validation.
 
-Changes from 0.53:
-- Moved Restart from the bottom of the main rollout to a compact top-right button.
-- Reduced the main dialog height so Restart no longer adds a full bottom row.
-- Kept all cleaner sub-rollout widths and tool behavior unchanged.
-
-Changes from 0.52:
-- Reduced the Face Slicer Angle spinner width from 90 px to 45 px.
-- Expanded the Cut by edge radio-button area and relaxed the Horizontal offset so the full All label is visible.
-- Kept the compact Face Slicer row and original dialog size unchanged.
-
-Changes from 0.51:
-- Restored the dialog and child-rollout widths to the pre-0.51 size.
-- Removed the visible Cut by edge label to free horizontal space.
-- Kept All / Horizontal / Vertical and Angle on one row.
-- Used radiobutton offsets so the All column is visually narrower while preserving one native radio group.
-
-Changes from 0.50:
-- Kept Cut by edge as All / Horizontal / Vertical radio buttons and moved the Angle spinner onto the same row.
-- Renamed the user-facing N-gon cleanup action to Fix N-gons.
-
-Changes from 0.49:
-- Restart now prefers the versioned script beside the running file, for example WallMeshCleaner_0.50.ms.
-- If the versioned script does not exist, Restart falls back to WallMeshCleaner.ms.
-- Restart reports an error without closing the UI if neither file exists.
-
-Changes from 0.48:
-- Replaced the Face Slicer "Cut by edge" dropdown with All / Horizontal / Vertical radio buttons.
-- Preserved the existing CutMode INI values: 1 = All, 2 = Horizontal, 3 = Vertical.
-
-Changes from 0.46:
-- Fix Angles now uses all currently selected vertices, regardless of edge connectivity.
-- LMB / RMB align the selected set to its lowest / highest world Z.
-- CTRL + LMB / CTRL + RMB align the selected set to its lowest / highest wall-local horizontal position.
-
-Changes from 0.42:
-- Fix Angles defaults to vertical world-Z alignment.
-- CTRL + LMB / CTRL + RMB switch Fix Angles to horizontal wall-plane alignment.
-- Horizontal movement follows the local wall horizontal axis derived from adjacent face normals, preserving the wall plane as much as possible.
-- LMB uses the lower active coordinate; RMB uses the higher active coordinate.
-
-Changes from 0.41:
-- Reformatted control tooltips into short separated instruction lines.
-- Preserved uppercase mouse/modifier labels such as LMB, RMB, and CTRL + RMB.
-- Shortened Vertex Cleaner success messages to clear action-oriented text.
-
-Changes from 0.40:
-- Reworked Fix Verts to process near-duplicate vertices as individual pairs.
-- If a pair has no direct edge, Fix Verts attempts to create one between them.
-- The connecting edge is then collapsed so the pair becomes one vertex.
-- Pair detection is repeated after each collapse because topology indices can change.
-
-Changes from 0.39:
-- Reworked Fix Angles to operate on border edges whose both endpoints are selected.
-- LMB Fix Angles snaps the pair to the lower world Z.
-- RMB Fix Angles snaps the pair to the higher world Z.
-- Only world Z is changed; X/Y remain untouched.
-
-Changes from 0.38:
-- Added Fix buttons to both Vertex Cleaner rows.
-- Fix Border Angles moves detected border vertices to the nearest valid 90 or 180 degree solution while keeping neighboring border vertices fixed.
-- Fix Double Verts welds only the currently detected near-coincident vertices using the Double Vert Threshold.
-
-Changes from 0.37:
-- Reworked Vertex Cleaner into one horizontal row per feature.
-- Each row now uses Button | Spinner layout.
-- Test Border Angles and Find Double Verts buttons now share a taller 34 px height.
-
-Changes from 0.35:
-- Added tooltips to all interactive UI controls.
-- Tooltips explain geometry actions, display toggles, slicing modes, and validation thresholds.
-- Selection-only diagnostics are identified as non-destructive in their tooltips.
-
-Changes from 0.34:
-- Moved Options into its own sub-rollout.
-- Moved Slice controls into their own sub-rollout and renamed it to Face Slicer.
-- Main UI now stacks Options, Face Slicer, Face Cleaner, and Vertex Cleaner as child rollouts.
-- Existing behavior and persisted settings are unchanged.
-
-Changes from 0.33:
-- Renamed tool to WallMeshCleaner / Wall Mesh Cleaner.
-- Renamed the main script file to WallMeshCleaner.ms.
-- Updated the visible rollout title to "Wall Mesh Cleaner".
-
-Changes from 0.32:
-- Reorganized cleaner UI into sub-rollouts.
-- Added Face Cleaner as the first cleaner sub-rollout and moved Fix N-gons into it.
-- Added Vertex Cleaner as the second cleaner sub-rollout and moved border-angle / duplicate-vertex controls into it.
-- Cleaner functionality and persisted settings remain unchanged.
-
-Changes from 0.31:
-- Moved border-angle vertex tools into a dedicated Vertex Cleaner section.
-- Added Find Double Verts detector for near-coincident vertices on each selected supported object.
-- Added independent Double Vert Threshold stored in system units; default is 1.0 system unit.
-- Duplicate detection is selection-only and does not weld or modify geometry.
-
-Changes from 0.30:
-- Added a dedicated Border Angle Threshold float spinner for Test Border Angles.
-- Border-angle validation no longer shares the slice-orientation Angle spinner.
-- Border Angle Threshold is persisted independently in the INI file.
-- Spinner uses 0.1 degree increments so decimal tolerances can be entered directly.
-
-Changes from 0.29:
-- Added Test Border Angles button.
-- Detects every open-border loop, including inner opening borders and the outer wall border.
-- A border vertex is valid when its two border edges form approximately 90/270 degrees or 180 degrees using the shared Angle tolerance.
-- Vertices whose border angle is neither orthogonal nor straight are selected for inspection.
-- Border vertices with an invalid border degree other than two are also selected as problematic.
-
-Changes from 0.28:
-- In Slice Selected Walls, Cut by edge = All now runs as two ordered passes.
-- The complete Vertical pass runs first on all selected supported objects.
-- The complete Horizontal pass runs second.
-- Clean slice-edge flags from the Vertical pass are preserved through the Horizontal pass so the second pass treats the established vertical cuts as preferred topology.
-- Horizontal-only and Vertical-only modes keep their previous behavior.
-
-Changes from 0.27:
-- Prefer protected new slice edges first, existing orthogonal edges second, and old angled internal edges last.
-- Detect removable angled internal edges whose two coplanar faces merge into one four-corner orthogonal region.
-- Dissolve those angled dirty edges before the older generic redundant-divider cleanup.
-- Straight middle vertices exposed by the dissolve are removed by the existing straight-vertex cleanup.
-- This fixes the triangle + polygon + N-gon junction case where removing the diagonal divider and its straight middle vertex produces two clean orthogonal polygons.
-
-Changes from 0.26:
-- Classify post-slice topology by the actual slice plane instead of treating every newly indexed edge as clean.
-- Keep true slice-plane edges clean; split fragments created from old hidden edges stay dirty.
-- Before each cut, remember previously clean edge segments so later cuts cannot dirty an earlier clean slice when that edge is split.
-- After each cut, prefer clean slice edges over dirty hidden edges at their intersections.
-- Dissolve eligible dirty hidden edges touching a clean cut before generic redundant-loop cleanup.
-- Allow straight two-edge vertices on a clean cut to dissolve, then transfer the clean flag to the merged replacement edge.
-- Added regression notes for cuts crossing hidden triangulation edges.
-
-Changes from 0.25:
-- New slice edges take priority; cleanup dissolves eligible old dividers instead.
-- Accumulate clean-edge flags across all cuts in the operation.
-- Recheck old seams after restoring original material IDs.
-- Preserve clean cut intersections during vertex cleanup.
-
-Changes from 0.24:
-- Recognize straight vertices with exactly two actual edges regardless of visibility flags.
-- Continue checking other vertices when one dissolve fails.
-- Sweep vertices after the complete cut sequence as well as after each successful cut.
-
-Changes from 0.23:
-- Fix catch rethrow syntax: use a bare throw inside catch.
-- After every cut dissolve straight vertices with exactly two visible edges,
-  even when additional hidden edges meet there; preserve corners and folds.
-
-Changes from 0.22:
-- Check new edges immediately after each main or junction cut.
-- Dissolve only a single shared divider between two clean coplanar quads
-  whose combined outline is also a single four-sided region.
-- Re-read flagged candidates after every dissolve; preserve material and SG boundaries.
-
-Changes from 0.21:
-- Share boundary slice planes across each connected coplanar wall island.
-- Ignore internal polygon seams when collecting source edges.
-- Preserve requested slice edges instead of dissolving rectangular subdivisions.
-
-Changes from 0.05:
-- Removed dependency on a manually chosen smoothing-group number.
-- Wall identity is detected automatically from the smoothing group of the face
-  containing a junction vertex.
-- Only the connected face island with that smoothing group is processed.
-  Disconnected walls may reuse the same smoothing group safely.
-- Added optional vertex welding before the main slice operation.
-- Weld threshold defaults to 1.0 system unit.
-- Added INI persistence for:
-  - Weld Vertices checkbox
-  - Weld Threshold
-  - Display Hidden Edges
-  - Double Side
-  - Auto Smooth
-  - Rollout/dialog position
-- Added "Display Hidden Edges" checkbutton.
-  Checked = node.allEdges ON.
-- Added "Double Side" checkbutton.
-  Checked = object backface culling OFF.
-- Added "Auto Smooth" checkbutton to Wall Junction Post-process.
-  When enabled, polyop.autoSmooth is applied before junction detection/slicing.
-- Fixed Editable Poly weld call:
-  polyop.weldVertsByThreshold takes only <poly> and <vertlist>.
-  Weld distance is supplied through Editable_Poly.weldThreshold.
-- Fixed INI dialog-position loader.
-  readIniIntFromSection() was referenced before that struct method existed,
-  which resolved to undefined in MaxScript. The helper is now declared first.
-- "Auto Smooth" checkbutton moved above "Fix N-gons".
-- When Auto Smooth is checked, Auto Smooth is forced before N-gon cutting.
-- Auto Smooth is applied with all faces temporarily selected, then the previous
-  face selection is restored.
-- The selected node list is reused directly so Auto Smooth definitely runs on
-  the same objects that are about to be cut.
-- Added cleanup after "Fix N-gons":
-  1. Weld all possible border vertices with weldThreshold = 0.0.
-  2. Find vertices connected to exactly two straight edges.
-  3. Remove those redundant vertices with EditablePoly.Remove.
-  4. Reapply Auto Smooth when the Auto Smooth checkbutton is enabled.
-- Fixed MaxScript struct function-order issue:
-  cleanupAfterNgonCut() now appears after autoSmoothNode(), so the call resolves
-  correctly instead of evaluating autoSmoothNode as undefined.
-- Moved Weld Vertices + Threshold controls into a shared "Options" section.
-- Fix N-gons now uses the same Weld Vertices checkbox and Weld Threshold.
-- Auto Smooth is now a checkbox instead of a checkbutton.
-- Added "Smooth" button next to Auto Smooth for manual Auto Smooth.
-- When Auto Smooth is checked, Auto Smooth runs before Fix N-gons and is
-  reapplied after cleanup.
+Slice and Fix N-gons use the same pipeline. No welding, material-ID tracking,
+per-cut dissolving or base-object writes occur in these actions.
+Regression: OrthogonalPipeline_TEST.ms. See README.md for supported scope.
 */
 
 try
@@ -218,6 +17,8 @@ catch
 (
 )
 
+global WMCWallTopology
+global WMCWallSlicePipeline
 global WallMeshCleaner_v
 global WallMeshCleaner
 global WallMeshCleanerRollout
@@ -229,12 +30,575 @@ global WallMeshCleanerScriptPath
 
 WallMeshCleanerScriptPath = getSourceFileName()
 
+/* Native Edit Poly pipeline. All persistent topology references are positions.
+   A topology snapshot is valid only until the next Commit. */
+struct WMCWallTopology (points, faces, edges, faceEdges, vertexEdges, border, materials, smoothing)
+struct WMCWallSlicePipeline
+(
+    node, ep, origin, normal, horizontal, vertical, referenceLocal = undefined,
+    tolerance = 0.0001, angularTolerance = 0.1, axisTolerance = 0.1,
+    corners = #(), anchors = #(), originalBorder = #(), originalDiagonals = #(),
+    protectedSegments = #(), baseline, cuts = 0, removedEdges = 0, removedVerts = 0,
+
+    fn refreshTopology =
+    (
+        update node
+        -- Force evaluation; Edit Poly otherwise returns zero counts after Commit.
+        local evaluated = snapshotAsMesh node
+        free evaluated
+        local t = WMCWallTopology points:#() faces:#() edges:#() faceEdges:#() vertexEdges:#() border:#{} materials:#() smoothing:#()
+        -- EditPolyMod.GetVertex returns world coordinates even inside coordsys local.
+        -- Convert explicitly; otherwise a rotated node is transformed twice.
+        local basis = copy node.objectTransform
+        basis.row4 = [0,0,0]
+        if referenceLocal == undefined and (ep.GetNumVertices node:node) > 0 do referenceLocal = (ep.GetVertex 1 node:node) * inverse node.objectTransform
+        for v = 1 to (ep.GetNumVertices node:node) do
+        (
+            append t.points ((((ep.GetVertex v node:node) * inverse node.objectTransform)-referenceLocal) * basis)
+            append t.vertexEdges #{}
+        )
+        for e = 1 to (ep.GetNumEdges node:node) do
+        (
+            local a = ep.GetEdgeVertex e 1 node:node
+            local b = ep.GetEdgeVertex e 2 node:node
+            local f = ep.GetEdgeFace e 1 node:node
+            local g = ep.GetEdgeFace e 2 node:node
+            append t.edges #(a,b,f,g)
+            if a > 0 and b > 0 do
+            (
+                t.vertexEdges[a][e] = true
+                t.vertexEdges[b][e] = true
+            )
+            if (f == 0) != (g == 0) do t.border[e] = true
+        )
+        for f = 1 to (ep.GetNumFaces node:node) do
+        (
+            local vs = #()
+            local es = #{}
+            for k = 1 to (ep.GetFaceDegree f node:node) do
+            (
+                append vs (ep.GetFaceVertex f k node:node)
+                es[ep.GetFaceEdge f k node:node] = true
+            )
+            append t.faces vs
+            append t.faceEdges es
+            append t.materials (ep.GetFaceMaterial f node:node)
+            append t.smoothing (ep.GetFaceSmoothingGroups f node:node)
+        )
+        t
+    ),
+    fn faceVector t f =
+    (
+        local vs = t.faces[f]
+        local result = [0,0,0]
+        local p = t.points[vs[1]]
+        for k = 1 to vs.count do
+        (
+            local j = if k == vs.count then 1 else k+1
+            result += cross (t.points[vs[k]]-p) (t.points[vs[j]]-p)
+        )
+        result * 0.5
+    ),
+    fn segment t e = #(t.points[t.edges[e][1]], t.points[t.edges[e][2]]),
+    fn edgeKind t e =
+    (
+        local s = segment t e
+        local d = s[2]-s[1]
+        if length d <= tolerance then #degenerate
+        else
+        (
+            d = normalize d
+            if abs(dot d horizontal) >= cos axisTolerance then #horizontal
+            else if abs(dot d vertical) >= cos axisTolerance then #vertical
+            else #diagonal
+        )
+    ),
+    fn onSegment p a b =
+    (
+        local d = b-a
+        local len = length d
+        if len <= tolerance then distance p a <= tolerance
+        else
+        (
+            local along = dot (p-a) (d/len)
+            along >= -tolerance and along <= len+tolerance and
+                length ((p-a)-(d/len)*along) <= tolerance
+        )
+    ),
+    fn covered s segments =
+    (
+        local d = s[2]-s[1]
+        local len = length d
+        if len <= tolerance then return false
+        d /= len
+        local intervals = #()
+        for other in segments do
+        (
+            local a = dot (other[1]-s[1]) d
+            local b = dot (other[2]-s[1]) d
+            if length ((other[1]-s[1])-d*a) <= tolerance and length ((other[2]-s[1])-d*b) <= tolerance do
+                append intervals #(amin a b, amax a b)
+        )
+        fn compareIntervals a b = (if a[1] < b[1] then -1 else if a[1] > b[1] then 1 else 0)
+        qsort intervals compareIntervals
+        local reach = 0.0
+        for interval in intervals do
+            if interval[1] <= reach+tolerance and interval[2] >= -tolerance do reach = amax reach interval[2]
+        reach >= len-tolerance
+    ),
+    fn hasPoint t p =
+    (
+        for q in t.points do if distance p q <= tolerance do return true
+        false
+    ),
+    fn isStraight a p b =
+    (
+        local u = a-p
+        local v = b-p
+        if length u <= tolerance or length v <= tolerance then false
+        else (dot (normalize u) (normalize v) <= -(cos angularTolerance)) and (onSegment p a b)
+    ),
+    fn otherVertex t e v = (if t.edges[e][1] == v then t.edges[e][2] else t.edges[e][1]),
+    fn collectCornerVertices t =
+    (
+        local result = #()
+        for v = 1 to t.points.count do
+        (
+            local borderEdges = (t.vertexEdges[v] * t.border) as array
+            if borderEdges.count > 0 do
+            (
+                if borderEdges.count != 2 do throw "Non-manifold wall boundary."
+                local a = otherVertex t borderEdges[1] v
+                local b = otherVertex t borderEdges[2] v
+                if not (isStraight t.points[a] t.points[v] t.points[b]) do append result t.points[v]
+            )
+        )
+        result
+    ),
+    fn setFrame t =
+    (
+        if t.faces.count == 0 do throw "The evaluated Edit Poly has no faces."
+        origin = t.points[t.faces[1][1]]
+        local n = faceVector t 1
+        if length n <= tolerance*tolerance do throw "Degenerate input face."
+        normal = normalize n
+        vertical = [0,0,1] - normal * (dot normal [0,0,1])
+        if length vertical < 0.00001 then
+        (
+            -- A horizontal planar input has no gravity-based up direction.
+            -- Use its longest boundary edge for a stable in-plane orientation.
+            local longest = [0,0,0]
+            for e in t.border do
+            (
+                local s = segment t e
+                if length(s[2]-s[1]) > length longest do longest = s[2]-s[1]
+            )
+            if length longest <= tolerance do throw "No usable boundary direction."
+            horizontal = normalize longest
+            vertical = normalize(cross normal horizontal)
+        )
+        else
+        (
+            vertical = normalize vertical
+            horizontal = normalize(cross vertical normal)
+        )
+        true
+    ),
+    fn areaByMaterial t =
+    (
+        local result = #()
+        for f = 1 to t.faces.count do
+        (
+            local key = #(t.materials[f],t.smoothing[f])
+            local entry = 0
+            for j = 1 to result.count do if result[j][1][1] == key[1] and result[j][1][2] == key[2] do entry = j
+            if entry == 0 then append result #(key,length(faceVector t f))
+            else result[entry][2] += length(faceVector t f)
+        )
+        result
+    ),
+    fn orient2 a b c = ((b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x)),
+    fn projected p = [dot(p-origin) horizontal,dot(p-origin) vertical,0],
+    fn simpleFace t vs =
+    (
+        if (vs as bitarray).numberSet != vs.count do return false
+        -- Reject crossings, including overlapping nonadjacent polygon edges.
+        for i = 1 to vs.count do for j = i+1 to vs.count do
+        (
+            local ni = if i == vs.count then 1 else i+1
+            local nj = if j == vs.count then 1 else j+1
+            if ni != j and nj != i do
+            (
+                local a = projected t.points[vs[i]]
+                local b = projected t.points[vs[ni]]
+                local c = projected t.points[vs[j]]
+                local d = projected t.points[vs[nj]]
+                local abC = orient2 a b c
+                local abD = orient2 a b d
+                local cdA = orient2 c d a
+                local cdB = orient2 c d b
+                if abC*abD < 0 and cdA*cdB < 0 do return false
+                if onSegment c a b or onSegment d a b or onSegment a c d or onSegment b c d do return false
+            )
+        )
+        true
+    ),
+    /* MNMesh can encode a polygon with a hole by traversing an internal
+       bridge twice, in opposite directions. This is not a self-intersection.
+       Accept only these native bridges; actual crossings and pinches fail. */
+    fn validFaceBoundary t f =
+    (
+        local vs = t.faces[f]
+        if simpleFace t vs do return true
+        local bridges = #{}
+        for e in t.faceEdges[f] do
+        (
+            local rec = t.edges[e]
+            if rec[3] == f and rec[4] == f do
+            (
+                local forwardCount = 0
+                local reverseCount = 0
+                for k=1 to vs.count do
+                (
+                    local next = if k == vs.count then 1 else k+1
+                    if vs[k] == rec[1] and vs[next] == rec[2] do forwardCount += 1
+                    if vs[k] == rec[2] and vs[next] == rec[1] do reverseCount += 1
+                )
+                if forwardCount != 1 or reverseCount != 1 do return false
+                bridges[e] = true
+            )
+        )
+        if bridges.numberSet == 0 do return false
+        for v in (vs as bitarray) do
+        (
+            local occurrences = 0
+            for candidate in vs do if candidate == v do occurrences += 1
+            if occurrences != 1+(t.vertexEdges[v]*bridges).numberSet do return false
+        )
+        for i=1 to vs.count do for j=i+1 to vs.count do
+        (
+            local ni = if i == vs.count then 1 else i+1
+            local nj = if j == vs.count then 1 else j+1
+            if ni != j and nj != i and not(vs[i] == vs[nj] and vs[ni] == vs[j]) do
+            (
+                local a = projected t.points[vs[i]]
+                local b = projected t.points[vs[ni]]
+                local c = projected t.points[vs[j]]
+                local d = projected t.points[vs[nj]]
+                if (orient2 a b c)*(orient2 a b d) < 0 and (orient2 c d a)*(orient2 c d b) < 0 do return false
+                if vs[j] != vs[i] and vs[j] != vs[ni] and onSegment c a b do return false
+                if vs[nj] != vs[i] and vs[nj] != vs[ni] and onSegment d a b do return false
+                if vs[i] != vs[j] and vs[i] != vs[nj] and onSegment a c d do return false
+                if vs[ni] != vs[j] and vs[ni] != vs[nj] and onSegment b c d do return false
+            )
+        )
+        true
+    ),
+    fn validateStructure t =
+    (
+        if t.faces.count == 0 do throw "The wall lost all faces."
+        for p in t.points do
+            if abs(dot(p-origin) normal) > tolerance do throw "Input/result is not one planar wall."
+        local used = #{}
+        for f = 1 to t.faces.count do
+        (
+            local vs = t.faces[f]
+            if vs.count < 3 do throw "Invalid polygon degree."
+            if not(validFaceBoundary t f) do throw "Self-intersecting or invalid polygon boundary."
+            if dot (faceVector t f) normal <= tolerance*tolerance do throw "Zero-area or reversed polygon."
+            for v in vs do used[v] = true
+        )
+        if used.numberSet != t.points.count do throw "Isolated vertices in topology."
+        for e = 1 to t.edges.count do
+        (
+            local rec = t.edges[e]
+            if rec[1] < 1 or rec[2] < 1 or (rec[3] == 0 and rec[4] == 0) do throw "Isolated/invalid edge."
+            if distance t.points[rec[1]] t.points[rec[2]] <= tolerance do throw "Zero-length edge."
+            -- Same-face bridge incidence was checked by validFaceBoundary.
+            for f in #(rec[3],rec[4]) where f > 0 do
+                if not t.faceEdges[f][e] do throw "Invalid face-edge adjacency."
+        )
+        collectCornerVertices t -- Also validates the outer and opening border degree.
+        true
+    ),
+    fn canRemoveVertex t v =
+    (
+        local incident = t.vertexEdges[v] as array
+        if incident.count != 2 do return false
+        for p in corners do if distance p t.points[v] <= tolerance do return false
+        local a = otherVertex t incident[1] v
+        local b = otherVertex t incident[2] v
+        if not(isStraight t.points[a] t.points[v] t.points[b]) do return false
+        for f = 1 to t.faces.count where findItem t.faces[f] v > 0 do
+            if t.faces[f].count <= 3 do return false
+        true
+    ),
+    fn uvContinuous t e =
+    (
+        local rec = t.edges[e]
+        for channel = -2 to (ep.GetNumMapChannels node:node)-1 do
+            if ep.GetMapChannelActive channel node:node do
+                for v in #(rec[1],rec[2]) do
+                (
+                    local values = #()
+                    for f in #(rec[3],rec[4]) do
+                    (
+                        local k = findItem t.faces[f] v
+                        local mv = ep.GetMapFaceVert channel f k node:node
+                        append values (ep.GetMapVertex channel mv node:node)
+                    )
+                    if distance values[1] values[2] > 0.000001 do return false
+                )
+        true
+    ),
+    fn canRemoveDiagonal t e =
+    (
+        local rec = t.edges[e]
+        local a = rec[3]
+        local b = rec[4]
+        if a == 0 or b == 0 or a == b do return false
+        if edgeKind t e != #diagonal do return false
+        local s = segment t e
+        local old = false
+        for stored in originalDiagonals do
+            if onSegment s[1] stored[1] stored[2] and onSegment s[2] stored[1] stored[2] do old = true
+        if not old do return false
+        if t.materials[a] != t.materials[b] or t.smoothing[a] != t.smoothing[b] do return false
+        if (t.faceEdges[a]*t.faceEdges[b]).numberSet != 1 do return false
+        -- Exactly two common vertices and one shared edge: their union is a disk,
+        -- not a ring around an opening or a pair touching at another corner.
+        if ((t.faces[a] as bitarray)*(t.faces[b] as bitarray)).numberSet != 2 do return false
+        if not(uvContinuous t e) do return false
+        -- Walk the conceptual union once; refuse multiple loops or crossings.
+        local boundaryEdges = (t.faceEdges[a]+t.faceEdges[b])-#{e}
+        local remaining = copy boundaryEdges
+        local loop = #(rec[1])
+        local current = rec[1]
+        while remaining.numberSet > 0 do
+        (
+            local candidates = (t.vertexEdges[current]*remaining) as array
+            if candidates.count == 0 do return false
+            local nextEdge = candidates[1]
+            remaining[nextEdge] = false
+            current = otherVertex t nextEdge current
+            if current != loop[1] then append loop current
+            else if remaining.numberSet > 0 do return false
+        )
+        current == loop[1] and simpleFace t loop
+    ),
+    fn validateCleanTopology t final:false =
+    (
+        validateStructure t
+        local borderSegments = for e in t.border collect segment t e
+        for s in originalBorder do if not(covered s borderSegments) do throw "Original wall/opening boundary changed."
+        for s in borderSegments do if not(covered s originalBorder) do throw "Unexpected wall/opening boundary."
+        for p in corners do if not(hasPoint t p) do throw "An original corner was lost."
+        if (t.points.count-t.edges.count+t.faces.count) != baseline[1] do throw "Wall/opening topology changed (Euler characteristic)."
+        local areas = areaByMaterial t
+        if areas.count != baseline[2].count do throw "Material/smoothing regions changed."
+        for old in baseline[2] do
+        (
+            local found = false
+            for current in areas do if old[1][1] == current[1][1] and old[1][2] == current[1][2] do
+                found = abs(old[2]-current[2]) <= amax (old[2]*0.00001) (tolerance*tolerance*10)
+            if not found do throw "Wall surface area or material/smoothing boundary changed."
+        )
+        local allSegments = for e = 1 to t.edges.count collect segment t e
+        for s in protectedSegments do if not(covered s allSegments) do throw "An intentional orthogonal edge was lost."
+        if final do
+        (
+            for v = 1 to t.points.count do if canRemoveVertex t v do throw "A safely removable collinear vertex remains."
+            for e = 1 to t.edges.count do if canRemoveDiagonal t e do throw "A safely removable internal diagonal remains."
+        )
+        true
+    ),
+    fn applyOperation level ids operation =
+    (
+        if level == #Vertex then subObjectLevel = 1
+        else if level == #Edge then subObjectLevel = 2
+        else if level == #Face then subObjectLevel = 4
+        ep.SetEPolySelLevel level
+        refreshTopology()
+        ep.SetSelection level #{} node:node
+        local selectedOK = ep.Select level ids node:node
+        if not selectedOK or (ep.GetSelection level node:node) != ids do throw ("Edit Poly selection failed for " + (level as string) + " result=" + (selectedOK as string) + " requested=" + (ids as string) + " actual=" + ((ep.GetSelection level node:node) as string))
+        ep.SetOperation operation
+        ep.Commit()
+        refreshTopology()
+    ),
+    fn cleanCollinearVertices =
+    (
+        local t = refreshTopology()
+        local changed = true
+        while changed do
+        (
+            changed = false
+            for v = 1 to t.points.count while not changed do if canRemoveVertex t v do
+            (
+                local countBefore = t.points.count
+                t = applyOperation #Vertex #{v} #RemoveVertex
+                if t.points.count != countBefore-1 do throw "Edit Poly did not remove exactly one straight vertex."
+                validateCleanTopology t
+                removedVerts += 1
+                changed = true
+            )
+        )
+        t
+    ),
+    fn componentAt t p =
+    (
+        local result = #{}
+        local queue = #()
+        for v = 1 to t.points.count do if distance t.points[v] p <= tolerance do
+            for e in t.vertexEdges[v] do for f in #(t.edges[e][3],t.edges[e][4]) where f > 0 do
+                if not result[f] do (result[f] = true; append queue f)
+        local i = 1
+        while i <= queue.count do
+        (
+            local f = queue[i]
+            i += 1
+            for e in t.faceEdges[f] do for g in #(t.edges[e][3],t.edges[e][4]) where g > 0 do
+                if not result[g] do (result[g] = true; append queue g)
+        )
+        result
+    ),
+    fn performCuts axis =
+    (
+        -- Deduplication is per connected component, identified geometrically.
+        local done = #()
+        for anchor in anchors do
+        (
+            local t = refreshTopology()
+            local region = componentAt t anchor
+            if region.numberSet == 0 do throw "Cannot remap a preserved corner anchor."
+            local station = dot(anchor-origin) axis
+            local duplicate = false
+            for item in done do
+                if abs(item[1]-station) <= tolerance and (componentAt t item[2]) == region do duplicate = true
+            if not duplicate do
+            (
+                append done #(station,anchor)
+                local spans = false
+                for f in region do
+                (
+                    local low = 1e30
+                    local high = -1e30
+                    for v in t.faces[f] do
+                    (
+                        local value = dot(t.points[v]-anchor) axis
+                        low = amin low value
+                        high = amax high value
+                    )
+                    if low < -tolerance and high > tolerance do spans = true
+                )
+                if spans do
+                (
+                    local tm = node.objectTransform
+                    -- Plane normals transform as covectors (also handles nonuniform scale).
+                    local localNormal = normalize [dot tm.row1 axis,dot tm.row2 axis,dot tm.row3 axis]
+                    tm.row4 = [0,0,0]
+                    ep.SetSlicePlane localNormal ((anchor * inverse tm) + referenceLocal)
+                    t = applyOperation #Face region #SliceSelectedFaces
+                    local currentRegion = componentAt t anchor
+                    for f in currentRegion do
+                    (
+                        local low = 1e30
+                        local high = -1e30
+                        for v in t.faces[f] do
+                        (
+                            local value = dot(t.points[v]-anchor) axis
+                            low = amin low value
+                            high = amax high value
+                        )
+                        if low < -tolerance and high > tolerance do throw "Slice left a polygon crossing its requested plane."
+                    )
+                    for e = 1 to t.edges.count do
+                    (
+                        local s = segment t e
+                        if abs(dot(s[1]-anchor) axis) <= tolerance and abs(dot(s[2]-anchor) axis) <= tolerance do
+                            append protectedSegments s
+                    )
+                    validateCleanTopology t
+                    cuts += 1
+                )
+            )
+        )
+        true
+    ),
+    fn performVerticalCuts = performCuts horizontal,
+    fn performHorizontalCuts = performCuts vertical,
+    fn removeRedundantDiagonalEdges =
+    (
+        local t = refreshTopology()
+        local changed = true
+        while changed do
+        (
+            changed = false
+            for e = 1 to t.edges.count while not changed do if canRemoveDiagonal t e do
+            (
+                local oldCount = t.faces.count
+                t = applyOperation #Edge #{e} #RemoveEdge
+                if t.faces.count != oldCount-1 do throw "Edit Poly did not dissolve exactly two adjacent faces."
+                validateCleanTopology t
+                removedEdges += 1
+                changed = true
+            )
+        )
+        t
+    ),
+    fn run cutMode:#all =
+    (
+        local t = refreshTopology()
+        tolerance = units.decodeValue "0.001mm"
+        setFrame t
+        validateStructure t
+        corners = collectCornerVertices t
+        originalBorder = for e in t.border collect segment t e
+        originalDiagonals = for e = 1 to t.edges.count where not t.border[e] and edgeKind t e == #diagonal collect segment t e
+        protectedSegments = for e = 1 to t.edges.count where edgeKind t e != #diagonal collect segment t e
+        baseline = #(t.points.count-t.edges.count+t.faces.count,areaByMaterial t)
+        cleanCollinearVertices()
+        t = refreshTopology()
+        -- Only boundary corners with one edge in each wall-plane direction anchor cuts.
+        anchors = #()
+        for v = 1 to t.points.count do
+        (
+            local es = (t.vertexEdges[v]*t.border) as array
+            if es.count == 2 do
+            (
+                local k1 = edgeKind t es[1]
+                local k2 = edgeKind t es[2]
+                if (k1 == #horizontal and k2 == #vertical) or (k1 == #vertical and k2 == #horizontal) do append anchors t.points[v]
+            )
+        )
+        if cutMode == #all or cutMode == #vertical do performVerticalCuts()
+        if cutMode == #all or cutMode == #horizontal do performHorizontalCuts()
+        -- Removing diagonals can expose collinear vertices; removing those can
+        -- make another pair of faces eligible. Refresh until both reach a fixed point.
+        local changed = true
+        while changed do
+        (
+            local before = removedEdges+removedVerts
+            removeRedundantDiagonalEdges()
+            cleanCollinearVertices()
+            changed = removedEdges+removedVerts > before
+        )
+        t = refreshTopology()
+        validateCleanTopology t final:true
+        format "WallMeshCleaner: % | cuts:% diagonal edges removed:% straight vertices removed:% | topology validated\n" node.name cuts removedEdges removedVerts
+        true
+    )
+)
+
+
+
 struct WallMeshCleaner_v
 (
-    version = "0.54",
-    temp_id_start = 60000,
+    version = "0.58",
+    last_slice_error = undefined,
+    last_slice_count = 0,
+    last_slice_report = "",
     epsilon = 0.001,
-    collinear_dot_limit = 0.9999,
     axis_angle_threshold = 5.0,
     ini_path = ((getDir #userScripts) + "\\WallMeshCleaner.ini"),
 
@@ -297,54 +661,6 @@ struct WallMeshCleaner_v
         (
             vector_value / vector_length
         )
-        -- return
-    ),
-
-    /*
-    Returns true when a WORLD-space edge matches the requested cut orientation.
-    All ignores the threshold; Horizontal means near the world XY plane; Vertical means near world Z.
-    */
-    function edgeMatchesOrientation edge_dir_world cut_mode angle_threshold =
-    (
-        edge_dir_normal = safeNormalize edge_dir_world
-
-        if edge_dir_normal == undefined then
-        (
-            false
-        )
-        else if cut_mode == #all then
-        (
-            true
-        )
-        else
-        (
-            z_alignment = abs (dot edge_dir_normal [0,0,1])
-
-            if cut_mode == #vertical then
-            (
-                z_alignment >= (cos angle_threshold)
-            )
-            else if cut_mode == #horizontal then
-            (
-                z_alignment <= (sin angle_threshold)
-            )
-            else
-            (
-                true
-            )
-        )
-        -- return
-    ),
-
-    /*
-    Converts a local edge represented by two points into a normalized world-space direction.
-    Orientation filtering must use world axes even when the object itself is rotated.
-    */
-    function getWorldEdgeDirection node point_a_local point_b_local =
-    (
-        point_a_world = point_a_local * node.objectTransform
-        point_b_world = point_b_local * node.objectTransform
-        safeNormalize (point_b_world - point_a_world)
         -- return
     ),
 
@@ -565,174 +881,6 @@ struct WallMeshCleaner_v
     ),
 
     /*
-    Returns the vertex on the opposite side of an edge from the supplied vertex.
-    Undefined is returned when the supplied vertex is not part of the edge.
-    */
-    function getOtherEdgeVertex base_obj edge_index vert_index =
-    (
-        edge_verts = polyop.getVertsUsingEdge base_obj edge_index
-        edge_vert_array = edge_verts as array
-        other_vert = undefined
-
-        if edge_vert_array.count == 2 then
-        (
-            if edge_vert_array[1] == vert_index then
-            (
-                other_vert = edge_vert_array[2]
-            )
-            else if edge_vert_array[2] == vert_index then
-            (
-                other_vert = edge_vert_array[1]
-            )
-        )
-
-        other_vert
-        -- return
-    ),
-
-    /*
-    Returns true when a vertex has exactly two connected edges forming a straight line.
-    Directions are measured away from the vertex, so straight edges have dot product near -1.
-    */
-    function isTwoEdgeStraightVertex base_obj vert_index =
-    (
-        used_edges = polyop.getEdgesUsingVert base_obj vert_index
-
-        if used_edges.numberSet != 2 then
-        (
-            false
-        )
-        else
-        (
-            edge_indices = used_edges as array
-            other_vert_a = getOtherEdgeVertex base_obj edge_indices[1] vert_index
-            other_vert_b = getOtherEdgeVertex base_obj edge_indices[2] vert_index
-
-            if (other_vert_a == undefined) or (other_vert_b == undefined) then
-            (
-                false
-            )
-            else
-            (
-                center_point = polyop.getVert base_obj vert_index
-                point_a = polyop.getVert base_obj other_vert_a
-                point_b = polyop.getVert base_obj other_vert_b
-
-                dir_a = safeNormalize (point_a - center_point)
-                dir_b = safeNormalize (point_b - center_point)
-
-                if (dir_a == undefined) or (dir_b == undefined) then
-                (
-                    false
-                )
-                else
-                (
-                    (dot dir_a dir_b) <= (-collinear_dot_limit)
-                )
-            )
-        )
-        -- return
-    ),
-
-    /*
-    Finds all vertices that have exactly two connected straight edges.
-    The resulting bitarray can be passed to EditablePoly.Remove.
-    */
-    function getTwoEdgeStraightVerts node =
-    (
-        base_obj = node.baseObject
-        vert_count = polyop.getNumVerts base_obj
-        straight_verts = #{}
-
-        for vert_index = 1 to vert_count do
-        (
-            if isTwoEdgeStraightVertex base_obj vert_index then
-            (
-                straight_verts[vert_index] = true
-            )
-        )
-
-        straight_verts
-        -- return
-    ),
-
-    /*
-    Removes redundant two-edge straight vertices without deleting their surrounding faces.
-    EditablePoly.Remove is used instead of polyop.deleteVerts so polygons are preserved.
-    */
-    function removeTwoEdgeStraightVerts node =
-    (
-        if not (isSupportedNode node) then
-        (
-            0
-        )
-        else
-        (
-            base_obj = node.baseObject
-            straight_verts = getTwoEdgeStraightVerts node
-            remove_count = straight_verts.numberSet
-
-            if remove_count > 0 then
-            (
-                flag_bit = bit.set 0 30 true
-                polyop.setVertFlags base_obj straight_verts flag_bit mask:flag_bit undoable:true
-                remove_ok = base_obj.EditablePoly.Remove selLevel:#Vertex flag:flag_bit
-
-                if remove_ok != true then
-                (
-                    format "WallMeshCleaner Cleanup: Remove failed on %\n" node.name
-                )
-            )
-
-            update node
-
-            format "WallMeshCleaner Cleanup: % | straight 2-edge verts removed: %\n" \
-                node.name remove_count
-
-            remove_count
-        )
-        -- return
-    ),
-
-    /*
-    Returns true when two faces are coplanar within the tool tolerance.
-    Both parallel and opposite normal directions are accepted.
-    */
-    function areFacesCoplanar base_obj face_a face_b =
-    (
-        normal_a = safeNormalize (polyop.getFaceNormal base_obj face_a)
-        normal_b = safeNormalize (polyop.getFaceNormal base_obj face_b)
-
-        if (normal_a == undefined) or (normal_b == undefined) then
-        (
-            false
-        )
-        else if (abs (dot normal_a normal_b)) < collinear_dot_limit then
-        (
-            false
-        )
-        else
-        (
-            verts_a = polyop.getFaceVerts base_obj face_a
-            verts_b = polyop.getFaceVerts base_obj face_b
-
-            if (verts_a.count < 1) or (verts_b.count < 1) then
-            (
-                false
-            )
-            else
-            (
-                point_a = polyop.getVert base_obj verts_a[1]
-                point_b = polyop.getVert base_obj verts_b[1]
-                plane_distance = abs (dot (point_b - point_a) normal_a)
-
-                plane_distance <= epsilon
-            )
-        )
-        -- return
-    ),
-
-    /*
     Adds an integer to an array only when it is not already present.
     This helper is used while building merged face boundaries.
     */
@@ -744,1030 +892,6 @@ struct WallMeshCleaner_v
         )
 
         value_array
-        -- return
-    ),
-
-    /*
-    Returns boundary edges of two faces after conceptually dissolving their shared edge.
-    Edges used by both faces are omitted; all remaining edges form the merged outline.
-    */
-    function getMergedBoundaryEdges base_obj face_a face_b =
-    (
-        edges_a = (polyop.getEdgesUsingFace base_obj face_a) as array
-        edges_b = (polyop.getEdgesUsingFace base_obj face_b) as array
-        boundary_edges = #()
-
-        for edge_index in edges_a do
-        (
-            if (findItem edges_b edge_index) == 0 then
-            (
-                appendUniqueInteger boundary_edges edge_index
-            )
-        )
-
-        for edge_index in edges_b do
-        (
-            if (findItem edges_a edge_index) == 0 then
-            (
-                appendUniqueInteger boundary_edges edge_index
-            )
-        )
-
-        boundary_edges
-        -- return
-    ),
-
-    /*
-    Returns the boundary-neighbor vertices connected to one vertex by supplied boundary edges.
-    A clean polygon boundary should produce exactly two neighbors per boundary vertex.
-    */
-    function getBoundaryVertexNeighbors base_obj boundary_edges vert_index =
-    (
-        neighbor_verts = #()
-
-        for edge_index in boundary_edges do
-        (
-            edge_verts = (polyop.getVertsUsingEdge base_obj edge_index) as array
-
-            if edge_verts.count == 2 then
-            (
-                if edge_verts[1] == vert_index then
-                (
-                    appendUniqueInteger neighbor_verts edge_verts[2]
-                )
-                else if edge_verts[2] == vert_index then
-                (
-                    appendUniqueInteger neighbor_verts edge_verts[1]
-                )
-            )
-        )
-
-        neighbor_verts
-        -- return
-    ),
-
-    /*
-    Returns true when an edge is horizontal or vertical in world space within the cleanup threshold.
-    Horizontal accepts any XY direction, so walls may be freely rotated around world Z.
-    */
-    function isOrthogonalWallEdge node edge_index angle_threshold:axis_angle_threshold =
-    (
-        base_obj = node.baseObject
-        edge_verts = (polyop.getVertsUsingEdge base_obj edge_index) as array
-        is_orthogonal = false
-
-        if edge_verts.count == 2 then
-        (
-            point_a = polyop.getVert base_obj edge_verts[1]
-            point_b = polyop.getVert base_obj edge_verts[2]
-            edge_dir_world = getWorldEdgeDirection node point_a point_b
-
-            if edge_dir_world != undefined then
-            (
-                is_orthogonal = ((edgeMatchesOrientation edge_dir_world #horizontal angle_threshold) or (edgeMatchesOrientation edge_dir_world #vertical angle_threshold))
-            )
-        )
-
-        is_orthogonal
-        -- return
-    ),
-
-    /*
-    Counts non-collinear corners on the merged outline of two adjacent faces.
-    Straight intermediate vertices are ignored, matching the desired clean-quad test.
-    */
-    function countMergedBoundaryCorners base_obj face_a face_b =
-    (
-        boundary_edges = getMergedBoundaryEdges base_obj face_a face_b
-        boundary_verts = #()
-        valid_boundary = true
-        corner_count = 0
-
-        for edge_index in boundary_edges do
-        (
-            edge_verts = (polyop.getVertsUsingEdge base_obj edge_index) as array
-
-            if edge_verts.count == 2 then
-            (
-                appendUniqueInteger boundary_verts edge_verts[1]
-                appendUniqueInteger boundary_verts edge_verts[2]
-            )
-        )
-
-        for vert_index in boundary_verts while valid_boundary do
-        (
-            neighbor_verts = getBoundaryVertexNeighbors base_obj boundary_edges vert_index
-
-            if neighbor_verts.count != 2 then
-            (
-                valid_boundary = false
-            )
-            else
-            (
-                center_point = polyop.getVert base_obj vert_index
-                point_a = polyop.getVert base_obj neighbor_verts[1]
-                point_b = polyop.getVert base_obj neighbor_verts[2]
-
-                dir_a = safeNormalize (point_a - center_point)
-                dir_b = safeNormalize (point_b - center_point)
-
-                if (dir_a == undefined) or (dir_b == undefined) then
-                (
-                    valid_boundary = false
-                )
-                else if (dot dir_a dir_b) > (-collinear_dot_limit) then
-                (
-                    corner_count += 1
-                )
-            )
-        )
-
-        if valid_boundary then corner_count else 0
-        -- return
-    ),
-
-    /*
-    Returns true when every surviving edge of a conceptual two-face merge is horizontal or vertical.
-    The shared divider itself is excluded because it is the edge being considered for removal.
-    */
-    function isMergedBoundaryOrthogonal node face_a face_b angle_threshold:axis_angle_threshold =
-    (
-        base_obj = node.baseObject
-        boundary_edges = getMergedBoundaryEdges base_obj face_a face_b
-        is_orthogonal = boundary_edges.count >= 4
-
-        for edge_index in boundary_edges while is_orthogonal do
-        (
-            if not (isOrthogonalWallEdge node edge_index angle_threshold:angle_threshold) then
-            (
-                is_orthogonal = false
-            )
-        )
-
-        is_orthogonal
-        -- return
-    ),
-
-    /*
-    Returns true when an old angled internal edge only splits one clean four-corner orthogonal region.
-    Coplanarity, material ID and smoothing group are preserved before preferring the orthogonal boundary.
-    */
-    function isRedundantAngledOldEdge node edge_index angle_threshold:axis_angle_threshold =
-    (
-        base_obj = node.baseObject
-        used_faces = (polyop.getFacesUsingEdge base_obj edge_index) as array
-        removable_edge = false
-
-        if used_faces.count == 2 then
-        (
-            face_a = used_faces[1]
-            face_b = used_faces[2]
-            same_material = (polyop.getFaceMatID base_obj face_a) == (polyop.getFaceMatID base_obj face_b)
-            same_smoothing = (polyop.getFaceSmoothGroup base_obj face_a) == (polyop.getFaceSmoothGroup base_obj face_b)
-
-            if same_material and same_smoothing and (areFacesCoplanar base_obj face_a face_b) then
-            (
-                shared_edges = (polyop.getEdgesUsingFace base_obj face_a) * (polyop.getEdgesUsingFace base_obj face_b)
-
-                if (shared_edges.numberSet == 1) and (not (isOrthogonalWallEdge node edge_index angle_threshold:angle_threshold)) then
-                (
-                    removable_edge = (((countMergedBoundaryCorners base_obj face_a face_b) == 4) and (isMergedBoundaryOrthogonal node face_a face_b angle_threshold:angle_threshold))
-                )
-            )
-        )
-
-        removable_edge
-        -- return
-    ),
-
-    /* Tests whether a face has four convex corners, ignoring straight intermediate vertices.
-    This excludes triangles, concave regions and degenerate boundary turns.
-    */
-    function isCleanQuadFace base_obj face_index =
-    (
-        local face_verts = polyop.getFaceVerts base_obj face_index
-        local corner_count = 0
-        local turn_sign = 0
-        local clean_face = face_verts.count >= 4
-        local face_normal = safeNormalize (polyop.getFaceNormal base_obj face_index)
-        if face_normal == undefined then clean_face = false
-        for position_index = 1 to face_verts.count while clean_face do
-        (
-            local previous_index = if position_index == 1 then face_verts.count else position_index - 1
-            local next_index = if position_index == face_verts.count then 1 else position_index + 1
-            local center_point = polyop.getVert base_obj face_verts[position_index]
-            local incoming_dir = safeNormalize (center_point - polyop.getVert base_obj face_verts[previous_index])
-            local outgoing_dir = safeNormalize ((polyop.getVert base_obj face_verts[next_index]) - center_point)
-            if (incoming_dir == undefined) or (outgoing_dir == undefined) then
-            (
-                clean_face = false
-            )
-            else if (dot incoming_dir outgoing_dir) < collinear_dot_limit then
-            (
-                local turn_value = dot (cross incoming_dir outgoing_dir) face_normal
-                local current_sign = if turn_value > 0 then 1 else -1
-                if (abs turn_value) < 0.000001 then clean_face = false
-                if (turn_sign != 0) and (turn_sign != current_sign) then clean_face = false
-                turn_sign = current_sign
-                corner_count += 1
-            )
-        )
-        clean_face and (corner_count == 4)
-    ),
-
-    /*
-    Returns true when an old edge only divides one clean flat four-sided region.
-    Material ID and smoothing group must also match so semantic boundaries are preserved.
-    */
-    function isRedundantOldEdge node edge_index =
-    (
-        base_obj = node.baseObject
-        used_faces = (polyop.getFacesUsingEdge base_obj edge_index) as array
-
-        if used_faces.count != 2 then
-        (
-            false
-        )
-        else
-        (
-            face_a = used_faces[1]
-            face_b = used_faces[2]
-
-            same_material = (polyop.getFaceMatID base_obj face_a) == (polyop.getFaceMatID base_obj face_b)
-            same_smoothing = (polyop.getFaceSmoothGroup base_obj face_a) == (polyop.getFaceSmoothGroup base_obj face_b)
-
-            if not same_material then
-            (
-                false
-            )
-            else if not same_smoothing then
-            (
-                false
-            )
-            else if not (areFacesCoplanar base_obj face_a face_b) then
-            (
-                false
-            )
-            else
-            (
-                local shared_edges = (polyop.getEdgesUsingFace base_obj face_a) * (polyop.getEdgesUsingFace base_obj face_b)
-                (shared_edges.numberSet == 1) and
-                    (isCleanQuadFace base_obj face_a) and
-                    (isCleanQuadFace base_obj face_b) and
-                    ((countMergedBoundaryCorners base_obj face_a face_b) == 4)
-            )
-        )
-        -- return
-    ),
-
-    /* Marks pre-slice edges so topology created by the next slice can be identified.
-    User edge flags survive index changes better than relying on numeric edge IDs alone.
-    */
-    function markExistingSliceEdges node =
-    (
-        base_obj = node.baseObject
-        existing_flag = bit.set 0 27 true
-        polyop.setEdgeFlags base_obj (polyop.getEdgesByFlag base_obj 0) existing_flag mask:existing_flag undoable:true
-        existing_flag
-        -- return
-    ),
-
-    /* Stores geometric segments for edges carrying the requested flag.
-    The snapshot lets a later slice preserve earlier clean cuts even when an edge is split.
-    */
-    function collectFlaggedEdgeSegments base_obj edge_flag =
-    (
-        edge_segments = #()
-        flagged_edges = polyop.getEdgesByFlag base_obj edge_flag
-
-        for edge_index in flagged_edges do
-        (
-            edge_verts = (polyop.getVertsUsingEdge base_obj edge_index) as array
-
-            if edge_verts.count == 2 then
-            (
-                append edge_segments #(
-                    polyop.getVert base_obj edge_verts[1],
-                    polyop.getVert base_obj edge_verts[2]
-                )
-            )
-        )
-
-        edge_segments
-        -- return
-    ),
-
-    /* Tests whether a point lies on a stored straight edge segment within tolerance.
-    Projection is used so large world-coordinate values do not depend on angle-only tests.
-    */
-    function pointLiesOnSegment point_value segment_start segment_end tolerance_value =
-    (
-        segment_vector = segment_end - segment_start
-        segment_length_sq = dot segment_vector segment_vector
-        lies_on_segment = false
-
-        if segment_length_sq <= (tolerance_value * tolerance_value) then
-        (
-            lies_on_segment = (distance point_value segment_start) <= tolerance_value
-        )
-        else
-        (
-            projection = (dot (point_value - segment_start) segment_vector) / segment_length_sq
-
-            if (projection >= -0.0001) and (projection <= 1.0001) then
-            (
-                closest_point = segment_start + (segment_vector * projection)
-                lies_on_segment = (distance point_value closest_point) <= tolerance_value
-            )
-        )
-
-        lies_on_segment
-        -- return
-    ),
-
-    /* Tests whether both endpoints of an edge lie on one previously stored edge segment.
-    This transfers clean status to child segments when a later slice splits an earlier clean cut.
-    */
-    function edgeLiesOnStoredSegments base_obj edge_index edge_segments tolerance_value =
-    (
-        edge_verts = (polyop.getVertsUsingEdge base_obj edge_index) as array
-        lies_on_stored_segment = false
-
-        if edge_verts.count == 2 then
-        (
-            point_a = polyop.getVert base_obj edge_verts[1]
-            point_b = polyop.getVert base_obj edge_verts[2]
-
-            for edge_segment in edge_segments while not lies_on_stored_segment do
-            (
-                if (pointLiesOnSegment point_a edge_segment[1] edge_segment[2] tolerance_value) and \
-                   (pointLiesOnSegment point_b edge_segment[1] edge_segment[2] tolerance_value) then
-                (
-                    lies_on_stored_segment = true
-                )
-            )
-        )
-
-        lies_on_stored_segment
-        -- return
-    ),
-
-    /* Tests whether an edge lies on the actual slice plane.
-    Only these topology edges are considered new clean cut edges for the current slice.
-    */
-    function edgeLiesOnSlicePlane base_obj edge_index slice_ray tolerance_value =
-    (
-        edge_verts = (polyop.getVertsUsingEdge base_obj edge_index) as array
-        plane_normal = safeNormalize slice_ray.dir
-        lies_on_plane = false
-
-        if (edge_verts.count == 2) and (plane_normal != undefined) then
-        (
-            point_a = polyop.getVert base_obj edge_verts[1]
-            point_b = polyop.getVert base_obj edge_verts[2]
-            distance_a = abs (dot (point_a - slice_ray.pos) plane_normal)
-            distance_b = abs (dot (point_b - slice_ray.pos) plane_normal)
-            lies_on_plane = (distance_a <= tolerance_value) and (distance_b <= tolerance_value)
-        )
-
-        lies_on_plane
-        -- return
-    ),
-
-    /* Counts clean slice edges incident to a vertex.
-    Two or more clean incident edges identify an intersection that belongs to the intended cut line.
-    */
-    function getCleanEdgeCountUsingVert base_obj vert_index =
-    (
-        clean_flag = bit.set 0 25 true
-        incident_edges = polyop.getEdgesUsingVert base_obj vert_index
-        clean_edges = polyop.getEdgesByFlag base_obj clean_flag
-        (incident_edges * clean_edges).numberSet
-        -- return
-    ),
-
-    /* Tests whether an edge shares either endpoint with an edge in the supplied set.
-    It is used to extend a newly created cut across old collinear edge segments on the same slice plane.
-    */
-    function edgeTouchesEdgeSet base_obj edge_index edge_set =
-    (
-        edge_verts = (polyop.getVertsUsingEdge base_obj edge_index) as array
-        touches_edge_set = false
-
-        for vert_index in edge_verts while not touches_edge_set do
-        (
-            if ((polyop.getEdgesUsingVert base_obj vert_index) * edge_set).numberSet > 0 then
-            (
-                touches_edge_set = true
-            )
-        )
-
-        touches_edge_set
-        -- return
-    ),
-
-    /* Tests whether a dirty hidden edge may be dissolved in favor of a clean slice edge.
-    The edge must be internal, coplanar, same material/SG, and touch a vertex carrying the clean cut through it.
-    */
-    function isDirtyHiddenEdgeAtCleanCut node edge_index =
-    (
-        base_obj = node.baseObject
-        clean_flag = bit.set 0 25 true
-        edge_flags = polyop.getEdgeFlags base_obj edge_index
-        is_clean = (bit.and edge_flags clean_flag) != 0
-        removable_edge = false
-
-        if (not is_clean) and (not (polyop.getEdgeVis base_obj edge_index)) then
-        (
-            used_faces = (polyop.getFacesUsingEdge base_obj edge_index) as array
-
-            if used_faces.count == 2 then
-            (
-                face_a = used_faces[1]
-                face_b = used_faces[2]
-                same_material = (polyop.getFaceMatID base_obj face_a) == (polyop.getFaceMatID base_obj face_b)
-                same_smoothing = (polyop.getFaceSmoothGroup base_obj face_a) == (polyop.getFaceSmoothGroup base_obj face_b)
-
-                if same_material and same_smoothing and (areFacesCoplanar base_obj face_a face_b) then
-                (
-                    edge_verts = (polyop.getVertsUsingEdge base_obj edge_index) as array
-
-                    for vert_index in edge_verts while not removable_edge do
-                    (
-                        if (getCleanEdgeCountUsingVert base_obj vert_index) >= 2 then
-                        (
-                            removable_edge = true
-                        )
-                    )
-                )
-            )
-        )
-
-        removable_edge
-        -- return
-    ),
-
-    /* Dissolves dirty hidden topology that crosses or terminates on the new clean cut.
-    Failed edges are skipped until another successful topology change makes a retry meaningful.
-    */
-    function cleanupDirtyHiddenEdgesAtCleanCuts node =
-    (
-        base_obj = node.baseObject
-        clean_flag = bit.set 0 25 true
-        remove_flag = bit.set 0 31 true
-        skipped_flag = bit.set 0 32 true
-        removed_count = 0
-        keep_checking = true
-
-        polyop.setEdgeFlags base_obj #{} 0 mask:skipped_flag undoable:true
-
-        while keep_checking do
-        (
-            dirty_edges = (polyop.getEdgesByFlag base_obj 0 mask:clean_flag) - (polyop.getEdgesByFlag base_obj skipped_flag)
-            dirty_edge = 0
-
-            for edge_index in dirty_edges while dirty_edge == 0 do
-            (
-                if isDirtyHiddenEdgeAtCleanCut node edge_index then
-                (
-                    dirty_edge = edge_index
-                )
-            )
-
-            if dirty_edge == 0 then
-            (
-                keep_checking = false
-            )
-            else
-            (
-                polyop.setEdgeFlags base_obj #{dirty_edge} remove_flag mask:remove_flag undoable:true
-
-                if (base_obj.EditablePoly.Remove selLevel:#Edge flag:remove_flag) == true then
-                (
-                    removed_count += 1
-                    polyop.setEdgeFlags base_obj #{} 0 mask:skipped_flag undoable:true
-                    update node
-                )
-                else
-                (
-                    blocked_edges = (polyop.getEdgesByFlag base_obj skipped_flag) + #{dirty_edge}
-                    polyop.setEdgeFlags base_obj blocked_edges skipped_flag mask:skipped_flag undoable:true
-                )
-            )
-        )
-
-        polyop.setEdgeFlags base_obj #{} 0 mask:(bit.or remove_flag skipped_flag) undoable:true
-
-        if removed_count > 0 then
-        (
-            format "WallMeshCleaner Cleanup: % | dirty hidden edges removed at clean cuts: %\n" node.name removed_count
-        )
-
-        removed_count
-        -- return
-    ),
-
-    /* Protects true slice-plane edges and dissolves eligible dirty dividers one at a time.
-    Clean flags persist across cuts; final cleanup can run after material restoration.
-    */
-    function cleanupNewSliceEdges node existing_flag collect_new:true slice_ray:undefined previous_clean_segments:#() =
-    (
-        base_obj = node.baseObject
-        candidate_flag = bit.set 0 28 true
-        clean_flag = bit.set 0 25 true
-        remove_flag = bit.set 0 29 true
-        total_removed = 0
-        cleanup_error = undefined
-        plane_tolerance = epsilon * 10.0
-
-        if slice_ray != undefined then
-        (
-            precision_tolerance = (length slice_ray.pos) / 10000000.0
-
-            if precision_tolerance > plane_tolerance then
-            (
-                plane_tolerance = precision_tolerance
-            )
-        )
-
-        try
-        (
-            if collect_new then
-            (
-                new_edges = polyop.getEdgesByFlag base_obj 0 mask:existing_flag
-                live_edges = polyop.getEdgesByFlag base_obj 0
-                clean_edges = polyop.getEdgesByFlag base_obj clean_flag
-                current_slice_edges = #{}
-
-                for edge_index in new_edges do
-                (
-                    is_clean_edge = false
-
-                    if slice_ray != undefined then
-                    (
-                        is_clean_edge = edgeLiesOnSlicePlane base_obj edge_index slice_ray plane_tolerance
-                    )
-                    else
-                    (
-                        is_clean_edge = true
-                    )
-
-                    if is_clean_edge then
-                    (
-                        clean_edges[edge_index] = true
-                        current_slice_edges[edge_index] = true
-                    )
-                )
-
-                if (slice_ray != undefined) and (current_slice_edges.numberSet > 0) then
-                (
-                    keep_promoting = true
-
-                    while keep_promoting do
-                    (
-                        keep_promoting = false
-
-                        for edge_index in live_edges do
-                        (
-                            if not clean_edges[edge_index] then
-                            (
-                                if (edgeLiesOnSlicePlane base_obj edge_index slice_ray plane_tolerance) and \
-                                   (edgeTouchesEdgeSet base_obj edge_index clean_edges) then
-                                (
-                                    clean_edges[edge_index] = true
-                                    current_slice_edges[edge_index] = true
-                                    keep_promoting = true
-                                )
-                            )
-                        )
-                    )
-                )
-
-                if previous_clean_segments.count > 0 then
-                (
-                    for edge_index in live_edges do
-                    (
-                        if not clean_edges[edge_index] then
-                        (
-                            if edgeLiesOnStoredSegments base_obj edge_index previous_clean_segments plane_tolerance then
-                            (
-                                clean_edges[edge_index] = true
-                            )
-                        )
-                    )
-                )
-
-                polyop.setEdgeFlags base_obj clean_edges clean_flag mask:clean_flag undoable:true
-            )
-
-            cleanupDirtyHiddenEdgesAtCleanCuts node
-            old_edges = polyop.getEdgesByFlag base_obj 0 mask:clean_flag
-            polyop.setEdgeFlags base_obj old_edges candidate_flag mask:candidate_flag undoable:true
-            keep_checking = true
-
-            while keep_checking do
-            (
-                candidates = (polyop.getEdgesByFlag base_obj candidate_flag) - (polyop.getEdgesByFlag base_obj clean_flag)
-                redundant_edge = 0
-
-                /* Prefer dirty angled dividers before orthogonal redundant loops. */
-                for edge_index in candidates while redundant_edge == 0 do
-                (
-                    if isRedundantAngledOldEdge node edge_index then
-                    (
-                        redundant_edge = edge_index
-                    )
-                )
-
-                if redundant_edge == 0 then
-                (
-                    for edge_index in candidates while redundant_edge == 0 do
-                    (
-                        if isRedundantOldEdge node edge_index then
-                        (
-                            redundant_edge = edge_index
-                        )
-                    )
-                )
-
-                if redundant_edge == 0 then
-                (
-                    keep_checking = false
-                )
-                else
-                (
-                    polyop.setEdgeFlags base_obj #{redundant_edge} remove_flag mask:remove_flag undoable:true
-
-                    if (base_obj.EditablePoly.Remove selLevel:#Edge flag:remove_flag) == true then
-                    (
-                        total_removed += 1
-                    )
-                    else
-                    (
-                        keep_checking = false
-                        format "WallMeshCleaner Cleanup: edge dissolve failed on %\n" node.name
-                    )
-                )
-            )
-        )
-        catch
-        (
-            cleanup_error = getCurrentException()
-        )
-
-        clear_edge_mask = bit.or existing_flag (bit.or candidate_flag remove_flag)
-        polyop.setEdgeFlags base_obj #{} 0 mask:clear_edge_mask undoable:true
-
-        if cleanup_error != undefined then throw cleanup_error
-
-        if total_removed > 0 then
-        (
-            format "WallMeshCleaner Cleanup: % | redundant dirty dividers removed: %\n" node.name total_removed
-        )
-
-        total_removed
-        -- return
-    ),
-
-    /* Identifies a redundant straight vertex using visible polygon edges only.
-    Valence-two vertices simplify when both edges share clean/dirty status; mixed clean-dirty pairs are preserved.
-    */
-    function isTwoVisibleEdgeStraightVertex base_obj vert_index =
-    (
-        visible_edges = #()
-        incident_edges = polyop.getEdgesUsingVert base_obj vert_index
-        removable = false
-
-        if incident_edges.numberSet == 2 then
-        (
-            clean_edges = polyop.getEdgesByFlag base_obj (bit.set 0 25 true)
-            clean_edge_count = (incident_edges * clean_edges).numberSet
-
-            if clean_edge_count != 1 then
-            (
-                removable = isTwoEdgeStraightVertex base_obj vert_index
-            )
-        )
-        else
-        (
-            for edge_index in incident_edges do
-            (
-                if polyop.getEdgeVis base_obj edge_index then
-                (
-                    append visible_edges edge_index
-                )
-            )
-
-            clean_edges = polyop.getEdgesByFlag base_obj (bit.set 0 25 true)
-
-            if (incident_edges * clean_edges).numberSet == 0 then
-            (
-                if visible_edges.count == 2 then
-                (
-                    other_a = getOtherEdgeVertex base_obj visible_edges[1] vert_index
-                    other_b = getOtherEdgeVertex base_obj visible_edges[2] vert_index
-
-                    if (other_a != undefined) and (other_b != undefined) then
-                    (
-                        center_point = polyop.getVert base_obj vert_index
-                        direction_a = safeNormalize ((polyop.getVert base_obj other_a) - center_point)
-                        direction_b = safeNormalize ((polyop.getVert base_obj other_b) - center_point)
-
-                        if (direction_a != undefined) and (direction_b != undefined) then
-                        (
-                            removable = (dot direction_a direction_b) <= (-collinear_dot_limit)
-                        )
-                    )
-                )
-
-                if removable then
-                (
-                    incident_faces = (polyop.getFacesUsingVert base_obj vert_index) as array
-
-                    if incident_faces.count == 0 then
-                    (
-                        removable = false
-                    )
-
-                    for face_position = 2 to incident_faces.count while removable do
-                    (
-                        removable = areFacesCoplanar base_obj incident_faces[1] incident_faces[face_position]
-                    )
-                )
-            )
-        )
-
-        removable
-        -- return
-    ),
-
-    /* Finds a live edge directly connecting two vertices.
-    The helper is used after dissolving a straight vertex to locate the merged replacement edge.
-    */
-    function findEdgeBetweenVerts base_obj vert_a vert_b =
-    (
-        shared_edges = (polyop.getEdgesUsingVert base_obj vert_a) * (polyop.getEdgesUsingVert base_obj vert_b)
-        shared_edge_array = shared_edges as array
-        edge_index = 0
-
-        if shared_edge_array.count > 0 then
-        (
-            edge_index = shared_edge_array[1]
-        )
-
-        edge_index
-        -- return
-    ),
-
-    /* Dissolves one straight candidate and transfers clean status to its merged edge.
-    This lets 2-edge vertices created by slicing across hidden topology disappear without losing the cut line.
-    */
-    function removeStraightVertexPreserveClean node vert_index remove_flag =
-    (
-        base_obj = node.baseObject
-        clean_flag = bit.set 0 25 true
-        endpoint_a_flag = bit.set 0 31 true
-        endpoint_b_flag = bit.set 0 32 true
-        incident_edges = polyop.getEdgesUsingVert base_obj vert_index
-        preserve_clean = false
-        can_track_merge = false
-        remove_ok = false
-
-        if incident_edges.numberSet == 2 then
-        (
-            clean_edges = polyop.getEdgesByFlag base_obj clean_flag
-            preserve_clean = ((incident_edges * clean_edges).numberSet == 2)
-            incident_edge_array = incident_edges as array
-            other_vert_a = getOtherEdgeVertex base_obj incident_edge_array[1] vert_index
-            other_vert_b = getOtherEdgeVertex base_obj incident_edge_array[2] vert_index
-
-            if (other_vert_a != undefined) and (other_vert_b != undefined) then
-            (
-                can_track_merge = true
-                polyop.setVertFlags base_obj #{other_vert_a} endpoint_a_flag mask:endpoint_a_flag undoable:true
-                polyop.setVertFlags base_obj #{other_vert_b} endpoint_b_flag mask:endpoint_b_flag undoable:true
-            )
-        )
-
-        polyop.setVertFlags base_obj #{vert_index} remove_flag mask:remove_flag undoable:true
-        remove_ok = base_obj.EditablePoly.Remove selLevel:#Vertex flag:remove_flag
-
-        if (remove_ok == true) and preserve_clean and can_track_merge then
-        (
-            endpoint_a_verts = polyop.getVertsByFlag base_obj endpoint_a_flag
-            endpoint_b_verts = polyop.getVertsByFlag base_obj endpoint_b_flag
-
-            if (endpoint_a_verts.numberSet == 1) and (endpoint_b_verts.numberSet == 1) then
-            (
-                endpoint_a = (endpoint_a_verts as array)[1]
-                endpoint_b = (endpoint_b_verts as array)[1]
-                merged_edge = findEdgeBetweenVerts base_obj endpoint_a endpoint_b
-
-                if merged_edge > 0 then
-                (
-                    polyop.setEdgeFlags base_obj #{merged_edge} clean_flag undoable:true
-                )
-            )
-        )
-
-        polyop.setVertFlags base_obj #{} 0 mask:(bit.or endpoint_a_flag endpoint_b_flag) undoable:true
-        remove_ok
-        -- return
-    ),
-
-    /* Dissolves straight two-visible-edge vertices after each cut without deleting faces.
-    Clean valence-two cuts are simplified too, with clean status transferred to the replacement edge.
-    */
-    function removeTwoVisibleEdgeStraightVerts node =
-    (
-        base_obj = node.baseObject
-        remove_flag = bit.set 0 30 true
-        removed_count = 0
-        skipped_flag = bit.set 0 26 true
-        continue_cleanup = true
-        polyop.setVertFlags base_obj #{} 0 mask:skipped_flag undoable:true
-
-        try
-        (
-            while continue_cleanup do
-            (
-                live_verts = polyop.getVertsByFlag base_obj 0
-                candidate_vert = 0
-                skipped_verts = polyop.getVertsByFlag base_obj skipped_flag
-
-                for vert_index in (live_verts - skipped_verts) while candidate_vert == 0 do
-                (
-                    if isTwoVisibleEdgeStraightVertex base_obj vert_index then
-                    (
-                        candidate_vert = vert_index
-                    )
-                )
-
-                if candidate_vert == 0 then
-                (
-                    continue_cleanup = false
-                )
-                else
-                (
-                    previous_live_count = live_verts.numberSet
-                    remove_ok = removeStraightVertexPreserveClean node candidate_vert remove_flag
-                    current_live_count = (polyop.getVertsByFlag base_obj 0).numberSet
-
-                    if (remove_ok == true) and (current_live_count < previous_live_count) then
-                    (
-                        removed_count += previous_live_count - current_live_count
-                        polyop.setVertFlags base_obj #{} 0 mask:skipped_flag undoable:true
-                    )
-                    else
-                    (
-                        blocked_vert = polyop.getVertsByFlag base_obj remove_flag
-                        skipped_verts = (polyop.getVertsByFlag base_obj skipped_flag) + blocked_vert
-                        polyop.setVertFlags base_obj skipped_verts skipped_flag mask:skipped_flag undoable:true
-                        format "WallMeshCleaner Cleanup: skipped a blocked vertex on %\n" node.name
-                    )
-                )
-            )
-        )
-        catch
-        (
-            polyop.setVertFlags base_obj #{} 0 mask:(bit.or remove_flag skipped_flag) undoable:true
-            throw
-        )
-
-        polyop.setVertFlags base_obj #{} 0 mask:(bit.or remove_flag skipped_flag) undoable:true
-
-        if removed_count > 0 then
-        (
-            format "WallMeshCleaner Cleanup: % | straight vertices removed: %\n" node.name removed_count
-        )
-
-        removed_count
-        -- return
-    ),
-
-    /* Slices once and cleans new dividers, clearing the tracking flag on failure.
-    All plane and topology operations use the Editable Poly base object's local space.
-    */
-    function sliceWithCleanup node target_faces slice_ray =
-    (
-        base_obj = node.baseObject
-        clean_flag = bit.set 0 25 true
-        previous_clean_segments = collectFlaggedEdgeSegments base_obj clean_flag
-        existing_flag = markExistingSliceEdges node
-        slice_ok = false
-
-        try
-        (
-            slice_ok = polyop.slice base_obj target_faces slice_ray
-
-            if slice_ok == true then
-            (
-                cleanupNewSliceEdges node existing_flag slice_ray:slice_ray previous_clean_segments:previous_clean_segments
-                removeTwoVisibleEdgeStraightVerts node
-                update node
-            )
-            else
-            (
-                polyop.setEdgeFlags base_obj #{} 0 mask:existing_flag undoable:true
-            )
-        )
-        catch
-        (
-            polyop.setEdgeFlags base_obj #{} 0 mask:existing_flag undoable:true
-            throw
-        )
-
-        slice_ok
-        -- return
-    ),
-
-    /*
-    Removes redundant flat divider edges from the whole object during post-process cleanup.
-    Each edge is validated locally, allowing a redundant loop to continue around corners between different wall SGs.
-    */
-    function cleanupRedundantPostProcessEdges node =
-    (
-        if not (isSupportedNode node) then
-        (
-            0
-        )
-        else
-        (
-            base_obj = node.baseObject
-            total_removed_edges = 0
-            continue_cleanup = true
-
-            while continue_cleanup do
-            (
-                continue_cleanup = false
-                edge_count = polyop.getNumEdges base_obj
-                redundant_edge = 0
-
-                for edge_index = 1 to edge_count while redundant_edge == 0 do
-                (
-                    if isRedundantOldEdge node edge_index then
-                    (
-                        redundant_edge = edge_index
-                    )
-                )
-
-                if redundant_edge > 0 then
-                (
-                    edge_verts = (polyop.getVertsUsingEdge base_obj redundant_edge) as array
-                    edge_set = #{}
-                    edge_set[redundant_edge] = true
-
-                    edge_flag_bit = bit.set 0 29 true
-                    all_edges = #{1..edge_count}
-                    polyop.setEdgeFlags base_obj all_edges 0 mask:edge_flag_bit undoable:true
-                    polyop.setEdgeFlags base_obj edge_set edge_flag_bit mask:edge_flag_bit undoable:true
-
-                    remove_edge_ok = base_obj.EditablePoly.Remove selLevel:#Edge flag:edge_flag_bit
-
-                    if remove_edge_ok == true then
-                    (
-                        total_removed_edges += 1
-                        update node
-
-                        current_vert_count = polyop.getNumVerts base_obj
-                        removable_verts = #{}
-
-                        for vert_index in edge_verts do
-                        (
-                            if vert_index <= current_vert_count then
-                            (
-                                if isTwoEdgeStraightVertex base_obj vert_index then
-                                (
-                                    removable_verts[vert_index] = true
-                                )
-                            )
-                        )
-
-                        if removable_verts.numberSet > 0 then
-                        (
-                            vert_flag_bit = bit.set 0 30 true
-                            all_verts = #{1..current_vert_count}
-                            polyop.setVertFlags base_obj all_verts 0 mask:vert_flag_bit undoable:true
-                            polyop.setVertFlags base_obj removable_verts vert_flag_bit mask:vert_flag_bit undoable:true
-                            base_obj.EditablePoly.Remove selLevel:#Vertex flag:vert_flag_bit
-                            update node
-                        )
-
-                        continue_cleanup = true
-                    )
-                    else
-                    (
-                        format "WallMeshCleaner Post Cleanup: edge Remove failed on % | edge: %\n" \
-                            node.name redundant_edge
-                    )
-                )
-            )
-
-            format "WallMeshCleaner Post Cleanup: % | redundant edges removed: %\n" \
-                node.name total_removed_edges
-
-            total_removed_edges
-        )
         -- return
     ),
 
@@ -1866,715 +990,171 @@ struct WallMeshCleaner_v
         -- return
     ),
 
-    /*
-    Runs the post-cut cleanup pipeline on one wall object.
-    Welding is followed by redundant-loop cleanup, straight-vertex cleanup, then optional Auto Smooth.
-    */
-    function cleanupAfterNgonCut node weld_vertices:false weld_threshold:1.0 reapply_auto_smooth:false =
+    /* Slice and Fix N-gons now share one native Edit Poly pipeline.
+       Legacy weld keywords are accepted, but cleanup never welds borders. */
+    function processNode node cut_mode:#all angle_threshold:5.0 reset_clean_edges:true clear_clean_edges:true auto_smooth:false =
     (
-        if not (isSupportedNode node) then
+        last_slice_error = undefined
+        last_slice_count = 0
+        if not isValidNode node then
         (
-            false
+            last_slice_error = "The selected node is no longer valid."
+            return false
         )
-        else
+        local supported = (classOf node.baseObject == Editable_Poly)
+        for m in node.modifiers do if classOf m == Edit_Poly do supported = true
+        if not supported then
         (
-            if weld_vertices then
+            last_slice_error = "Requires Editable Poly geometry or an Edit Poly modifier."
+            return false
+        )
+        local oldSelection = selection as array
+        local oldPanel = getCommandPanelTaskMode()
+        local oldCurrent = modPanel.getCurrentObject()
+        local oldLevel = subObjectLevel
+        local modifier = undefined
+        local backup = undefined
+        local added = false
+        local success = false
+        local failure = undefined
+        local settings = undefined
+        try
+        (
+            -- An instanced object shares its whole evaluated modifier pipeline.
+            -- Copy that pipeline for this node before changing any modifier data.
+            local stackInstances = #()
+            InstanceMgr.GetInstances node &stackInstances
+            if stackInstances.count > 1 do
             (
-                weldNodeVertices node weld_threshold
+                if not(InstanceMgr.MakeObjectsUnique #(node) #individual) do throw "Cannot isolate the selected wall instance."
+                if node.modifiers.count > 0 then oldCurrent = node.modifiers[1] else oldCurrent = node.baseObject
             )
-
-            -- Requested orthogonal dividers must survive post-process cleanup.
-            removeTwoEdgeStraightVerts node
-
-            if reapply_auto_smooth then
-            (
-                autoSmoothNode node
-            )
-
-            true
-        )
-        -- return
-    ),
-
-    /*
-    Collects object-local slicing planes from all boundary edges of one original face.
-    Slice data is stored before topology changes so later edge-index changes do not matter.
-    */
-    function collectFaceSliceData node face_index cut_mode:#all angle_threshold:5.0 island_faces:#{} =
-    (
-        base_obj = node.baseObject
-        face_normal_local = safeNormalize (polyop.getFaceNormal base_obj face_index)
-
-        if face_normal_local == undefined then
-        (
-            #()
-        )
-        else
-        (
-            face_edges = polyop.getEdgesUsingFace base_obj face_index
-            slice_data = #()
-
-            for edge_index in face_edges do
-            (
-                edge_verts = polyop.getVertsUsingEdge base_obj edge_index
-                vert_indices = edge_verts as array
-
-                if (vert_indices.count == 2) and (((polyop.getFacesUsingEdge base_obj edge_index) * island_faces).numberSet <= 1) then
+            if node.modifiers.count > 0 do
+                if classOf node.modifiers[1] == Edit_Poly do modifier = node.modifiers[1]
+            -- Isolate a shared top modifier without changing its base geometry.
+            if modifier != undefined do
+                if (refs.dependentNodes modifier).count > 1 do
                 (
-                    point_a = polyop.getVert base_obj vert_indices[1]
-                    point_b = polyop.getVert base_obj vert_indices[2]
-
-                    edge_dir_local = safeNormalize (point_b - point_a)
-                    edge_dir_world = getWorldEdgeDirection node point_a point_b
-
-                    if (edge_dir_local != undefined) and (edge_dir_world != undefined) then
-                    (
-                        if edgeMatchesOrientation edge_dir_world cut_mode angle_threshold then
-                        (
-                            plane_normal_local = safeNormalize (cross edge_dir_local face_normal_local)
-
-                            if plane_normal_local != undefined then
-                            (
-                                plane_center_local = (point_a + point_b) * 0.5
-                                append slice_data #(plane_center_local, plane_normal_local)
-                            )
-                        )
-                    )
+                    if modifier.animationMode != 0 or modifier.currentOperation != 0 do throw "Commit the active Edit Poly operation before slicing."
+                    local sharedModifier = modifier
+                    if not(InstanceMgr.MakeModifiersUnique #(node) #(modifier) #individual) do throw "Cannot isolate the shared Edit Poly modifier."
+                    modifier = node.modifiers[1]
+                    if oldCurrent == sharedModifier do oldCurrent = modifier
                 )
-            )
-
-            slice_data
-        )
-        -- return
-    ),
-
-    /* Finds one connected coplanar wall before any topology changes.
-    Compare against the seed plane to avoid drifting around curved walls.
-    */
-    function getConnectedPlanarIsland base_obj seed_face =
-    (
-        local island_faces = #{}
-        local face_queue = #(seed_face)
-        local queue_position = 1
-        island_faces[seed_face] = true
-
-        while queue_position <= face_queue.count do
-        (
-            local current_face = face_queue[queue_position]
-            queue_position += 1
-            local face_edges = polyop.getEdgesUsingFace base_obj current_face
-
-            for edge_index in face_edges do
+            if modifier == undefined then
             (
-                local neighbor_faces = polyop.getFacesUsingEdge base_obj edge_index
-                for neighbor_face in neighbor_faces do
-                (
-                    if not island_faces[neighbor_face] then
-                    (
-                        if areFacesCoplanar base_obj seed_face neighbor_face then
-                        (
-                            island_faces[neighbor_face] = true
-                            append face_queue neighbor_face
-                        )
-                    )
-                )
-            )
-        )
-        island_faces
-    ),
-
-    /* Collects unique boundary planes for every original face in a flat wall.
-    Disconnected walls and walls around corners receive independent plane lists.
-    */
-    function collectWallSliceData node cut_mode:#all angle_threshold:5.0 =
-    (
-        local base_obj = node.baseObject
-        local face_count = polyop.getNumFaces base_obj
-        local face_slice_data = #()
-        local visited_faces = #{}
-        face_slice_data.count = face_count
-
-        for seed_face = 1 to face_count do
-        (
-            if not visited_faces[seed_face] then
-            (
-                local island_faces = getConnectedPlanarIsland base_obj seed_face
-                visited_faces = visited_faces + island_faces
-                local island_planes = #()
-
-                for face_index in island_faces do
-                (
-                    local source_planes = collectFaceSliceData node face_index cut_mode:cut_mode angle_threshold:angle_threshold island_faces:island_faces
-                    for source_plane in source_planes do
-                    (
-                        local duplicate_plane = false
-                        for stored_plane in island_planes while not duplicate_plane do
-                        (
-                            if (abs (dot source_plane[2] stored_plane[2])) >= 0.999999 then
-                            (
-                                if (abs (dot (source_plane[1] - stored_plane[1]) stored_plane[2])) <= epsilon then
-                                (
-                                    duplicate_plane = true
-                                )
-                            )
-                        )
-                        if not duplicate_plane then
-                        (
-                            append island_planes source_plane
-                        )
-                    )
-                )
-                for face_index in island_faces do
-                (
-                    face_slice_data[face_index] = island_planes
-                )
-            )
-        )
-        face_slice_data
-    ),
-
-    /*
-    Finds all faces currently carrying the requested temporary material ID.
-    These faces are treated as descendants of one original source polygon.
-    */
-    function getFacesByMaterialId node material_id =
-    (
-        base_obj = node.baseObject
-        face_count = polyop.getNumFaces base_obj
-        result_faces = #{}
-
-        for face_index = 1 to face_count do
-        (
-            if (polyop.getFaceMatID base_obj face_index) == material_id then
-            (
-                result_faces[face_index] = true
-            )
-        )
-
-        result_faces
-        -- return
-    ),
-
-    /*
-    Slices descendants of one original polygon using stored object-local slice planes.
-    polyop.slice receives the plane as a Ray.
-    */
-    function sliceTrackedFace node material_id slice_data =
-    (
-        base_obj = node.baseObject
-        slice_count = 0
-
-        for slice_item in slice_data do
-        (
-            tracked_faces = getFacesByMaterialId node material_id
-
-            if tracked_faces.numberSet > 0 then
-            (
-                plane_center_local = slice_item[1]
-                plane_normal_local = slice_item[2]
-                slice_ray = ray plane_center_local plane_normal_local
-                slice_ok = sliceWithCleanup node tracked_faces slice_ray
-
-                if slice_ok == true then
-                (
-                    slice_count += 1
-                )
-            )
-        )
-
-        slice_count
-        -- return
-    ),
-
-    /*
-    Processes one Editable Poly node and restores original material IDs afterward.
-    Original face data is captured before any slicing changes the topology.
-    */
-    function processNode node cut_mode:#all angle_threshold:5.0 reset_clean_edges:true clear_clean_edges:true =
-    (
-        if not (isSupportedNode node) then
-        (
-            format "WallMeshCleaner: skipped unsupported node: %\n" node.name
-            false
-        )
-        else
-        (
-            base_obj = node.baseObject
-            original_face_count = polyop.getNumFaces base_obj
-
-            if original_face_count < 1 then
-            (
-                false
-            )
-            else if (temp_id_start + original_face_count) > 65535 then
-            (
-                messageBox ("WallMeshCleaner: Too many polygons on object \"" + node.name + "\" for temporary material IDs.")
-                false
+                modifier = Edit_Poly name:"Wall topology cleanup"
+                addModifier node modifier
+                added = true
             )
             else
             (
-                if reset_clean_edges then
+                if modifier.animationMode != 0 or modifier.currentOperation != 0 do throw "Commit the active Edit Poly operation before slicing."
+                backup = copy modifier
+            )
+            settings = #(modifier.split,modifier.useStackSelection,modifier.useSoftSel,modifier.remveEdgeCtrlKey)
+            select node
+            max modify mode
+            modPanel.setCurrentObject modifier
+            modifier.SetPrimaryNode node
+            modifier.split = false
+            modifier.useStackSelection = false
+            modifier.useSoftSel = false
+            modifier.remveEdgeCtrlKey = false
+            local pipeline = WMCWallSlicePipeline node:node ep:modifier axisTolerance:(amin 45.0 (amax 0.0 angle_threshold))
+            pipeline.run cutMode:cut_mode
+            if auto_smooth do
+            (
+                local t = pipeline.refreshTopology()
+                local ids = #{1..t.faces.count}
+                t = pipeline.applyOperation #Face ids #Autosmooth
+                pipeline.validateStructure t
+            )
+            modifier.SetSelection #Vertex #{} node:node
+            modifier.SetSelection #Edge #{} node:node
+            modifier.SetSelection #Face #{} node:node
+            modifier.split = settings[1]
+            modifier.useStackSelection = settings[2]
+            modifier.useSoftSel = settings[3]
+            modifier.remveEdgeCtrlKey = settings[4]
+            last_slice_count = pipeline.cuts
+            success = true
+        )
+        catch
+        (
+            failure = getCurrentException()
+            if modifier != undefined do
+            (
+                if added then deleteModifier node modifier
+                else if backup != undefined do
                 (
-                    polyop.setEdgeFlags base_obj #{} 0 mask:(bit.set 0 25 true) undoable:true
+                    deleteModifier node modifier
+                    addModifier node backup
+                    if oldCurrent == modifier do oldCurrent = backup
                 )
-
-                face_records = #()
-                local wall_slice_data = collectWallSliceData node cut_mode:cut_mode angle_threshold:angle_threshold
-
-                for face_index = 1 to original_face_count do
-                (
-                    original_mat_id = polyop.getFaceMatID base_obj face_index
-                    temp_mat_id = temp_id_start + face_index
-                    slice_data = wall_slice_data[face_index]
-
-                    append face_records #(temp_mat_id, original_mat_id, slice_data)
-                    polyop.setFaceMatID base_obj #{face_index} temp_mat_id
-                )
-
-                total_slices = 0
-
-                for face_record in face_records do
-                (
-                    total_slices += sliceTrackedFace node face_record[1] face_record[3]
-                )
-
-                for face_record in face_records do
-                (
-                    tracked_faces = getFacesByMaterialId node face_record[1]
-
-                    if tracked_faces.numberSet > 0 then
-                    (
-                        polyop.setFaceMatID base_obj tracked_faces face_record[2]
-                    )
-                )
-
-                cleanupNewSliceEdges node (bit.set 0 27 true) collect_new:false
-                removeTwoVisibleEdgeStraightVerts node
-
-                if clear_clean_edges then
-                (
-                    polyop.setEdgeFlags base_obj #{} 0 mask:(bit.set 0 25 true) undoable:true
-                )
-
-                update node
-
-                format "WallMeshCleaner: % | original faces: % | slice operations: %\n" \
-                    node.name original_face_count total_slices
-
-                true
             )
         )
-        -- return
+        select oldSelection
+        if oldPanel == #modify and oldCurrent != undefined do
+            try (modPanel.setCurrentObject oldCurrent; subObjectLevel = oldLevel) catch ()
+        setCommandPanelTaskMode oldPanel
+        last_slice_error = failure
+        if failure != undefined do format "WallMeshCleaner: % | restored after failure: %\n" node.name failure
+        success
     ),
-
-    /*
-    Runs the original edge-based slicer on all currently selected supported objects.
-    Optional vertex welding is performed immediately before slicing.
-    */
     function sliceSelection weld_vertices:false weld_threshold:1.0 cut_mode:#all angle_threshold:5.0 =
     (
-        selected_nodes = selection as array
-
-        if selected_nodes.count == 0 then
+        local selectedNodes = selection as array
+        local processed = 0
+        last_slice_report = ""
+        if selectedNodes.count == 0 then
         (
-            messageBox "WallMeshCleaner: Select at least one wall object."
-            false
+            last_slice_report = "Select at least one wall before running this action."
+            return false
         )
-        else
+        undo "WallMeshCleaner - Slice" on
         (
-            processed_count = 0
-
-            undo "WallMeshCleaner" on
+            for node in selectedNodes do
             (
-                if weld_vertices then
+                if processNode node cut_mode:cut_mode angle_threshold:angle_threshold then
                 (
-                    weldSelection weld_threshold
+                    processed += 1
+                    last_slice_report += node.name + ": completed; " + (last_slice_count as string) + " slice operations.\n"
                 )
-
-                if cut_mode == #all then
-                (
-                    vertical_results = #()
-
-                    format "WallMeshCleaner: All pass 1/2 | Vertical\n"
-
-                    for node in selected_nodes do
-                    (
-                        vertical_result = processNode node \
-                            cut_mode:#vertical \
-                            angle_threshold:angle_threshold \
-                            reset_clean_edges:true \
-                            clear_clean_edges:false
-
-                        append vertical_results vertical_result
-                    )
-
-                    format "WallMeshCleaner: All pass 2/2 | Horizontal\n"
-
-                    for node_index = 1 to selected_nodes.count do
-                    (
-                        node = selected_nodes[node_index]
-                        vertical_result = vertical_results[node_index]
-
-                        horizontal_result = processNode node \
-                            cut_mode:#horizontal \
-                            angle_threshold:angle_threshold \
-                            reset_clean_edges:(not vertical_result) \
-                            clear_clean_edges:true
-
-                        if vertical_result or horizontal_result then
-                        (
-                            processed_count += 1
-                        )
-                    )
-                )
-                else
-                (
-                    for node in selected_nodes do
-                    (
-                        if processNode node cut_mode:cut_mode angle_threshold:angle_threshold then
-                        (
-                            processed_count += 1
-                        )
-                    )
-                )
-            )
-
-            format "WallMeshCleaner: processed % of % selected object(s).\n" \
-                processed_count selected_nodes.count
-
-            completeRedraw()
-            processed_count > 0
-        )
-        -- return
-    ),
-
-    /*
-    Returns true when three ordered boundary points form an almost straight line.
-    This detects an extra vertex inserted into a formerly single straight edge.
-    */
-    function isStraightBoundaryVertex point_prev point_current point_next =
-    (
-        dir_a = safeNormalize (point_current - point_prev)
-        dir_b = safeNormalize (point_next - point_current)
-
-        if (dir_a == undefined) or (dir_b == undefined) then
-        (
-            false
-        )
-        else
-        (
-            (dot dir_a dir_b) >= collinear_dot_limit
-        )
-        -- return
-    ),
-
-    /*
-    Returns the exact smoothing-group mask stored on one face.
-    A zero mask is allowed but is not useful as an automatic wall identifier.
-    */
-    function getFaceSmoothMask base_obj face_index =
-    (
-        polyop.getFaceSmoothGroup base_obj face_index
-        -- return
-    ),
-
-    /*
-    Returns true when a vertex is shared by the source wall face and a face with a different SG mask.
-    This identifies a real wall junction rather than an arbitrary collinear vertex.
-    */
-    function isWallJunctionVertex node vert_index source_smooth_mask =
-    (
-        base_obj = node.baseObject
-        used_faces = polyop.getFacesUsingVert base_obj vert_index
-
-        has_source_face = false
-        has_other_face = false
-
-        for face_index in used_faces do
-        (
-            face_smooth_mask = getFaceSmoothMask base_obj face_index
-
-            if face_smooth_mask == source_smooth_mask then
-            (
-                has_source_face = true
-            )
-            else
-            (
-                has_other_face = true
+                else last_slice_report += node.name + ": " + (last_slice_error as string) + "\n"
             )
         )
-
-        (has_source_face and has_other_face)
-        -- return
+        completeRedraw()
+        processed == selectedNodes.count
     ),
-
-    /*
-    Returns the faces connected to a seed face through shared edges with the same SG mask.
-    This isolates one physical wall even when disconnected walls reuse the same smoothing group.
-    */
-    function getConnectedSmoothIsland node seed_face smooth_mask =
-    (
-        base_obj = node.baseObject
-        face_count = polyop.getNumFaces base_obj
-        visited_faces = #{}
-        island_faces = #{}
-        face_queue = #()
-
-        if (seed_face < 1) or (seed_face > face_count) then
-        (
-            island_faces
-        )
-        else if (getFaceSmoothMask base_obj seed_face) != smooth_mask then
-        (
-            island_faces
-        )
-        else
-        (
-            append face_queue seed_face
-            visited_faces[seed_face] = true
-
-            while face_queue.count > 0 do
-            (
-                current_face = face_queue[1]
-                deleteItem face_queue 1
-                island_faces[current_face] = true
-
-                face_edges = polyop.getEdgesUsingFace base_obj current_face
-
-                for edge_index in face_edges do
-                (
-                    neighbor_faces = polyop.getFacesUsingEdge base_obj edge_index
-
-                    for neighbor_face in neighbor_faces do
-                    (
-                        if not visited_faces[neighbor_face] then
-                        (
-                            visited_faces[neighbor_face] = true
-
-                            if (getFaceSmoothMask base_obj neighbor_face) == smooth_mask then
-                            (
-                                append face_queue neighbor_face
-                            )
-                        )
-                    )
-                )
-            )
-
-            island_faces
-        )
-        -- return
-    ),
-
-    /*
-    Finds a current seed face for a stored junction point and smoothing-group mask.
-    This allows the connected wall island to be rebuilt after earlier slice operations.
-    */
-    function findSeedFaceAtPoint node point_local smooth_mask =
-    (
-        base_obj = node.baseObject
-        face_count = polyop.getNumFaces base_obj
-        found_face = 0
-
-        for face_index = 1 to face_count while found_face == 0 do
-        (
-            if (getFaceSmoothMask base_obj face_index) == smooth_mask then
-            (
-                face_verts = polyop.getFaceVerts base_obj face_index
-
-                for vert_index in face_verts while found_face == 0 do
-                (
-                    vert_pos = polyop.getVert base_obj vert_index
-
-                    if (distance vert_pos point_local) <= epsilon then
-                    (
-                        found_face = face_index
-                    )
-                )
-            )
-        )
-
-        found_face
-        -- return
-    ),
-
-    /*
-    Collects automatic junction cuts from all wall faces in the object.
-    Each record stores the wall SG mask, a junction point, and a slice-plane normal.
-    */
-    function collectAutomaticJunctionCuts node cut_mode:#all angle_threshold:5.0 =
-    (
-        base_obj = node.baseObject
-        face_count = polyop.getNumFaces base_obj
-        cut_records = #()
-
-        for face_index = 1 to face_count do
-        (
-            smooth_mask = getFaceSmoothMask base_obj face_index
-
-            if smooth_mask != 0 then
-            (
-                face_verts = polyop.getFaceVerts base_obj face_index
-                vert_count = face_verts.count
-
-                if vert_count > 3 then
-                (
-                    for face_vert_position = 1 to vert_count do
-                    (
-                        prev_position = face_vert_position - 1
-                        next_position = face_vert_position + 1
-
-                        if prev_position < 1 then
-                        (
-                            prev_position = vert_count
-                        )
-
-                        if next_position > vert_count then
-                        (
-                            next_position = 1
-                        )
-
-                        prev_vert = face_verts[prev_position]
-                        current_vert = face_verts[face_vert_position]
-                        next_vert = face_verts[next_position]
-
-                        point_prev = polyop.getVert base_obj prev_vert
-                        point_current = polyop.getVert base_obj current_vert
-                        point_next = polyop.getVert base_obj next_vert
-
-                        if isStraightBoundaryVertex point_prev point_current point_next then
-                        (
-                            if isWallJunctionVertex node current_vert smooth_mask then
-                            (
-                                straight_dir_local = safeNormalize (point_next - point_prev)
-                                straight_dir_world = getWorldEdgeDirection node point_prev point_next
-
-                                if (straight_dir_local != undefined) and (straight_dir_world != undefined) then
-                                (
-                                    if edgeMatchesOrientation straight_dir_world cut_mode angle_threshold then
-                                    (
-                                        append cut_records #(smooth_mask, point_current, straight_dir_local, current_vert, face_index)
-                                    )
-                                )
-                            )
-                        )
-                    )
-                )
-            )
-        )
-
-        cut_records
-        -- return
-    ),
-
-    /*
-    Propagates all automatically detected junction cuts through their connected wall islands.
-    No smoothing-group number is specified by the user.
-    */
     function propagateAutomaticJunctionCuts node cut_mode:#all angle_threshold:5.0 =
     (
-        if not (isSupportedNode node) then
-        (
-            format "WallMeshCleaner Junctions: skipped unsupported node: %\n" node.name
-            0
-        )
-        else
-        (
-            base_obj = node.baseObject
-            polyop.setEdgeFlags base_obj #{} 0 mask:(bit.set 0 25 true) undoable:true
-            cut_records = collectAutomaticJunctionCuts node cut_mode:cut_mode angle_threshold:angle_threshold
-            slice_count = 0
-
-            format "WallMeshCleaner Junctions: % | candidates: %\n" node.name cut_records.count
-
-            for cut_record in cut_records do
-            (
-                smooth_mask = cut_record[1]
-                plane_center = cut_record[2]
-                plane_normal = cut_record[3]
-                source_vert = cut_record[4]
-
-                seed_face = findSeedFaceAtPoint node plane_center smooth_mask
-
-                if seed_face > 0 then
-                (
-                    island_faces = getConnectedSmoothIsland node seed_face smooth_mask
-
-                    if island_faces.numberSet > 0 then
-                    (
-                        slice_ray = ray plane_center plane_normal
-                        slice_ok = sliceWithCleanup node island_faces slice_ray
-
-                        if slice_ok == true then
-                        (
-                            slice_count += 1
-
-                            format "  junction vertex: % | SG mask: % | island faces: %\n" \
-                                source_vert smooth_mask island_faces.numberSet
-                        )
-                    )
-                )
-            )
-
-            cleanupNewSliceEdges node (bit.set 0 27 true) collect_new:false
-            removeTwoVisibleEdgeStraightVerts node
-            polyop.setEdgeFlags base_obj #{} 0 mask:(bit.set 0 25 true) undoable:true
-            update node
-
-            format "WallMeshCleaner Junctions: % | propagated slices: %\n" \
-                node.name slice_count
-
-            slice_count
-        )
-        -- return
+        if processNode node cut_mode:cut_mode angle_threshold:angle_threshold then last_slice_count else 0
     ),
-
-    /*
-    Runs automatic wall-junction propagation and cleanup on all selected supported objects.
-    Shared Options control welding; Auto Smooth runs before cutting and again after cleanup.
-    */
     function propagateSelectionJunctionCuts weld_vertices:false weld_threshold:1.0 auto_smooth:false cut_mode:#all angle_threshold:5.0 =
     (
-        selected_nodes = selection as array
-
-        if selected_nodes.count == 0 then
+        local selectedNodes = selection as array
+        local processed = 0
+        last_slice_report = ""
+        if selectedNodes.count == 0 then
         (
-            messageBox "WallMeshCleaner: Select at least one wall object."
-            false
+            last_slice_report = "Select at least one wall before running this action."
+            return false
         )
-        else
+        undo "WallMeshCleaner - Fix N-gons" on
         (
-            total_slices = 0
-
-            undo "WallMeshCleaner - Fix N-gons" on
+            for node in selectedNodes do
             (
-                if auto_smooth then
+                if processNode node cut_mode:cut_mode angle_threshold:angle_threshold auto_smooth:auto_smooth then
                 (
-                    format "WallMeshCleaner: Auto Smooth before Fix N-gons...\n"
-
-                    for node in selected_nodes do
-                    (
-                        autoSmoothNode node
-                    )
+                    processed += 1
+                    last_slice_report += node.name + ": completed; " + (last_slice_count as string) + " slice operations.\n"
                 )
-
-                for node in selected_nodes do
-                (
-                    total_slices += propagateAutomaticJunctionCuts node cut_mode:cut_mode angle_threshold:angle_threshold
-                )
-
-                format "WallMeshCleaner: Post Fix N-gons cleanup...\n"
-
-                for node in selected_nodes do
-                (
-                    cleanupAfterNgonCut node                         weld_vertices:weld_vertices                         weld_threshold:weld_threshold                         reapply_auto_smooth:auto_smooth
-                )
+                else last_slice_report += node.name + ": " + (last_slice_error as string) + "\n"
             )
-
-            format "WallMeshCleaner Junctions: total propagated slices: %\n" total_slices
-            completeRedraw()
-            true
         )
-        -- return
+        completeRedraw()
+        processed == selectedNodes.count
     ),
 
     /*
@@ -2653,6 +1233,273 @@ struct WallMeshCleaner_v
         )
 
         valid_angle
+        -- return
+    ),
+
+    /*
+    Returns the face-selection target for one node.
+    An Edit Poly modifier is preferred so evaluated modifier topology is tested; otherwise Editable Poly is used.
+    */
+    function getFaceSelectionTarget node =
+    (
+        target_modifier = undefined
+
+        if isValidNode node then
+        (
+            current_object = undefined
+
+            try
+            (
+                current_object = modPanel.getCurrentObject()
+            )
+            catch
+            (
+                current_object = undefined
+            )
+
+            if (current_object != undefined) and ((classOf current_object) == Edit_Poly) then
+            (
+                for modifier_value in node.modifiers while target_modifier == undefined do
+                (
+                    if modifier_value == current_object then
+                    (
+                        target_modifier = modifier_value
+                    )
+                )
+            )
+
+            if target_modifier == undefined then
+            (
+                for modifier_value in node.modifiers while target_modifier == undefined do
+                (
+                    if (classOf modifier_value) == Edit_Poly then
+                    (
+                        target_modifier = modifier_value
+                    )
+                )
+            )
+        )
+
+        if target_modifier != undefined then
+        (
+            #(#edit_poly, target_modifier)
+        )
+        else if isValidNode node and ((classOf node.baseObject) == Editable_Poly) then
+        (
+            #(#editable_poly, node.baseObject)
+        )
+        else
+        (
+            undefined
+        )
+        -- return
+    ),
+
+    /*
+    Collects faces whose vertices do not lie on one geometric plane.
+    The plane is built from a stable longest face chord and the vertex farthest from that chord.
+    */
+    function collectNonPlanarFaces node planarity_threshold:epsilon =
+    (
+        bad_faces = #{}
+        target = getFaceSelectionTarget node
+        threshold_value = amax 0.0 planarity_threshold
+
+        if target != undefined then
+        (
+            target_type = target[1]
+            target_object = target[2]
+
+            if target_type == #edit_poly then
+            (
+                face_count = target_object.GetNumFaces node:node
+            )
+            else
+            (
+                face_count = polyop.getNumFaces target_object
+            )
+
+            for face_index = 1 to face_count do
+            (
+                face_points = #()
+
+                if target_type == #edit_poly then
+                (
+                    face_degree = target_object.GetFaceDegree face_index node:node
+
+                    for corner_index = 1 to face_degree do
+                    (
+                        vert_index = target_object.GetFaceVertex face_index corner_index node:node
+                        append face_points (target_object.GetVertex vert_index node:node)
+                    )
+                )
+                else
+                (
+                    face_verts = polyop.getFaceVerts target_object face_index
+
+                    for vert_index in face_verts do
+                    (
+                        append face_points (polyop.getVert target_object vert_index)
+                    )
+                )
+
+                if face_points.count > 3 then
+                (
+                    point_a = face_points[1]
+                    point_b = undefined
+                    longest_distance_sq = 0.0
+
+                    for point_index = 2 to face_points.count do
+                    (
+                        chord_vector = face_points[point_index] - point_a
+                        chord_distance_sq = dot chord_vector chord_vector
+
+                        if chord_distance_sq > longest_distance_sq then
+                        (
+                            longest_distance_sq = chord_distance_sq
+                            point_b = face_points[point_index]
+                        )
+                    )
+
+                    if (point_b != undefined) and (longest_distance_sq > (epsilon * epsilon)) then
+                    (
+                        chord_vector = point_b - point_a
+                        best_normal = undefined
+                        best_cross_length_sq = 0.0
+
+                        for point_index = 2 to face_points.count do
+                        (
+                            candidate_vector = face_points[point_index] - point_a
+                            candidate_cross = cross chord_vector candidate_vector
+                            candidate_cross_length_sq = dot candidate_cross candidate_cross
+
+                            if candidate_cross_length_sq > best_cross_length_sq then
+                            (
+                                best_cross_length_sq = candidate_cross_length_sq
+                                best_normal = candidate_cross
+                            )
+                        )
+
+                        if (best_normal != undefined) and (best_cross_length_sq > (epsilon * epsilon * epsilon * epsilon)) then
+                        (
+                            face_normal = normalize best_normal
+                            is_non_planar = false
+
+                            for point_value in face_points while not is_non_planar do
+                            (
+                                plane_distance = abs (dot (point_value - point_a) face_normal)
+
+                                if plane_distance > threshold_value then
+                                (
+                                    is_non_planar = true
+                                )
+                            )
+
+                            if is_non_planar then
+                            (
+                                bad_faces[face_index] = true
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        bad_faces
+        -- return
+    ),
+
+    /*
+    Selects non-planar faces on selected Editable Poly objects or Edit Poly modifiers.
+    Geometry is not modified; only face selection and face sub-object mode are changed.
+    */
+    function selectNonPlanarFaces planarity_threshold:epsilon =
+    (
+        selected_nodes = selection as array
+        supported_nodes = #()
+        target_records = #()
+        total_bad_faces = 0
+
+        for node in selected_nodes do
+        (
+            target = getFaceSelectionTarget node
+
+            if target != undefined then
+            (
+                bad_faces = collectNonPlanarFaces node planarity_threshold:planarity_threshold
+                append supported_nodes node
+                append target_records #(node, target)
+                total_bad_faces += bad_faces.numberSet
+
+                if target[1] == #edit_poly then
+                (
+                    target_modifier = target[2]
+                    target_modifier.SetPrimaryNode node
+                    target_modifier.SetEPolySelLevel #Face
+                    target_modifier.SetSelection #Face bad_faces node:node
+                )
+                else
+                (
+                    polyop.setFaceSelection target[2] bad_faces
+                )
+
+                update node
+            )
+        )
+
+        if supported_nodes.count == 0 then
+        (
+            messageBox "WallMeshCleaner: Select an Editable Poly object or an object with an Edit Poly modifier."
+            false
+        )
+        else
+        (
+            try
+            (
+                select supported_nodes
+                max modify mode
+
+                first_target = target_records[1][2]
+
+                if first_target[1] == #edit_poly then
+                (
+                    modPanel.setCurrentObject first_target[2]
+                    first_target[2].SetPrimaryNode target_records[1][1]
+                    first_target[2].SetEPolySelLevel #Face
+                )
+                else
+                (
+                    modPanel.setCurrentObject first_target[2]
+                )
+
+                subObjectLevel = 4
+            )
+            catch
+            (
+            )
+
+            format "FIND NON PLANAR FACES: % selected | threshold: %\n" total_bad_faces planarity_threshold
+            completeRedraw()
+            true
+        )
+        -- return
+    ),
+
+    /*
+    Creates one warped quad for a quick non-planar-face regression test.
+    Run WallMeshCleaner.createNonPlanarFaceTest() and then press Find Non Planar Faces.
+    */
+    function createNonPlanarFaceTest =
+    (
+        test_node = plane name:"WMC_NonPlanar_TEST" length:100.0 width:100.0 lengthsegs:1 widthsegs:1
+        convertToPoly test_node
+        test_vert = polyop.getVert test_node 4
+        test_vert.z += 10.0
+        polyop.setVert test_node #{4} test_vert
+        update test_node
+        select test_node
+        completeRedraw()
+        test_node
         -- return
     ),
 
@@ -3439,7 +2286,7 @@ saved_dialog_position = WallMeshCleaner.loadDialogPosition()
 
 rollout WallMeshCleanerOptionsRollout "Options" width:310 height:142
 (
-    checkbox weld_checkbox "Weld Vertices" pos:[8,13] width:110 height:20 checked:saved_weld_enabled tooltip:"Enable vertex welding.\n\nUses Weld Threshold."
+    checkbox weld_checkbox "Weld Vertices" pos:[8,13] width:110 height:20 checked:saved_weld_enabled tooltip:"Legacy weld setting.\nSlice and Fix N-gons preserve boundaries without welding."
     label weld_threshold_label "Threshold:" pos:[140,15] width:62 height:18
     spinner weld_threshold_spinner "" pos:[200,12] width:102 height:20 \
         range:[0.0,1000000.0,saved_weld_threshold] type:#worldUnits scale:0.1 \
@@ -3494,7 +2341,7 @@ rollout WallMeshCleanerOptionsRollout "Options" width:310 height:142
     )
 )
 
-rollout WallMeshCleanerFaceSlicerRollout "Face Slicer" width:310 height:86
+rollout WallMeshCleanerFaceSlicerRollout "Face Slicer" width:310 height:136
 (
     radiobuttons cut_mode_radio "" pos:[8,8] width:243 height:20 \
         labels:#("All", "Horizontal", "Vertical") default:saved_cut_mode_index columns:3 align:#left \
@@ -3505,7 +2352,9 @@ rollout WallMeshCleanerFaceSlicerRollout "Face Slicer" width:310 height:86
         range:[0.0,45.0,saved_angle_threshold] type:#float scale:1.0 \
         tooltip:"Orientation tolerance.\n\nUnits: degrees."
 
-    button slice_button "Slice Selected Walls" pos:[8,40] width:294 height:34 tooltip:"Slice selected wall faces.\n\nAll: Vertical first, then Horizontal."
+    button slice_button "Slice Selected Walls" pos:[8,40] width:294 height:34 tooltip:"Clean redundant straight vertices and safe internal diagonals.\nPreserve boundary corners.\n\nAll: Vertical first, then Horizontal in the wall plane."
+
+    groupBox debug_group "Debug" pos:[8,82] width:294 height:42
 
     on cut_mode_radio changed state do
     (
@@ -3523,13 +2372,20 @@ rollout WallMeshCleanerFaceSlicerRollout "Face Slicer" width:310 height:86
     )
 )
 
-rollout WallMeshCleanerFaceCleanerRollout "Face Cleaner" width:310 height:60
+rollout WallMeshCleanerFaceCleanerRollout "Face Cleaner" width:310 height:102
 (
     button junction_button "Fix N-gons" pos:[8,8] width:294 height:34 tooltip:"Reduce wall N-gons.\n\nPrefer orthogonal clean cuts.\n\nRemove redundant dirty topology."
+
+    button find_non_planar_faces_button "Find Non Planar Faces" pos:[8,50] width:294 height:34 tooltip:"Find and select faces whose vertices are not coplanar.\n\nWorks on Editable Poly and Edit Poly topology.\n\nSelection only."
 
     on junction_button pressed do
     (
         ::WallMeshCleanerRollout.runFaceCleaner()
+    )
+
+    on find_non_planar_faces_button pressed do
+    (
+        ::WallMeshCleanerRollout.runNonPlanarFaceTest()
     )
 )
 
@@ -3604,10 +2460,10 @@ rollout WallMeshCleanerVertexCleanerRollout "Vertex Cleaner" width:310 height:14
     )
 )
 
-rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.54" width:344 height:594
+rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.58" width:344 height:594
 (
     button restart_button "Restart" pos:[262,6] width:74 height:22 tooltip:"Reload the matching versioned script first.\nFallback: WallMeshCleaner.ms."
-    subRollout tool_subrollout "Wall Mesh Cleaner 0.54" pos:[8,32] width:328 height:554
+    subRollout tool_subrollout "Wall Mesh Cleaner 0.58" pos:[8,32] width:328 height:554
 
     /*
     Returns the requested face-slice orientation from the Face Slicer sub-rollout.
@@ -3668,12 +2524,13 @@ rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.54" width:344 height:594
         WallMeshCleaner.setSelectionDoubleSide WallMeshCleanerOptionsRollout.double_side_checkbutton.checked
         saveUiSettings()
 
-        WallMeshCleaner.sliceSelection \
+        local completed = WallMeshCleaner.sliceSelection \
             weld_vertices:WallMeshCleanerOptionsRollout.weld_checkbox.checked \
             weld_threshold:WallMeshCleanerOptionsRollout.weld_threshold_spinner.value \
             cut_mode:(getCutMode()) \
             angle_threshold:WallMeshCleanerFaceSlicerRollout.angle_spinner.value
-        -- return
+        messageBox WallMeshCleaner.last_slice_report title:(if completed then "Wall Mesh Cleaner - Completed" else "Wall Mesh Cleaner - Could not finish")
+        completed
     )
 
     /*
@@ -3684,12 +2541,23 @@ rollout WallMeshCleanerRollout "Wall Mesh Cleaner 0.54" width:344 height:594
     (
         saveUiSettings()
 
-        WallMeshCleaner.propagateSelectionJunctionCuts \
+        local completed = WallMeshCleaner.propagateSelectionJunctionCuts \
             weld_vertices:WallMeshCleanerOptionsRollout.weld_checkbox.checked \
             weld_threshold:WallMeshCleanerOptionsRollout.weld_threshold_spinner.value \
             auto_smooth:WallMeshCleanerOptionsRollout.auto_smooth_checkbox.checked \
             cut_mode:(getCutMode()) \
             angle_threshold:WallMeshCleanerFaceSlicerRollout.angle_spinner.value
+        messageBox WallMeshCleaner.last_slice_report title:(if completed then "Wall Mesh Cleaner - Completed" else "Wall Mesh Cleaner - Could not finish")
+        completed
+    )
+
+    /*
+    Finds and selects non-planar faces without modifying geometry.
+    Edit Poly modifier topology is preferred when present; Editable Poly is the fallback.
+    */
+    function runNonPlanarFaceTest =
+    (
+        WallMeshCleaner.selectNonPlanarFaces planarity_threshold:WallMeshCleaner.epsilon
         -- return
     )
 
@@ -3858,336 +2726,3 @@ else
 (
     createDialog WallMeshCleanerRollout pos:saved_dialog_position
 )
-
-/*
-TEST CODE
-
-A. Display Hidden Edges:
-1. Select a wall object.
-2. Toggle "Display Hidden Edges".
-3. Verify Object Properties > Edges Only behavior visually.
-4. Listener equivalent:
-WallMeshCleaner.setSelectionDisplayHiddenEdges true
-WallMeshCleaner.setSelectionDisplayHiddenEdges false
-
-B. Double Side:
-1. Select a one-sided wall.
-2. Toggle "Double Side".
-3. Checked state must set object backFaceCull = false.
-4. Listener equivalent:
-WallMeshCleaner.setSelectionDoubleSide true
-WallMeshCleaner.setSelectionDoubleSide false
-
-C. Main slicer with weld enabled:
-WallMeshCleaner.sliceSelection weld_vertices:true weld_threshold:1.0
-
-Weld-only verification:
-- Make two border vertices closer than 1 system unit.
-- Select the object.
-- Run:
-WallMeshCleaner.weldSelection 1.0
-- The vertices should weld.
-- The object's previous Editable Poly weldThreshold value should be restored afterward.
-
-D. Automatic junction propagation with cleanup:
-1. Select the architectural wall object.
-2. Configure Weld Vertices + Threshold in Options.
-3. Enable Auto Smooth if wanted.
-4. Press "Fix N-gons".
-5. Expected order:
-   - Auto Smooth when checked
-   - Fix N-gons
-   - weld using the Options threshold when Weld Vertices is checked
-   - remove vertices with exactly two straight edges
-   - Auto Smooth again when checked
-5. Listener should print:
-   WallMeshCleaner: Auto Smooth before Fix N-gons...
-   WallMeshCleaner: Post Fix N-gons cleanup...
-
-Cleanup-only test:
-WallMeshCleaner.cleanupAfterNgonCut $     weld_vertices:true     weld_threshold:1.0     reapply_auto_smooth:true
-
-Verify that:
-- coincident border vertices are welded with threshold 0.0
-- vertices with exactly two collinear edges are removed
-- surrounding faces remain intact
-- Auto Smooth is reapplied when requested
-
-Listener equivalent:
-WallMeshCleaner.propagateSelectionJunctionCuts auto_smooth:true
-
-E. Connected-island protection:
-- Different disconnected walls may use the same smoothing-group mask.
-- A propagated cut must remain limited to the connected wall island containing
-  the detected junction.
-
-F. INI persistence:
-1. Rerun the script with an existing WallMeshCleaner.ini.
-   The dialog must initialize without an undefined-function error.
-2. Change Weld Vertices, Threshold, Display Hidden Edges, Double Side, Auto Smooth.
-2. Move the rollout.
-3. Close and rerun WallMeshCleaner_0.30.ms.
-4. All settings and the rollout position should be restored.
-
-INI location:
-<User Scripts>\WallMeshCleaner.ini
-*/
-
-
-/* 0.26 REGRESSION NOTES
-Use a fresh test_wall.obj import for each orientation; OBJ import can renumber vertices.
-User's Editable Poly pairs BEFORE slicing:
-Horizontal: #{9..10}, #{7..8}, #{5..6}
-Vertical: #{2,5}, #{3,6}, #{7,9}, #{8,10}
-OBJ world-Z levels: 511581.9688, 512207.7188, 513793.9688.
-OBJ world-X stations: 1220048.5, 1221966.5, 1223884.5, 1225802.5.
-Cuts must continue through both coplanar original polygons wherever wall exists.
-Internal diagonal seams must not generate further diagonal cuts.
-Clean quad-to-quad dividers may dissolve; opening and non-quad boundaries remain.
-
-Manual regression checklist:
-- Doorway, window, U-shaped connected walls, unequal wall heights.
-- Adjacent walls sharing an edge; disconnected walls reusing smoothing groups.
-- Rotate walls in XY: Horizontal remains relative to world Z.
-- Fresh copies for All, Horizontal and Vertical; test 4.9 and 5.1 degree edges.
-- Repeat with welding enabled/disabled and Auto Smooth enabled/disabled.
-- Fix N-gons removes redundant quad dividers; straight-vertex cleanup preserves faces.
-- Original material IDs restored; unselected objects unchanged.
-- Rerun with rollout open, then close/reopen and verify INI settings/position.
-*/
-
-
-/* 0.26 CLEANUP TEST NOTES (historical; superseded by 0.26 priority rules and 0.27 hidden-edge priority)
-- Cut a flat rectangle: the divider between the two resulting quads should dissolve.
-- Cut a strip of clean quads: removable new loop segments should dissolve in sequence.
-- A candidate touching a triangle, concave polygon or opening must remain.
-- Preserve boundaries between different materials, smoothing groups or noncoplanar faces.
-- Historical behavior only: 0.27 now prefers clean slice edges and may dissolve eligible old dirty edges.
-- Repeat main cuts and junction cuts; check for stale flags or accidental extra removals.
-- Verify no faces disappear and only straight two-edge endpoints are dissolved.
-- 0.22's assertion that every requested plane remains is intentionally superseded:
-  redundant quad dividers are now expected to be removed.
-*/
-
-
-/* 0.26 TEST NOTES
-- Evaluate the complete file: catch blocks must compile (bare throw).
-- Slice across an invisible polygon edge: a straight vertex with two visible
-  incident edges must dissolve even if hidden incident edges also exist.
-- Repeat with Display Hidden Edges on/off: use stored edge visibility, not viewport state.
-- Retain a bent two-edge corner, a three-visible-edge T junction, and a folded wall junction.
-- Exercise main Slice and Fix N-gons; both call the shared per-cut cleanup.
-- Verify removed vertices dissolve surrounding polygons instead of deleting wall surfaces.
-- Recheck the 0.23 redundant quad-loop cases after vertex cleanup.
-*/
-
-
-
-/* 0.26 REGRESSION NOTES
-- A straight vertex with exactly two actual polygon edges must dissolve when
-  both are visible, only one is visible, or both are hidden.
-- Test the same configurations on horizontal and vertical boundaries.
-- Vertices with additional hidden edges still require two visible straight
-  edges and coplanar incident faces; preserve bent corners and visible junctions.
-- A failed removal must not prevent cleanup of later eligible vertices.
-- Verify both per-cut cleanup and the final sweep in main and junction slicing.
-*/
-
-
-/* 0.31 BORDER-ANGLE REGRESSION
-- Test Border Angles reads polyop.getOpenEdges, so outer borders and inner opening borders are tested while internal two-face seams are ignored.
-- A clean border vertex must have exactly two border neighbors.
-- With Border Angle Threshold = 5.0 degrees, accept unsigned border-edge angles near 90 degrees or 180 degrees.
-  A geometric 270-degree reflex corner has the same unsigned two-ray angle as 90 degrees and is therefore accepted.
-- Select every border vertex that is neither orthogonal nor straight.
-- Border vertices with a border degree other than two are selected as malformed/problematic.
-
-Direct Listener test on selected supported walls:
-WallMeshCleaner.selectNonOrthoBorderVerts angle_threshold:5.0
-
-Deterministic geometry test is provided in WallMeshCleaner_TEST_0.31.ms.
-- UI regression: set Border Angle Threshold to 2.5 and reopen the tool; the value must persist independently from the slice Angle spinner.
-*/
-
-
-/* 0.29 ALL-PASS ORDER REGRESSION
-For Slice Selected Walls with Cut by edge = All:
-- Listener must print "All pass 1/2 | Vertical" before any horizontal pass message.
-- All selected supported objects complete the Vertical pass first.
-- Then Listener must print "All pass 2/2 | Horizontal" and the Horizontal pass runs.
-- Vertical clean slice edges stay protected during the Horizontal pass.
-- Horizontal mode alone still performs only horizontal slicing.
-- Vertical mode alone still performs only vertical slicing.
-*/
-
-
-/* 0.28 ORTHOGONAL-EDGE PRIORITY REGRESSION
-Use the user case containing one triangle, one polygon and one 5+ sided N-gon meeting at the middle wall vertex.
-
-Expected behavior:
-- The old internal diagonal/angled divider is dirty and lower priority than horizontal/vertical wall edges.
-- If dissolving that angled divider merges its two coplanar same-material/same-SG faces into one four-corner orthogonal region, remove it.
-- Run straight-vertex cleanup immediately afterward; the middle vertex that now lies on two collinear orthogonal edges must dissolve.
-- The expected fixed result is two orthogonal polygons with no triangle and one fewer vertex.
-- A protected clean slice edge always wins even if an older edge would otherwise be preferred.
-
-Listener test on the selected Editable Poly:
-format "Before: V=% E=% F=%\n" (polyop.getNumVerts $.baseObject) (polyop.getNumEdges $.baseObject) (polyop.getNumFaces $.baseObject)
-WallMeshCleaner.cleanupNewSliceEdges $ (bit.set 0 27 true) collect_new:false
-WallMeshCleaner.removeTwoVisibleEdgeStraightVerts $
-format "After : V=% E=% F=%\n" (polyop.getNumVerts $.baseObject) (polyop.getNumEdges $.baseObject) (polyop.getNumFaces $.baseObject)
-
-For the supplied regression topology the target is 8 vertices and 2 polygons.
-*/
-
-
-/* 0.27 HIDDEN-EDGE PRIORITY TEST
-Use a fresh import of test_wall.obj and enable Display Hidden Edges while inspecting topology.
-
-Expected cleanup behavior after every successful cut:
-- Only edges lying on the requested slice plane become new clean edges.
-- Edge fragments created by splitting an older hidden edge remain dirty.
-- When a clean cut passes through dirty hidden topology, dissolve the dirty hidden edge first.
-- If that leaves a straight valence-two vertex on the clean cut, dissolve the vertex and keep the merged edge clean.
-- A later perpendicular cut may split an earlier clean cut; both child segments must remain clean.
-- Never remove the clean cut just to preserve an older hidden/triangulation edge.
-
-Listener diagnostics after selecting one Editable Poly:
-format "Before: V=% E=% F=%\n" (polyop.getNumVerts $.baseObject) (polyop.getNumEdges $.baseObject) (polyop.getNumFaces $.baseObject)
-WallMeshCleaner.propagateAutomaticJunctionCuts $ cut_mode:#all angle_threshold:5.0
-format "After : V=% E=% F=%\n" (polyop.getNumVerts $.baseObject) (polyop.getNumEdges $.baseObject) (polyop.getNumFaces $.baseObject)
-
-Additional topology check:
-problem_verts = #{}
-for vert_index = 1 to (polyop.getNumVerts $.baseObject) do
-(
-    if WallMeshCleaner.isTwoEdgeStraightVertex $.baseObject vert_index then
-    (
-        problem_verts[vert_index] = true
-    )
-)
-format "Remaining straight 2-edge verts: %\n" problem_verts
-*/
-
-
-/* 0.26 PRIORITY REGRESSION NOTES (supersedes earlier new-divider removal tests)
-- Start with a rectangle split by an old vertical edge. Slice horizontally:
-  keep the new horizontal divider and remove eligible old vertical segments.
-- Add another cut: edges generated by earlier cuts in the same operation remain clean.
-- Preserve material, smoothing, border and noncoplanar boundaries.
-- Straight valence-two vertices can simplify a clean line; intersections with
-  additional old hidden edges must not be dissolved at the expense of that line.
-- Main slicing defers seams between tracked original faces until material IDs are
-  restored, then rechecks only old edges, preserving the new clean dividers.
-*/
-
-
-/*
-FIX ANGLES TEST CODE
-
-1. Select two connected bad-angle border vertices.
-2. LMB Fix Angles:
-   - default vertical mode
-   - higher Z endpoint moves to lower Z
-3. RMB Fix Angles:
-   - default vertical mode
-   - lower Z endpoint moves to higher Z
-4. CTRL + LMB Fix Angles:
-   - horizontal wall-plane mode
-   - higher local horizontal endpoint moves to lower local horizontal position
-   - movement stays in the wall plane
-5. CTRL + RMB Fix Angles:
-   - horizontal wall-plane mode
-   - lower local horizontal endpoint moves to higher local horizontal position
-   - movement stays in the wall plane
-
-Direct function test:
-WallMeshCleaner.fixNonOrthoBorderVerts use_high_z:false horizontal_mode:false
-WallMeshCleaner.fixNonOrthoBorderVerts use_high_z:true horizontal_mode:false
-WallMeshCleaner.fixNonOrthoBorderVerts use_high_z:false horizontal_mode:true
-WallMeshCleaner.fixNonOrthoBorderVerts use_high_z:true horizontal_mode:true
-*/
-
-
-/*
-CUT BY EDGE RADIO BUTTON TEST CODE
-
-1. Run WallMeshCleaner_0.54.ms.
-2. Face Slicer must show three radio buttons:
-   All | Horizontal | Vertical
-3. Select each radio button and verify this Listener code:
-
-format "Cut By Edge state: % | mode: %\n" \
-    WallMeshCleanerFaceSlicerRollout.cut_mode_radio.state \
-    WallMeshCleanerRollout.getCutMode()
-
-Expected mapping:
-1 = #all
-2 = #horizontal
-3 = #vertical
-
-4. Close and reopen the tool. The selected radio button must restore from
-   the existing [Settings] CutMode INI value without migration.
-*/
-
-/*
-FACE SLICER COMPACT ONE-ROW UI TEST CODE
-
-1. Open Face Slicer.
-2. There must be no visible "Cut by edge" label.
-3. Radio group must remain: All | Horizontal | Vertical.
-4. All / Horizontal / Vertical and Angle must stay on the same row.
-5. The full All label must be visible.
-6. Angle spinner must be about half its previous width (45 px).
-7. Main dialog width must remain 344 px.
-8. Face Cleaner button text must read "Fix N-gons".
-9. Verify UI control positions in Listener:
-
-format "Cut mode pos: % | Angle pos: % | Angle width: % | Dialog size: %\n" \
-    WallMeshCleanerFaceSlicerRollout.cut_mode_radio.pos \
-    WallMeshCleanerFaceSlicerRollout.angle_spinner.pos \
-    WallMeshCleanerFaceSlicerRollout.angle_spinner.width \
-    (getDialogSize WallMeshCleanerRollout)
-
-Expected:
-- Cut mode pos = [8,8]
-- Angle pos = [257,8]
-- Angle width = 45
-- Dialog width = 344
-*/
-
-/*
-RESTART FILE PRIORITY TEST CODE
-
-Listener test:
-restart_path = WallMeshCleaner.getRestartScriptPath WallMeshCleanerScriptPath
-format "Restart source: %\n" WallMeshCleanerScriptPath
-format "Restart target: %\n" restart_path
-
-Expected behavior:
-1. If WallMeshCleaner_0.54.ms exists beside the running script, restart_path must point to it.
-2. Rename or remove WallMeshCleaner_0.54.ms while WallMeshCleaner.ms exists.
-   Run the Listener test again; restart_path must point to WallMeshCleaner.ms.
-3. If neither file exists, restart_path must be undefined and pressing Restart must keep the UI open and show an error.
-*/
-
-/*
-RESTART TOP-UI LAYOUT TEST CODE
-
-1. Open WallMeshCleaner_0.54.ms.
-2. Restart must be visible at the top-right of the main UI.
-3. There must be no Restart row below Vertex Cleaner.
-4. Verify the compact layout in Listener:
-
-format "Restart pos: % | size: [% x %] | Dialog size: %\n" \
-    WallMeshCleanerRollout.restart_button.pos \
-    WallMeshCleanerRollout.restart_button.width \
-    WallMeshCleanerRollout.restart_button.height \
-    (getDialogSize WallMeshCleanerRollout)
-
-Expected:
-- Restart pos = [262,6]
-- Restart size = [74 x 22]
-- Dialog width = 344
-- Dialog height is smaller than 626 px
-*/
