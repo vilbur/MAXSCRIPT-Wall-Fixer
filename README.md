@@ -34,6 +34,8 @@ Supported input is planar, consistently oriented manifold wall geometry with val
 
 The **Edge Cleaner** rollout contains **Cleanup Redundant Loops**. The action tests evaluated Editable Poly or Edit Poly topology geometrically; smoothing-group IDs are not used.
 
+**Slice Selected Walls** runs the same cleanup automatically after each selected wall completes its slicing pipeline. A successful automatic cleanup leaves the same `FIND REDUNDANT LOOPS` / `DELETE REDUNDANT LOOPS` inspection pair as the manual Edge Cleaner action.
+
 An edge chain is accepted only when it is straight, spans border-to-border across coplanar faces, has straight and flat transverse continuations, and ends on straight border segments rather than corner vertices. Border edges, opening boundaries, material boundaries, non-manifold junctions, bent surfaces, and shape-changing continuations are preserved.
 
 When redundant loops are detected, the tool adds these modifiers in order:
@@ -55,7 +57,7 @@ Run in a disposable scene or with `3dsmaxbatch.exe`. The report is written to `t
 
 `PreSliceCleanup_TEST.ms` and `SliceCleanup_TEST.ms` are historical tests of the replaced algorithms; their welding and per-cut dissolving expectations do not apply to this pipeline.
 
-`RedundantLoopCleanup_TEST.ms` creates a planar wall with a removable straight border-to-border divider and a second wall whose divider ends at a corner. It verifies Editable Poly and existing Edit Poly workflows, the two named modifiers, stored inspection selection, `RemoveEdge` face/border preservation, and the no-modifier rejection case. Its report is written to `tests/RedundantLoopCleanup_RESULTS.txt` and must end with `ALL TESTS PASSED`.
+`RedundantLoopCleanup_TEST.ms` creates a planar wall with a removable straight border-to-border divider and a second wall whose divider ends at a corner. It verifies Editable Poly and existing Edit Poly workflows, manual and automatic Slice Selected Walls cleanup, the two named modifiers, stored inspection selection, `RemoveEdge` face/border preservation, and the no-modifier rejection case. Its report is written to `tests/RedundantLoopCleanup_RESULTS.txt` and must end with `ALL TESTS PASSED`.
 
 The test also exports native before/after geometry in `test/pipeline-window-before.obj`, `test/pipeline-window-after.obj`, and `test/pipeline-door-after.obj`. `test/pipeline-comparison.svg` shows the exported window topology. `test/pipeline-validation.json` records an independent check of the exported opening, outer boundary, edge directions, and surface area.
 

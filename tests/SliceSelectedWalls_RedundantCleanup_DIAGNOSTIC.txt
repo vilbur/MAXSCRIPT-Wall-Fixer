@@ -1,0 +1,7 @@
+AUTO result:false report:automatic-cleanup-wall: no progress in vertical mode; REMAINING INNER VERTS: #{3, 6}
+ modifiers:1
+AUTO modifier[1]: Wall topology cleanup
+AUTO pending sliced-edge cleanup: undefined
+SLICED EDGE MANUAL result:false report:automatic-cleanup-wall: no valid last-slice anchor/direction chain was found. Run Make 1 Slice first.
+MANUAL result:#(true, 0, 0, "") modifiers:1
+FINAL modifier[1]: Wall topology cleanup

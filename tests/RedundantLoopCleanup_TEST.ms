@@ -113,6 +113,17 @@ Regression protected here:
             flush report
         )
 
+        local automatic_wall = makeStraightDividerWall()
+        select automatic_wall
+
+        check (WallMeshCleaner.sliceSelection()) "Slice Selected Walls failed on the automatic-cleanup fixture."
+        check (automatic_wall.modifiers.count == 3) "Slice Selected Walls did not add its cleanup modifier plus FIND and DELETE redundant-loop modifiers."
+        check (automatic_wall.modifiers[2].name == "FIND REDUNDANT LOOPS") "Slice Selected Walls did not preserve the automatic redundant-loop inspection selection."
+        check (automatic_wall.modifiers[1].name == "DELETE REDUNDANT LOOPS") "Slice Selected Walls did not execute automatic redundant-loop removal."
+
+        format "PASS: Slice Selected Walls automatically ran redundant-loop cleanup after slicing.\n" to:report
+        flush report
+
         local corner_wall = makeCornerDividerWall()
         select corner_wall
 
