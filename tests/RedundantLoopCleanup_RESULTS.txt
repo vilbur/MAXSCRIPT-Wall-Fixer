@@ -1,0 +1,4 @@
+PASS: straight planar border-to-border redundant loop found and dissolved (existing Edit Poly:false).
+PASS: straight planar border-to-border redundant loop found and dissolved (existing Edit Poly:true).
+PASS: divider ending at a corner vertex preserved with no modifiers.
+ALL TESTS PASSED

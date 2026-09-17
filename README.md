@@ -30,6 +30,21 @@ The base object is not changed or collapsed. A failed operation restores the pre
 
 Supported input is planar, consistently oriented manifold wall geometry with valid polygon boundaries. Native n-gons containing a hole bridged by a twice-traversed internal edge are supported. Nonplanar walls, degenerate polygons, and genuinely self-intersecting boundaries are rejected rather than remodeled. Other cleaning controls retain their existing behavior.
 
+## Redundant Loop Cleanup
+
+The **Edge Cleaner** rollout contains **Cleanup Redundant Loops**. The action tests evaluated Editable Poly or Edit Poly topology geometrically; smoothing-group IDs are not used.
+
+An edge chain is accepted only when it is straight, spans border-to-border across coplanar faces, has straight and flat transverse continuations, and ends on straight border segments rather than corner vertices. Border edges, opening boundaries, material boundaries, non-manifold junctions, bent surfaces, and shape-changing continuations are preserved.
+
+When redundant loops are detected, the tool adds these modifiers in order:
+
+1. `FIND REDUNDANT LOOPS` stores the detected edge selection.
+2. `DELETE REDUNDANT LOOPS` sits above it and dissolves that selection with Edit Poly `RemoveEdge`.
+
+Disable `DELETE REDUNDANT LOOPS` and select `FIND REDUNDANT LOOPS` to inspect the original edge selection. If detection finds no valid loop, the temporary analysis modifier is removed and the object receives no new modifiers.
+
+Listener output includes every detected loop and its edge IDs, the final removed edge IDs, and useful rejection reasons for near-candidates.
+
 ## Regression test
 
 `OrthogonalPipeline_TEST.ms` builds a rectangular wall with a rectangular opening, redundant straight boundary vertices, and hidden internal diagonals. It runs against object rotations, baked rotation, pre-existing Edit Poly modifiers, and an Edit Poly over Editable Mesh (a native hole-bridged n-gon). Additional cases cover a door notch, nonuniform scale, a genuine sloping boundary, material seams, rollback of nonplanar input, single-direction cuts, and unselected-instance preservation.
@@ -39,6 +54,8 @@ Expected window-only result: **16 vertices, 24 edges, 8 rectangular polygons**; 
 Run in a disposable scene or with `3dsmaxbatch.exe`. The report is written to `test/pipeline-native-results.txt`. Success requires `ALL TESTS PASSED`; a successful Slice call alone is insufficient.
 
 `PreSliceCleanup_TEST.ms` and `SliceCleanup_TEST.ms` are historical tests of the replaced algorithms; their welding and per-cut dissolving expectations do not apply to this pipeline.
+
+`RedundantLoopCleanup_TEST.ms` creates a planar wall with a removable straight border-to-border divider and a second wall whose divider ends at a corner. It verifies Editable Poly and existing Edit Poly workflows, the two named modifiers, stored inspection selection, `RemoveEdge` face/border preservation, and the no-modifier rejection case. Its report is written to `tests/RedundantLoopCleanup_RESULTS.txt` and must end with `ALL TESTS PASSED`.
 
 The test also exports native before/after geometry in `test/pipeline-window-before.obj`, `test/pipeline-window-after.obj`, and `test/pipeline-door-after.obj`. `test/pipeline-comparison.svg` shows the exported window topology. `test/pipeline-validation.json` records an independent check of the exported opening, outer boundary, edge directions, and surface area.
 
