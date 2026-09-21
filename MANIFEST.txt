@@ -1,30 +1,69 @@
-Wall-Fixer canonical unversioned codebase
+﻿Wall-Fixer canonical codebase
+
+
+
 
 SHARED PROJECT VERSION:
-  0.29
+  0.36
+
+
+
 
 RUN:
   Wall-Fixer.ms
 
-ACTIVE RUNTIME FILES:
-  Wall-Fixer.ms                                      (file: 0.25, project: 0.29)
-  Wall-Fixer-UI.ms                                   (file: 0.25, project: 0.29; includes Get Outter Walls)
+
+
+
+LAUNCHER / DISTRIBUTION:
+  Wall-Fixer.ms                                      (file: 0.30, project: 0.36, bundled runtime)
+
+
+
+
+DEVELOPMENT SOURCE FILES:
+  Wall-Fixer-UI.ms                                   (file: 0.27, project: 0.31; includes Get Outter Walls)
   Wall-Fixer-Core.ms                                 (file: 0.22, project: 0.22)
   Wall-Fixer-Pipeline.ms                             (file: 0.22, project: 0.22)
   Straight-Edge-Fixer.ms                             (file: 0.2, project: 0.2)
 
+
+
+
+BUNDLED STARTUP:
+  Wall-Fixer.ms contains Pipeline, Core, Straight Edge Fixer and UI snapshots in load order.
+  Runtime startup does not require the separate development source files to exist locally.
+  The launcher may therefore be copied by itself into the 3ds Max scripts folder.
+
+
+
+
+CANONICAL WINDOWS REPOSITORY:
+  C:\GoogleDrive\ProgramsData\CG\3DsMax\AppData\scripts\MAXSCRIPT-Wall-Fixer\
+  C:\GoogleDrive is a link to G:\GoogleDrive.
+
+
+
+
 FACE CLASSIFIER DEVELOPMENT:
-  Runtime classifier is embedded in Wall-Fixer-UI.ms.
+  Runtime classifier is embedded in Wall-Fixer-UI.ms and in the bundled Wall-Fixer.ms.
   Face-Classifier/Wall-Fixer-Face-Classifier.ms
   Face-Classifier/Wall-Fixer-Face-Classifier_0.20.ms
 
+
+
+
 TESTS:
-  Tests/Wall-Fixer-Loader_TEST_0.02.ms
+  Run testWallFixerLoader() after Wall-Fixer.ms.
+  Tests/Wall-Fixer-Loader_TEST_0.02.ms is historical for the old multi-file loader.
   Tests/Wall-Fixer-UI_TEST_0.02.ms
+
+
+
 
 RULES:
   This Drive folder is the canonical Wall-Fixer source of truth.
-  Runtime filenames stay unversioned.
+  Runtime launcher filename stays unversioned.
   On a code change, increment the modified file version and the shared project version by 0.01.
-  Unchanged files keep their existing file/project version values.
+  Unchanged development files keep their existing file/project version values.
   The highest loaded project/tool version wins and the UI displays that global version.

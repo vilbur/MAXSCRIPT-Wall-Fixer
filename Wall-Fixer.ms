@@ -1,23 +1,31 @@
-/*
-Wall-Fixer Loader 0.25
-Loads the fixed canonical component filenames from this folder.
+﻿/*
+Wall-Fixer Bundled Loader 0.30
+Project version 0.36.
+
+
+This launcher contains the complete Wall-Fixer runtime snapshot.
+Separate component files remain development sources and are not required at startup.
 */
+
 
 global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.25"
-global wall_fixer_loader_tool_version = 0.29
+global wall_fixer_loader_file_version = "0.30"
+global wall_fixer_loader_tool_version = 0.36
+global wall_fixer_runtime_mode = #bundled
+
 
 /*
-Registers this file's shared Wall-Fixer tool version.
-Accepts legacy string or numeric global versions; the highest loaded version wins.
+Registers the bundled launcher's shared Wall-Fixer project version.
+The highest loaded project version always wins.
 */
 if wall_fixer_version_system != 1 then
 (
     wall_fixer_version_system = 1
 )
+
 
 if wall_fixer_version_epoch != 3 then
 (
@@ -25,7 +33,9 @@ if wall_fixer_version_epoch != 3 then
     WallFixerVersion = undefined
 )
 
+
 wall_fixer_loader_current_tool_version_number = undefined
+
 
 if WallFixerVersion != undefined then
 (
@@ -39,6 +49,7 @@ if WallFixerVersion != undefined then
     )
 )
 
+
 if wall_fixer_loader_current_tool_version_number == undefined then
 (
     WallFixerVersion = wall_fixer_loader_tool_version
@@ -47,6 +58,98 @@ else if wall_fixer_loader_tool_version > wall_fixer_loader_current_tool_version_
 (
     WallFixerVersion = wall_fixer_loader_tool_version
 )
+
+
+/*
+Reports bundled runtime status without probing external component files.
+Use this smoke test to verify that startup no longer depends on synced component paths.
+*/
+function testWallFixerLoader =
+(
+    format "\n============================================================\n"
+    format "WALL-FIXER BUNDLED LOADER TEST %\n" wall_fixer_loader_file_version
+    format "Runtime mode: %\n" wall_fixer_runtime_mode
+    format "Project version: %\n" WallFixerVersion
+    format "Source file: %\n" (getSourceFileName())
+    format "============================================================\n"
+
+
+    true
+    -- return
+)
+
+
+format "Wall-Fixer bundled loader %\n" wall_fixer_loader_file_version
+format "Project version: %\n" WallFixerVersion
+format "Source file: %\n" (getSourceFileName())
+
+
+/*
+Bundled dependency order:
+1. Wall-Fixer Pipeline
+2. Wall-Fixer Core
+3. Straight Edge Fixer
+4. Wall-Fixer UI
+*/
+
+
+/*
+Wall-Fixer Pipeline 0.22
+Native Edit Poly topology snapshot and wall slicing pipeline.
+Load through Wall-Fixer.ms during normal development.
+*/
+
+
+global WallFixerVersion
+global WallFixerRollout
+global wall_fixer_version_system
+global wall_fixer_version_epoch
+global wall_fixer_pipeline_file_version = "0.22"
+global wall_fixer_pipeline_tool_version = 0.22
+
+
+/*
+Registers this file's shared Wall-Fixer tool version.
+Accepts legacy string or numeric global versions; the highest loaded version wins.
+*/
+if wall_fixer_version_system != 1 then
+(
+    wall_fixer_version_system = 1
+)
+
+
+if wall_fixer_version_epoch != 3 then
+(
+    wall_fixer_version_epoch = 3
+    WallFixerVersion = undefined
+)
+
+
+wall_fixer_pipeline_current_tool_version_number = undefined
+
+
+if WallFixerVersion != undefined then
+(
+    try
+    (
+        wall_fixer_pipeline_current_tool_version_number = WallFixerVersion as float
+    )
+    catch
+    (
+        wall_fixer_pipeline_current_tool_version_number = undefined
+    )
+)
+
+
+if wall_fixer_pipeline_current_tool_version_number == undefined then
+(
+    WallFixerVersion = wall_fixer_pipeline_tool_version
+)
+else if wall_fixer_pipeline_tool_version > wall_fixer_pipeline_current_tool_version_number then
+(
+    WallFixerVersion = wall_fixer_pipeline_tool_version
+)
+
 
 if WallFixerRollout != undefined then
 (
@@ -60,77 +163,15549 @@ if WallFixerRollout != undefined then
 )
 
 
-/*
-Requires one canonical Wall-Fixer component from the supplied folder.
-Throws a descriptive error when the codebase is incomplete.
-*/
-function requireWallFixerComponent folder_path file_name =
+
+
+global WMCWallTopology
+global WMCWallSlicePipeline
+
+
+/* Native Edit Poly pipeline. All persistent topology references are positions.
+   A topology snapshot is valid only until the next Commit. */
+struct WMCWallTopology (points, validVertices, faces, validFaces, edges, validEdges, faceEdges, vertexEdges, border, materials, smoothing)
+struct WMCWallSlicePipeline
 (
-    component_path = folder_path + file_name
+    node, ep, origin, normal, horizontal, vertical, referenceWorld = undefined,
+    tolerance = 0.0001, planarTolerance = 1.0, angularTolerance = 0.1, axisTolerance = 0.1,
+    corners = #(), anchors = #(), originalBorder = #(), originalDiagonals = #(),
+    protectedSegments = #(), baseline, cuts = 0, removedEdges = 0, removedVerts = 0, uiSelection = true,
 
-    if not doesFileExist component_path then
+
+    fn refreshTopology =
     (
-        throw ("Wall-Fixer loader: missing component: " + component_path)
-    )
+        update node
+        -- Force evaluation; Edit Poly otherwise returns zero counts after Commit.
+        local evaluated = snapshotAsMesh node
+        free evaluated
+        local t = WMCWallTopology points:#() validVertices:#{} faces:#() validFaces:#{} edges:#() validEdges:#{} faceEdges:#() vertexEdges:#() border:#{} materials:#() smoothing:#()
 
-    component_path
-    -- return
+
+        /*
+        Edit Poly can keep dead sub-object slots after topology operations.
+        Indexed interface calls return undefined for those slots, so keep only live
+        Point3 values and explicitly track live vertices, edges and faces.
+        */
+        local vertex_count = ep.GetNumVertices node:node
+        if referenceWorld == undefined and vertex_count > 0 then
+        (
+            for v = 1 to vertex_count do
+            (
+                if referenceWorld == undefined then
+                (
+                    local reference_point = ep.GetVertex v node:node
+                    if reference_point != undefined then referenceWorld = reference_point
+                )
+            )
+        )
+        if referenceWorld == undefined and vertex_count > 0 then throw "Edit Poly has no valid vertex positions."
+
+
+        for v = 1 to vertex_count do
+        (
+            local vertex_point = ep.GetVertex v node:node
+            if vertex_point != undefined then
+            (
+                append t.points (vertex_point - referenceWorld)
+                t.validVertices[v] = true
+            )
+            else
+            (
+                /* Placeholder preserves Edit Poly IDs; dead slots are never used. */
+                append t.points [0,0,0]
+            )
+            append t.vertexEdges #{}
+        )
+
+
+        local edge_count = ep.GetNumEdges node:node
+        for e = 1 to edge_count do
+        (
+            local a = ep.GetEdgeVertex e 1 node:node
+            local b = ep.GetEdgeVertex e 2 node:node
+            local f = ep.GetEdgeFace e 1 node:node
+            local g = ep.GetEdgeFace e 2 node:node
+            local edge_valid = true
+
+
+            if a == undefined or b == undefined or f == undefined or g == undefined then edge_valid = false
+            if edge_valid then
+            (
+                if a < 1 or b < 1 or a > vertex_count or b > vertex_count then edge_valid = false
+            )
+            if edge_valid then
+            (
+                if not t.validVertices[a] or not t.validVertices[b] then edge_valid = false
+            )
+
+
+            if edge_valid then
+            (
+                append t.edges #(a,b,f,g)
+                t.validEdges[e] = true
+                t.vertexEdges[a][e] = true
+                t.vertexEdges[b][e] = true
+            )
+            else
+            (
+                append t.edges #(0,0,0,0)
+            )
+        )
+
+
+        local face_count = ep.GetNumFaces node:node
+        for f = 1 to face_count do
+        (
+            local vs = #()
+            local es = #{}
+            local degree = ep.GetFaceDegree f node:node
+            local face_valid = true
+
+
+            if degree == undefined then
+            (
+                face_valid = false
+            )
+            else if degree < 3 then
+            (
+                face_valid = false
+            )
+
+
+            if face_valid then
+            (
+                for k = 1 to degree while face_valid do
+                (
+                    local face_vertex = ep.GetFaceVertex f k node:node
+                    local face_edge = ep.GetFaceEdge f k node:node
+                    if face_vertex == undefined or face_edge == undefined then
+                    (
+                        face_valid = false
+                    )
+                    else if face_vertex < 1 or face_vertex > vertex_count or face_edge < 1 or face_edge > edge_count then
+                    (
+                        face_valid = false
+                    )
+                    else if not t.validVertices[face_vertex] or not t.validEdges[face_edge] then
+                    (
+                        face_valid = false
+                    )
+                    else
+                    (
+                        append vs face_vertex
+                        es[face_edge] = true
+                    )
+                )
+            )
+
+
+            if face_valid then
+            (
+                append t.faces vs
+                append t.faceEdges es
+                t.validFaces[f] = true
+                local face_material = ep.GetFaceMaterial f node:node
+                local face_smoothing = ep.GetFaceSmoothingGroups f node:node
+                append t.materials (if face_material == undefined then 0 else face_material)
+                append t.smoothing (if face_smoothing == undefined then 0 else face_smoothing)
+            )
+            else
+            (
+                append t.faces #()
+                append t.faceEdges #{}
+                append t.materials 0
+                append t.smoothing 0
+            )
+        )
+
+
+        /* Normalize edge face references against live faces and discard dead edges. */
+        t.border = #{}
+        for e in t.validEdges do
+        (
+            local rec = t.edges[e]
+            local f = rec[3]
+            local g = rec[4]
+            local live_f = 0
+            local live_g = 0
+            if f != undefined then
+            (
+                if f > 0 and f <= face_count then if t.validFaces[f] then live_f = f
+            )
+            if g != undefined then
+            (
+                if g > 0 and g <= face_count then if t.validFaces[g] then live_g = g
+            )
+
+
+            if live_f == 0 and live_g == 0 then
+            (
+                t.validEdges[e] = false
+                t.vertexEdges[rec[1]][e] = false
+                t.vertexEdges[rec[2]][e] = false
+                t.edges[e] = #(0,0,0,0)
+            )
+            else
+            (
+                t.edges[e] = #(rec[1],rec[2],live_f,live_g)
+                if (live_f == 0) != (live_g == 0) then t.border[e] = true
+            )
+        )
+
+
+        if vertex_count != t.validVertices.numberSet or edge_count != t.validEdges.numberSet or face_count != t.validFaces.numberSet then
+        (
+            format "Wall-Fixer Topology Snapshot: raw verts/edges/faces:%/%/% live:%/%/% dead:%/%/%\n" \
+                vertex_count edge_count face_count \
+                t.validVertices.numberSet t.validEdges.numberSet t.validFaces.numberSet \
+                (vertex_count - t.validVertices.numberSet) (edge_count - t.validEdges.numberSet) (face_count - t.validFaces.numberSet)
+        )
+        if t.validVertices.numberSet == 0 then throw "Edit Poly has no live vertices."
+        if t.validEdges.numberSet == 0 then throw "Edit Poly has no live edges."
+        if t.validFaces.numberSet == 0 then throw "Edit Poly has no live faces."
+        t
+    ),
+    fn faceVector t f =
+    (
+        if f < 1 or f > t.faces.count or not t.validFaces[f] then return [0,0,0]
+        local vs = t.faces[f]
+        if vs.count < 3 then return [0,0,0]
+        local result = [0,0,0]
+        local p = t.points[vs[1]]
+        for k = 1 to vs.count do
+        (
+            local j = if k == vs.count then 1 else k+1
+            result += cross (t.points[vs[k]]-p) (t.points[vs[j]]-p)
+        )
+        result * 0.5
+    ),
+    fn segment t e = #(t.points[t.edges[e][1]], t.points[t.edges[e][2]]),
+    fn edgeKind t e =
+    (
+        local s = segment t e
+        local d = s[2]-s[1]
+        if length d <= tolerance then #degenerate
+        else
+        (
+            d = normalize d
+            if abs(dot d horizontal) >= cos axisTolerance then #horizontal
+            else if abs(dot d vertical) >= cos axisTolerance then #vertical
+            else #diagonal
+        )
+    ),
+    fn onSegment p a b =
+    (
+        local d = b-a
+        local len = length d
+        if len <= tolerance then distance p a <= tolerance
+        else
+        (
+            local along = dot (p-a) (d/len)
+            along >= -tolerance and along <= len+tolerance and
+                length ((p-a)-(d/len)*along) <= tolerance
+        )
+    ),
+    fn covered s segments =
+    (
+        local d = s[2]-s[1]
+        local len = length d
+        if len <= tolerance then return false
+        d /= len
+        local intervals = #()
+        for other in segments do
+        (
+            local a = dot (other[1]-s[1]) d
+            local b = dot (other[2]-s[1]) d
+            if length ((other[1]-s[1])-d*a) <= tolerance and length ((other[2]-s[1])-d*b) <= tolerance do
+                append intervals #(amin a b, amax a b)
+        )
+        fn compareIntervals a b = (if a[1] < b[1] then -1 else if a[1] > b[1] then 1 else 0)
+        qsort intervals compareIntervals
+        local reach = 0.0
+        for interval in intervals do
+            if interval[1] <= reach+tolerance and interval[2] >= -tolerance do reach = amax reach interval[2]
+        reach >= len-tolerance
+    ),
+    /*
+    Returns a precision-aware tolerance used only when validating preserved geometry.
+    Large world coordinates lose sub-unit precision in Edit Poly world-space vertex queries.
+    */
+    function getBoundaryValidationTolerance =
+    (
+        local world_scale = 0.0
+        if referenceWorld != undefined then
+        (
+            world_scale = amax (abs referenceWorld.x) (abs referenceWorld.y)
+            world_scale = amax world_scale (abs referenceWorld.z)
+        )
+        amax tolerance (world_scale * 0.000001)
+        -- return
+    ),
+    /*
+    Tests whether a segment is fully represented by collinear result segments.
+    Uses an explicit validation tolerance without changing slice/intersection tolerance.
+    */
+    function coveredAtTolerance s segments match_tolerance =
+    (
+        local d = s[2]-s[1]
+        local len = length d
+        if len <= match_tolerance then return false
+        d /= len
+        local intervals = #()
+        for other in segments do
+        (
+            local a = dot (other[1]-s[1]) d
+            local b = dot (other[2]-s[1]) d
+            if length ((other[1]-s[1])-d*a) <= match_tolerance and length ((other[2]-s[1])-d*b) <= match_tolerance then
+            (
+                append intervals #(amin a b, amax a b)
+            )
+        )
+        function compareValidationIntervals a b =
+        (
+            if a[1] < b[1] then -1 else if a[1] > b[1] then 1 else 0
+            -- return
+        )
+        qsort intervals compareValidationIntervals
+        local reach = 0.0
+        for interval in intervals do
+        (
+            if interval[1] <= reach+match_tolerance and interval[2] >= -match_tolerance then
+            (
+                reach = amax reach interval[2]
+            )
+        )
+        reach >= len-match_tolerance
+        -- return
+    ),
+    fn hasPoint t p =
+    (
+        for vertex_index in t.validVertices do
+        (
+            if distance p t.points[vertex_index] <= tolerance then return true
+        )
+        false
+        -- return
+    ),
+    fn isStraight a p b =
+    (
+        local u = a-p
+        local v = b-p
+        if length u <= tolerance or length v <= tolerance then false
+        else (dot (normalize u) (normalize v) <= -(cos angularTolerance)) and (onSegment p a b)
+    ),
+    fn otherVertex t e v = (if t.edges[e][1] == v then t.edges[e][2] else t.edges[e][1]),
+    fn collectCornerVertices t =
+    (
+        local result = #()
+        for v in t.validVertices do
+        (
+            local borderEdges = (t.vertexEdges[v] * t.border) as array
+            if borderEdges.count > 0 do
+            (
+                if borderEdges.count != 2 do throw "Non-manifold wall boundary."
+                local a = otherVertex t borderEdges[1] v
+                local b = otherVertex t borderEdges[2] v
+                if not (isStraight t.points[a] t.points[v] t.points[b]) do append result t.points[v]
+            )
+        )
+        result
+    ),
+    fn setFrame t =
+    (
+        if t.validFaces.numberSet == 0 then throw "The evaluated Edit Poly has no live faces."
+        local first_face = (t.validFaces as array)[1]
+        origin = t.points[t.faces[first_face][1]]
+        local n = faceVector t first_face
+        if length n <= tolerance*tolerance do throw "Degenerate input face."
+        normal = normalize n
+        vertical = [0,0,1] - normal * (dot normal [0,0,1])
+        if length vertical < 0.00001 then
+        (
+            -- A horizontal planar input has no gravity-based up direction.
+            -- Use its longest boundary edge for a stable in-plane orientation.
+            local longest = [0,0,0]
+            for e in t.border do
+            (
+                local s = segment t e
+                if length(s[2]-s[1]) > length longest do longest = s[2]-s[1]
+            )
+            if length longest <= tolerance do throw "No usable boundary direction."
+            horizontal = normalize longest
+            vertical = normalize(cross normal horizontal)
+        )
+        else
+        (
+            vertical = normalize vertical
+            horizontal = normalize(cross vertical normal)
+        )
+        true
+    ),
+    fn areaByMaterial t =
+    (
+        local result = #()
+        for f in t.validFaces do
+        (
+            local key = #(t.materials[f],t.smoothing[f])
+            local entry = 0
+            for j = 1 to result.count do if result[j][1][1] == key[1] and result[j][1][2] == key[2] do entry = j
+            if entry == 0 then append result #(key,length(faceVector t f))
+            else result[entry][2] += length(faceVector t f)
+        )
+        result
+    ),
+    fn orient2 a b c = ((b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x)),
+    fn projected p = [dot(p-origin) horizontal,dot(p-origin) vertical,0],
+    fn simpleFace t vs =
+    (
+        if (vs as bitarray).numberSet != vs.count do return false
+        -- Reject crossings, including overlapping nonadjacent polygon edges.
+        for i = 1 to vs.count do for j = i+1 to vs.count do
+        (
+            local ni = if i == vs.count then 1 else i+1
+            local nj = if j == vs.count then 1 else j+1
+            if ni != j and nj != i do
+            (
+                local a = projected t.points[vs[i]]
+                local b = projected t.points[vs[ni]]
+                local c = projected t.points[vs[j]]
+                local d = projected t.points[vs[nj]]
+                local abC = orient2 a b c
+                local abD = orient2 a b d
+                local cdA = orient2 c d a
+                local cdB = orient2 c d b
+                if abC*abD < 0 and cdA*cdB < 0 do return false
+                if onSegment c a b or onSegment d a b or onSegment a c d or onSegment b c d do return false
+            )
+        )
+        true
+    ),
+    /* MNMesh can encode a polygon with a hole by traversing an internal
+       bridge twice, in opposite directions. This is not a self-intersection.
+       Accept only these native bridges; actual crossings and pinches fail. */
+    fn validFaceBoundary t f =
+    (
+        local vs = t.faces[f]
+        if simpleFace t vs do return true
+        local bridges = #{}
+        for e in t.faceEdges[f] do
+        (
+            local rec = t.edges[e]
+            if rec[3] == f and rec[4] == f do
+            (
+                local forwardCount = 0
+                local reverseCount = 0
+                for k=1 to vs.count do
+                (
+                    local next = if k == vs.count then 1 else k+1
+                    if vs[k] == rec[1] and vs[next] == rec[2] do forwardCount += 1
+                    if vs[k] == rec[2] and vs[next] == rec[1] do reverseCount += 1
+                )
+                if forwardCount != 1 or reverseCount != 1 do return false
+                bridges[e] = true
+            )
+        )
+        if bridges.numberSet == 0 do return false
+        for v in (vs as bitarray) do
+        (
+            local occurrences = 0
+            for candidate in vs do if candidate == v do occurrences += 1
+            if occurrences != 1+(t.vertexEdges[v]*bridges).numberSet do return false
+        )
+        for i=1 to vs.count do for j=i+1 to vs.count do
+        (
+            local ni = if i == vs.count then 1 else i+1
+            local nj = if j == vs.count then 1 else j+1
+            if ni != j and nj != i and not(vs[i] == vs[nj] and vs[ni] == vs[j]) do
+            (
+                local a = projected t.points[vs[i]]
+                local b = projected t.points[vs[ni]]
+                local c = projected t.points[vs[j]]
+                local d = projected t.points[vs[nj]]
+                if (orient2 a b c)*(orient2 a b d) < 0 and (orient2 c d a)*(orient2 c d b) < 0 do return false
+                if vs[j] != vs[i] and vs[j] != vs[ni] and onSegment c a b do return false
+                if vs[nj] != vs[i] and vs[nj] != vs[ni] and onSegment d a b do return false
+                if vs[i] != vs[j] and vs[i] != vs[nj] and onSegment a c d do return false
+                if vs[ni] != vs[j] and vs[ni] != vs[nj] and onSegment b c d do return false
+            )
+        )
+        true
+    ),
+    fn validateStructure t =
+    (
+        if t.validFaces.numberSet == 0 then throw "The wall lost all faces."
+        for vertex_index in t.validVertices do
+        (
+            if abs(dot(t.points[vertex_index]-origin) normal) > planarTolerance then throw "Input/result is not one planar wall."
+        )
+        local used = #{}
+        for f in t.validFaces do
+        (
+            local vs = t.faces[f]
+            if vs.count < 3 do throw "Invalid polygon degree."
+            if not(validFaceBoundary t f) do throw "Self-intersecting or invalid polygon boundary."
+            -- Face winding is not a planarity failure. Reject only truly degenerate zero-area faces.
+            if length(faceVector t f) <= tolerance*tolerance do throw "Zero-area polygon."
+            for v in vs do used[v] = true
+        )
+        if used.numberSet != t.validVertices.numberSet do throw "Isolated vertices in topology."
+        for e in t.validEdges do
+        (
+            local rec = t.edges[e]
+            if rec[1] < 1 or rec[2] < 1 or (rec[3] == 0 and rec[4] == 0) do throw "Isolated/invalid edge."
+            if distance t.points[rec[1]] t.points[rec[2]] <= tolerance do throw "Zero-length edge."
+            -- Same-face bridge incidence was checked by validFaceBoundary.
+            for f in #(rec[3],rec[4]) where f > 0 do
+            (
+                if not t.validFaces[f] then throw "Edge references a dead face."
+                if not t.faceEdges[f][e] then throw "Invalid face-edge adjacency."
+            )
+        )
+        collectCornerVertices t -- Also validates the outer and opening border degree.
+        true
+    ),
+    fn canRemoveVertex t v =
+    (
+        local incident = t.vertexEdges[v] as array
+        if incident.count != 2 do return false
+        for p in corners do if distance p t.points[v] <= tolerance do return false
+        local a = otherVertex t incident[1] v
+        local b = otherVertex t incident[2] v
+        if not(isStraight t.points[a] t.points[v] t.points[b]) do return false
+        for f in t.validFaces where findItem t.faces[f] v > 0 do
+            if t.faces[f].count <= 3 do return false
+        true
+    ),
+    fn uvContinuous t e =
+    (
+        local rec = t.edges[e]
+        for channel = -2 to (ep.GetNumMapChannels node:node)-1 do
+            if ep.GetMapChannelActive channel node:node do
+                for v in #(rec[1],rec[2]) do
+                (
+                    local values = #()
+                    for f in #(rec[3],rec[4]) do
+                    (
+                        local k = findItem t.faces[f] v
+                        local mv = ep.GetMapFaceVert channel f k node:node
+                        append values (ep.GetMapVertex channel mv node:node)
+                    )
+                    if distance values[1] values[2] > 0.000001 do return false
+                )
+        true
+    ),
+    fn canRemoveDiagonal t e =
+    (
+        local rec = t.edges[e]
+        local a = rec[3]
+        local b = rec[4]
+        if a == 0 or b == 0 or a == b then return false
+        if not t.validFaces[a] or not t.validFaces[b] then return false
+        if edgeKind t e != #diagonal then return false
+        local s = segment t e
+        local old = false
+        for stored in originalDiagonals do
+            if onSegment s[1] stored[1] stored[2] and onSegment s[2] stored[1] stored[2] do old = true
+        if not old do return false
+        if t.materials[a] != t.materials[b] or t.smoothing[a] != t.smoothing[b] do return false
+        if (t.faceEdges[a]*t.faceEdges[b]).numberSet != 1 do return false
+        -- Exactly two common vertices and one shared edge: their union is a disk,
+        -- not a ring around an opening or a pair touching at another corner.
+        if ((t.faces[a] as bitarray)*(t.faces[b] as bitarray)).numberSet != 2 do return false
+        if not(uvContinuous t e) do return false
+        -- Walk the conceptual union once; refuse multiple loops or crossings.
+        local boundaryEdges = (t.faceEdges[a]+t.faceEdges[b])-#{e}
+        local remaining = copy boundaryEdges
+        local loop = #(rec[1])
+        local current = rec[1]
+        while remaining.numberSet > 0 do
+        (
+            local candidates = (t.vertexEdges[current]*remaining) as array
+            if candidates.count == 0 do return false
+            local nextEdge = candidates[1]
+            remaining[nextEdge] = false
+            current = otherVertex t nextEdge current
+            if current != loop[1] then append loop current
+            else if remaining.numberSet > 0 do return false
+        )
+        current == loop[1] and simpleFace t loop
+    ),
+    fn validateCleanTopology t final:false =
+    (
+        validateStructure t
+        local boundary_tolerance = getBoundaryValidationTolerance()
+        local borderSegments = for e in t.border collect segment t e
+        for i = 1 to originalBorder.count do
+        (
+            local s = originalBorder[i]
+            if not(coveredAtTolerance s borderSegments boundary_tolerance) then
+            (
+                format "Wall-Fixer Boundary Debug: original segment:%  A:%  B:%  topologyTolerance:%  boundaryTolerance:%  planarTolerance:%\n" i s[1] s[2] tolerance boundary_tolerance planarTolerance
+                throw ("Original wall/opening boundary changed at original segment " + (i as string) + ".")
+            )
+        )
+        for i = 1 to borderSegments.count do
+        (
+            local s = borderSegments[i]
+            if not(coveredAtTolerance s originalBorder boundary_tolerance) then
+            (
+                format "Wall-Fixer Boundary Debug: unexpected segment:%  A:%  B:%  topologyTolerance:%  boundaryTolerance:%  planarTolerance:%\n" i s[1] s[2] tolerance boundary_tolerance planarTolerance
+                throw ("Unexpected wall/opening boundary at result segment " + (i as string) + ".")
+            )
+        )
+        for p in corners do if not(hasPoint t p) do throw "An original corner was lost."
+        if (t.validVertices.numberSet-t.validEdges.numberSet+t.validFaces.numberSet) != baseline[1] do throw "Wall/opening topology changed (Euler characteristic)."
+        local areas = areaByMaterial t
+        if areas.count != baseline[2].count do throw "Material/smoothing regions changed."
+        for old in baseline[2] do
+        (
+            local found = false
+            for current in areas do if old[1][1] == current[1][1] and old[1][2] == current[1][2] do
+                found = abs(old[2]-current[2]) <= amax (old[2]*0.00001) (tolerance*tolerance*10)
+            if not found do throw "Wall surface area or material/smoothing boundary changed."
+        )
+        local allSegments = for e in t.validEdges collect segment t e
+        for s in protectedSegments do if not(coveredAtTolerance s allSegments boundary_tolerance) do throw "An intentional orthogonal edge was lost."
+        if final do
+        (
+            for v in t.validVertices do if canRemoveVertex t v do throw "A safely removable collinear vertex remains."
+            for e in t.validEdges do if canRemoveDiagonal t e then throw "A safely removable internal diagonal remains."
+        )
+        true
+    ),
+    fn applyOperation level ids operation =
+    (
+        ep.SetEPolySelLevel level
+        refreshTopology()
+        ep.SetSelection level #{} node:node
+        local selectedOK = ep.Select level ids node:node
+        if not selectedOK or (ep.GetSelection level node:node) != ids do throw ("Edit Poly selection failed for " + (level as string) + " result=" + (selectedOK as string) + " requested=" + (ids as string) + " actual=" + ((ep.GetSelection level node:node) as string))
+        ep.SetOperation operation
+        ep.Commit()
+        refreshTopology()
+    ),
+    fn cleanCollinearVertices =
+    (
+        local t = refreshTopology()
+        local changed = true
+        while changed do
+        (
+            changed = false
+            for v in t.validVertices while not changed do if canRemoveVertex t v do
+            (
+                local countBefore = t.validVertices.numberSet
+                t = applyOperation #Vertex #{v} #RemoveVertex
+                if t.validVertices.numberSet != countBefore-1 do throw "Edit Poly did not remove exactly one straight vertex."
+                validateCleanTopology t
+                removedVerts += 1
+                changed = true
+            )
+        )
+        t
+    ),
+    fn componentAt t p =
+    (
+        local result = #{}
+        local queue = #()
+        for v in t.validVertices do if distance t.points[v] p <= tolerance do
+            for e in t.vertexEdges[v] do if t.validEdges[e] then for f in #(t.edges[e][3],t.edges[e][4]) where f > 0 do
+                if t.validFaces[f] and not result[f] then (result[f] = true; append queue f)
+        local i = 1
+        while i <= queue.count do
+        (
+            local f = queue[i]
+            i += 1
+            for e in t.faceEdges[f] do if t.validEdges[e] then for g in #(t.edges[e][3],t.edges[e][4]) where g > 0 do
+                if t.validFaces[g] and not result[g] then (result[g] = true; append queue g)
+        )
+        result
+    ),
+    /*
+    Collects boundary corner anchors used by the wall slicer.
+    An anchor must connect one horizontal and one vertical border edge.
+    */
+    function collectCutAnchors t =
+    (
+        anchors = #()
+        for v in t.validVertices do
+        (
+            local es = (t.vertexEdges[v]*t.border) as array
+            if es.count == 2 then
+            (
+                local k1 = edgeKind t es[1]
+                local k2 = edgeKind t es[2]
+                if (k1 == #horizontal and k2 == #vertical) or (k1 == #vertical and k2 == #horizontal) then
+                (
+                    append anchors t.points[v]
+                )
+            )
+        )
+        anchors
+        -- return
+    ),
+    /*
+    Initializes non-destructive mesh data required by debug and slice operations.
+    No topology change is performed by this function.
+    */
+    function prepareSliceAnalysis =
+    (
+        local t = refreshTopology()
+        setFrame t
+        validateStructure t
+        corners = collectCornerVertices t
+        originalBorder = for e in t.border collect segment t e
+        originalDiagonals = for e in t.validEdges where not t.border[e] and edgeKind t e == #diagonal collect segment t e
+        protectedSegments = for e in t.validEdges where edgeKind t e != #diagonal collect segment t e
+        baseline = #(t.validVertices.numberSet-t.validEdges.numberSet+t.validFaces.numberSet,areaByMaterial t)
+        collectCutAnchors t
+        t
+        -- return
+    ),
+    /*
+    Validates the current evaluated wall without modifying topology.
+    Returns compact mesh statistics for the Debug report.
+    */
+    function checkMesh =
+    (
+        local t = prepareSliceAnalysis()
+        #(t.validVertices.numberSet,t.validEdges.numberSet,t.validFaces.numberSet,t.border.numberSet,corners.count,anchors.count)
+        -- return
+    ),
+    /*
+    Builds a vertex BitArray for all currently detected slice anchors.
+    Anchor positions are remapped to the current topology snapshot.
+    */
+    function getSliceAnchorVertexSelection =
+    (
+        local t = refreshTopology()
+        local anchor_vertices = #{}
+        for anchor in anchors do
+        (
+            local best_vertex = 0
+            local best_distance = 1e30
+            for v in t.validVertices do
+            (
+                local current_distance = distance t.points[v] anchor
+                if current_distance < best_distance then
+                (
+                    best_distance = current_distance
+                    best_vertex = v
+                )
+            )
+            if best_vertex > 0 and best_distance <= tolerance then
+            (
+                anchor_vertices[best_vertex] = true
+            )
+        )
+        anchor_vertices
+        -- return
+    ),
+    /*
+    Collects closed border loops as ordered vertex-index arrays.
+    The validated wall boundary guarantees two border edges at each border vertex.
+    */
+    function collectBorderLoops t =
+    (
+        local remaining_edges = copy t.border
+        local loops = #()
+        while remaining_edges.numberSet > 0 do
+        (
+            local start_edge = (remaining_edges as array)[1]
+            local start_vertex = t.edges[start_edge][1]
+            local current_vertex = start_vertex
+            local current_edge = start_edge
+            local loop_vertices = #()
+            local closed = false
+            local safety = 0
+            while not closed and safety <= t.validEdges.numberSet do
+            (
+                safety += 1
+                append loop_vertices current_vertex
+                remaining_edges[current_edge] = false
+                local next_vertex = otherVertex t current_edge current_vertex
+                if next_vertex == start_vertex then
+                (
+                    closed = true
+                )
+                else
+                (
+                    local next_edges = (t.vertexEdges[next_vertex] * t.border) as array
+                    if next_edges.count != 2 then throw "Non-manifold wall boundary."
+                    local next_edge = if next_edges[1] == current_edge then next_edges[2] else next_edges[1]
+                    current_vertex = next_vertex
+                    current_edge = next_edge
+                )
+            )
+            if not closed then throw "Cannot trace closed wall boundary."
+            append loops loop_vertices
+        )
+        loops
+        -- return
+    ),
+    /*
+    Returns signed projected area of one border loop in the current wall frame.
+    Only absolute area is used to distinguish the outer boundary from openings.
+    */
+    function borderLoopArea t loop_vertices =
+    (
+        local area = 0.0
+        for i = 1 to loop_vertices.count do
+        (
+            local j = if i == loop_vertices.count then 1 else i + 1
+            local p1 = t.points[loop_vertices[i]] - origin
+            local p2 = t.points[loop_vertices[j]] - origin
+            local x1 = dot p1 horizontal
+            local y1 = dot p1 vertical
+            local x2 = dot p2 horizontal
+            local y2 = dot p2 vertical
+            area += x1 * y2 - x2 * y1
+        )
+        area * 0.5
+        -- return
+    ),
+    /*
+    Selects wall-inner corner vertices on all boundary loops.
+    Opening-loop corners are included, plus concave/re-entrant corners on the outer border.
+    */
+    function getInnerCornerVertexSelection =
+    (
+        local t = refreshTopology()
+        local loops = collectBorderLoops t
+        local result = #{}
+        if loops.count == 0 then return result
+
+
+        local outer_index = 1
+        local outer_signed_area = borderLoopArea t loops[1]
+        local outer_area = abs(outer_signed_area)
+        for i = 2 to loops.count do
+        (
+            local current_signed_area = borderLoopArea t loops[i]
+            local current_area = abs(current_signed_area)
+            if current_area > outer_area then
+            (
+                outer_area = current_area
+                outer_signed_area = current_signed_area
+                outer_index = i
+            )
+        )
+
+
+        for i = 1 to loops.count do
+        (
+            local loop_vertices = loops[i]
+            local loop_signed_area = borderLoopArea t loop_vertices
+            local loop_orientation = if loop_signed_area >= 0.0 then 1.0 else -1.0
+
+
+            for j = 1 to loop_vertices.count do
+            (
+                local v = loop_vertices[j]
+                local border_edges = (t.vertexEdges[v] * t.border) as array
+                if border_edges.count == 2 then
+                (
+                    local a = otherVertex t border_edges[1] v
+                    local b = otherVertex t border_edges[2] v
+                    if not(isStraight t.points[a] t.points[v] t.points[b]) then
+                    (
+                        if i != outer_index then
+                        (
+                            result[v] = true
+                        )
+                        else
+                        (
+                            local previous_index = if j == 1 then loop_vertices.count else j - 1
+                            local next_index = if j == loop_vertices.count then 1 else j + 1
+                            local previous_vertex = loop_vertices[previous_index]
+                            local next_vertex = loop_vertices[next_index]
+                            local p0 = t.points[previous_vertex] - origin
+                            local p1 = t.points[v] - origin
+                            local p2 = t.points[next_vertex] - origin
+                            local x0 = dot p0 horizontal
+                            local y0 = dot p0 vertical
+                            local x1 = dot p1 horizontal
+                            local y1 = dot p1 vertical
+                            local x2 = dot p2 horizontal
+                            local y2 = dot p2 vertical
+                            local turn_cross = ((x1 - x0) * (y2 - y1)) - ((y1 - y0) * (x2 - x1))
+                            if (turn_cross * loop_orientation) < -tolerance then result[v] = true
+                        )
+                    )
+                )
+            )
+        )
+        result
+        -- return
+    ),
+    /*
+    Finds redundant vertices created where the last debug slice crossed invisible triangulation edges.
+    New vertices lying on the slice line are kept only when they also lie on an original explicit polygon edge.
+    */
+    function findRedundantSliceVertices original_points original_segments slice_anchor slice_axis =
+    (
+        local t = refreshTopology()
+        local result = #{}
+        local match_tolerance = getBoundaryValidationTolerance()
+
+
+        function pointMatchesOriginal point_value points_array comparison_tolerance =
+        (
+            for original_point in points_array do
+            (
+                if distance point_value original_point <= comparison_tolerance then return true
+            )
+            false
+            -- return
+        )
+
+
+        function pointOnOriginalSegment point_value segments_array comparison_tolerance =
+        (
+            for original_segment in segments_array do
+            (
+                local a = original_segment[1]
+                local b = original_segment[2]
+                local d = b - a
+                local segment_length = length d
+                if segment_length > comparison_tolerance then
+                (
+                    local direction = d / segment_length
+                    local along = dot (point_value - a) direction
+                    local offset = length ((point_value - a) - (direction * along))
+                    if along >= -comparison_tolerance and along <= segment_length + comparison_tolerance and offset <= comparison_tolerance then return true
+                )
+            )
+            false
+            -- return
+        )
+
+
+        for v in t.validVertices do
+        (
+            local point_value = t.points[v]
+            if abs(dot (point_value - slice_anchor) slice_axis) <= match_tolerance then
+            (
+                if not(pointMatchesOriginal point_value original_points match_tolerance) and not(pointOnOriginalSegment point_value original_segments match_tolerance) then
+                (
+                    local slice_neighbor_count = 0
+                    for edge_index in t.vertexEdges[v] do
+                    (
+                        local other_vertex = otherVertex t edge_index v
+                        local other_point = t.points[other_vertex]
+                        if abs(dot (other_point - slice_anchor) slice_axis) <= match_tolerance then
+                        (
+                            slice_neighbor_count += 1
+                        )
+                    )
+                    if slice_neighbor_count >= 2 then result[v] = true
+                )
+            )
+        )
+        result
+        -- return
+    ),
+
+
+    /*
+    Finds new non-border edges created by the debug slice.
+    Border edges are always excluded because a border cannot be a sliced interior edge.
+    */
+    function findNewEdges original_segments =
+    (
+        local t = refreshTopology()
+        local result = #{}
+        local match_tolerance = getBoundaryValidationTolerance()
+
+
+        for edge_index in t.validEdges do
+        (
+            if not t.border[edge_index] then
+            (
+                local current_segment = segment t edge_index
+                local existed_before = false
+                for original_segment in original_segments while not existed_before do
+                (
+                    local same_forward = distance current_segment[1] original_segment[1] <= match_tolerance and distance current_segment[2] original_segment[2] <= match_tolerance
+                    local same_reverse = distance current_segment[1] original_segment[2] <= match_tolerance and distance current_segment[2] original_segment[1] <= match_tolerance
+                    if same_forward or same_reverse then existed_before = true
+                )
+                if not existed_before then result[edge_index] = true
+            )
+        )
+        result
+        -- return
+    ),
+    /*
+    Finds the current vertex index matching a preserved corner position.
+    The nearest evaluated vertex is returned so topology refreshes do not invalidate stored indices.
+    */
+    function findVertexAtPoint t point_value =
+    (
+        local best_vertex = 0
+        local best_distance = 1e30
+
+
+        for vertex_index in t.validVertices do
+        (
+            local current_distance = distance t.points[vertex_index] point_value
+            if current_distance < best_distance then
+            (
+                best_distance = current_distance
+                best_vertex = vertex_index
+            )
+        )
+
+
+        best_vertex
+        -- return
+    ),
+
+
+    /*
+    Builds one slice-plane definition from either the global wall frame or a corner plus its next border vertex.
+    Returns plane normal axis, defining vertex selection and the optional second defining vertex.
+    */
+    function getSlicePlaneDefinition t source_vertex slice_kind planeMode:#nextVert =
+    (
+        if source_vertex < 1 or source_vertex > t.points.count or not t.validVertices[source_vertex] then return undefined
+
+
+        local anchor = t.points[source_vertex]
+        local desired_line = if slice_kind == #vertical then vertical else horizontal
+
+
+        if planeMode == #globalAxis then
+        (
+            local plane_axis = if slice_kind == #vertical then horizontal else vertical
+            local aligned_vertices = #{}
+
+
+            for vertex_index in t.validVertices do
+            (
+                if abs(dot(t.points[vertex_index]-anchor) plane_axis) <= tolerance then
+                (
+                    aligned_vertices[vertex_index] = true
+                )
+            )
+
+
+            #(plane_axis,aligned_vertices,0,0)
+        )
+        else
+        (
+            local border_edges = (t.vertexEdges[source_vertex] * t.border) as array
+            local matching_edges = #()
+
+
+            /*
+            Edge Direction must be defined by one real border edge.
+            Accept only the adjacent border edge whose classified direction matches the requested slice direction.
+            */
+            for edge_index in border_edges do
+            (
+                if edgeKind t edge_index == slice_kind then
+                (
+                    append matching_edges edge_index
+                )
+            )
+
+
+            /* A clean orthogonal corner has exactly one horizontal and one vertical border edge. */
+            if matching_edges.count != 1 then return undefined
+
+
+            local defining_edge = matching_edges[1]
+            local best_vertex = otherVertex t defining_edge source_vertex
+            if best_vertex == 0 then return undefined
+
+
+            local edge_vector = t.points[best_vertex] - anchor
+            if length edge_vector <= tolerance then return undefined
+
+
+            local line_direction = normalize edge_vector
+            local plane_axis = cross line_direction normal
+            if length plane_axis <= tolerance then return undefined
+            plane_axis = normalize plane_axis
+
+
+            local aligned_vertices = #{source_vertex,best_vertex}
+            #(plane_axis,aligned_vertices,best_vertex,defining_edge)
+        )
+        -- return
+    ),
+
+
+    /*
+    Finds vertices defining the next debug slice plane without modifying topology.
+    Global-axis mode selects every vertex on the plane; next-vert mode selects the exact defining pair.
+    */
+    function getOneSliceAlignmentVertices cutMode:#all planeMode:#nextVert =
+    (
+        local t = prepareSliceAnalysis()
+        local inner_vertices = getInnerCornerVertexSelection()
+        if inner_vertices.numberSet == 0 then return undefined
+
+
+        local slice_kinds = #()
+        if cutMode == #all or cutMode == #vertical then append slice_kinds #vertical
+        if cutMode == #all or cutMode == #horizontal then append slice_kinds #horizontal
+
+
+        for source_vertex in inner_vertices do
+        (
+            t = refreshTopology()
+            local anchor = t.points[source_vertex]
+            local region = componentAt t anchor
+            if region.numberSet > 0 then
+            (
+                for slice_kind in slice_kinds do
+                (
+                    local plane_definition = getSlicePlaneDefinition t source_vertex slice_kind planeMode:planeMode
+                    if plane_definition != undefined then
+                    (
+                        local axis = plane_definition[1]
+                        local spans = false
+                    for face_index in region while not spans do
+                    (
+                        local low = 1e30
+                        local high = -1e30
+                        for vertex_index in t.faces[face_index] do
+                        (
+                            local value = dot(t.points[vertex_index]-anchor) axis
+                            low = amin low value
+                            high = amax high value
+                        )
+                        if low < -tolerance and high > tolerance then spans = true
+                    )
+
+
+                        if spans then
+                        (
+                            return #(plane_definition[2],source_vertex,slice_kind,axis,anchor,plane_definition[3],plane_definition[4])
+                        )
+                    )
+                )
+            )
+        )
+        undefined
+        -- return
+    ),
+
+
+    /*
+    Finds the current connected faces belonging to one stored planar base-wall region.
+    Face IDs may change after earlier cuts, so the region is remapped from its base normal, plane and preserved source vertex.
+    */
+    function getCurrentPlanarWallRegionFaces t source_vertex world_normal world_origin plane_tolerance:1.0 =
+    (
+        local result = #{}
+        if t == undefined or world_normal == undefined or world_origin == undefined then return result
+        if source_vertex < 1 or source_vertex > t.points.count or not t.validVertices[source_vertex] then return result
+        if length world_normal <= tolerance then return result
+
+
+        local region_normal = normalize world_normal
+        local region_origin = world_origin - referenceWorld
+        local normal_limit = cos 0.1
+        local seed_face = 0
+
+
+        for face_index in t.validFaces while seed_face == 0 do
+        (
+            if findItem t.faces[face_index] source_vertex > 0 then
+            (
+                local face_vector = faceVector t face_index
+                if length face_vector > tolerance*tolerance then
+                (
+                    local face_normal = normalize face_vector
+                    local face_matches = abs(dot face_normal region_normal) >= normal_limit
+
+
+                    for vertex_index in t.faces[face_index] while face_matches do
+                    (
+                        if abs(dot (t.points[vertex_index] - region_origin) region_normal) > plane_tolerance then
+                        (
+                            face_matches = false
+                        )
+                    )
+
+
+                    if face_matches then
+                    (
+                        seed_face = face_index
+                    )
+                )
+            )
+        )
+
+
+        if seed_face == 0 then return result
+
+
+        local face_queue = #(seed_face)
+        local queue_index = 1
+        result[seed_face] = true
+
+
+        while queue_index <= face_queue.count do
+        (
+            local current_face = face_queue[queue_index]
+            queue_index += 1
+
+
+            for edge_index in t.faceEdges[current_face] do
+            (
+                if t.validEdges[edge_index] then
+                (
+                    local edge_record = t.edges[edge_index]
+
+
+                    for adjacent_face in #(edge_record[3],edge_record[4]) do
+                    (
+                        if adjacent_face > 0 and t.validFaces[adjacent_face] and not result[adjacent_face] then
+                        (
+                            local face_vector = faceVector t adjacent_face
+                            local face_matches = length face_vector > tolerance*tolerance
+
+
+                            if face_matches then
+                            (
+                                local face_normal = normalize face_vector
+                                face_matches = abs(dot face_normal region_normal) >= normal_limit
+                            )
+
+
+                            if face_matches then
+                            (
+                                for vertex_index in t.faces[adjacent_face] while face_matches do
+                                (
+                                    if abs(dot (t.points[vertex_index] - region_origin) region_normal) > plane_tolerance then
+                                    (
+                                        face_matches = false
+                                    )
+                                )
+                            )
+
+
+                            if face_matches then
+                            (
+                                result[adjacent_face] = true
+                                append face_queue adjacent_face
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+
+        result
+        -- return
+    ),
+
+
+    /*
+    Performs one debug slice using a plane defined entirely by the unchanged base object.
+    The current Edit Poly only executes the plane and no longer rediscovers a border edge.
+    */
+    function makeOneSliceFromBasePlane sourceVertex worldAnchor worldAxis sliceKind wall_normal:undefined wall_origin:undefined plane_tolerance:1.0 =
+    (
+        if worldAnchor == undefined or worldAxis == undefined then return undefined
+        if length worldAxis <= tolerance then return undefined
+
+
+        local t = refreshTopology()
+
+
+        local axis = normalize worldAxis
+        local anchor = worldAnchor - referenceWorld
+        local slice_faces = copy t.validFaces
+
+
+        if wall_normal != undefined and wall_origin != undefined then
+        (
+            slice_faces = getCurrentPlanarWallRegionFaces                 t                 sourceVertex                 wall_normal                 wall_origin                 plane_tolerance:plane_tolerance
+
+
+            if slice_faces.numberSet == 0 then
+            (
+                format "Wall-Fixer Base Plane Slice Skip: source:% direction:% reason:stored planar wall region cannot be remapped.\n" sourceVertex sliceKind
+                return undefined
+            )
+        )
+
+
+        local original_vertex_count = t.validVertices.numberSet
+        local original_edge_count = t.validEdges.numberSet
+        local original_face_count = t.validFaces.numberSet
+        local original_vertices = copy t.validVertices
+        local original_points = for vertex_index in t.validVertices collect t.points[vertex_index]
+        local original_segments = #()
+        for edge_index in t.validEdges do
+        (
+            append original_segments (segment t edge_index)
+        )
+
+
+        /* Select current Edit Poly vertices lying on the base-defined slice plane.
+           Current vertex IDs are irrelevant; the unchanged base object owns the plane definition. */
+        local aligned_vertices = #{}
+        local alignment_tolerance = getBoundaryValidationTolerance()
+        local region_vertices = #{}
+
+
+        for face_index in slice_faces do
+        (
+            for vertex_index in t.faces[face_index] do
+            (
+                region_vertices[vertex_index] = true
+            )
+        )
+
+
+        for vertex_index in region_vertices do
+        (
+            if abs(dot(t.points[vertex_index] - anchor) axis) <= alignment_tolerance then
+            (
+                aligned_vertices[vertex_index] = true
+            )
+        )
+
+
+        if uiSelection then
+        (
+            ep.useStackSelection = false
+            ep.SetEPolySelLevel #Vertex
+            ep.SetSelection #Vertex #{} node:node
+            if aligned_vertices.numberSet > 0 then
+            (
+                ep.Select #Vertex aligned_vertices node:node
+            )
+            completeRedraw()
+        )
+
+
+        local tm = node.objectTransform
+        local local_normal = normalize [dot tm.row1 axis,dot tm.row2 axis,dot tm.row3 axis]
+        local local_point = worldAnchor * inverse tm
+        ep.SetSlicePlane local_normal local_point
+
+
+        local slice_operation = if slice_faces.numberSet == t.validFaces.numberSet then #Slice else #SliceSelectedFaces
+        format "Wall-Fixer Base Plane Slice: source:% direction:% alignedCurrentVerts:% axis:% regionFaces:%/% operation:% split:%\n"             sourceVertex sliceKind aligned_vertices axis slice_faces.numberSet t.validFaces.numberSet slice_operation ep.split
+        t = applyOperation #Face slice_faces slice_operation
+
+
+        local topology_changed = (t.validVertices.numberSet != original_vertex_count or t.validEdges.numberSet != original_edge_count or t.validFaces.numberSet != original_face_count)
+
+
+        local new_edges = findNewEdges original_segments
+        if topology_changed and new_edges.numberSet == 0 then
+        (
+            /* Geometric before/after matching can be over-tolerant at large world coordinates.
+               If Edit Poly changed topology, fall back to current non-border edges lying on this plane. */
+            local plane_edge_tolerance = amax tolerance 0.01
+            for edge_index in t.validEdges do
+            (
+                if not t.border[edge_index] then
+                (
+                    local edge_segment = segment t edge_index
+                    if abs(dot(edge_segment[1] - anchor) axis) <= plane_edge_tolerance and abs(dot(edge_segment[2] - anchor) axis) <= plane_edge_tolerance then
+                    (
+                        new_edges[edge_index] = true
+                    )
+                )
+            )
+        )
+
+
+        if not topology_changed then
+        (
+            format "Wall-Fixer Base Plane Slice Skip: source:% direction:% reason:Edit Poly topology did not change.\n" sourceVertex sliceKind
+            return undefined
+        )
+
+
+        cuts += 1
+        if uiSelection then
+        (
+            ep.useStackSelection = false
+            ep.SetEPolySelLevel #Edge
+            ep.SetSelection #Edge #{} node:node
+            ep.Select #Edge new_edges node:node
+            completeRedraw()
+        )
+
+
+        #(anchor,sourceVertex,sourceVertex,sliceKind,axis,original_points,original_segments,referenceWorld,new_edges,aligned_vertices,0,original_vertices)
+        -- return
+    ),
+
+
+    /*
+    Performs one debug slice through one current live vertex.
+    Debug slicing uses only the current live topology and current vertex selection.
+    */
+    function makeOneSlice cutMode:#all planeMode:#nextVert preferredSourceVertex:0 strictPreferredSource:false excludedSourceVertex:0 =
+    (
+        local t = undefined
+        local source_vertices = #{}
+
+
+        if strictPreferredSource then
+        (
+            if preferredSourceVertex < 1 then return undefined
+            t = refreshTopology()
+            setFrame t
+            if preferredSourceVertex > t.points.count or not t.validVertices[preferredSourceVertex] then
+            (
+                format "Wall-Fixer Slice Debug: selected source vertex % is not live anymore.\n" preferredSourceVertex
+                return undefined
+            )
+            source_vertices = #{preferredSourceVertex}
+        )
+        else
+        (
+            t = prepareSliceAnalysis()
+            local inner_vertices = getInnerCornerVertexSelection()
+            if inner_vertices.numberSet == 0 then return undefined
+            if preferredSourceVertex > 0 and preferredSourceVertex <= t.points.count and t.validVertices[preferredSourceVertex] and inner_vertices[preferredSourceVertex] and preferredSourceVertex != excludedSourceVertex then
+            (
+                source_vertices = #{preferredSourceVertex}
+            )
+            else
+            (
+                source_vertices = copy inner_vertices
+                if excludedSourceVertex > 0 and excludedSourceVertex <= source_vertices.count then
+                (
+                    source_vertices[excludedSourceVertex] = false
+                )
+            )
+
+
+            format "Wall-Fixer Make 1 Slice Candidates: inner:% preferred:% skippedLast:% candidates:%\n" inner_vertices preferredSourceVertex excludedSourceVertex source_vertices
+        )
+
+
+        local slice_kinds = #()
+        if cutMode == #all or cutMode == #vertical then append slice_kinds #vertical
+        if cutMode == #all or cutMode == #horizontal then append slice_kinds #horizontal
+
+
+        for source_vertex_before in source_vertices do
+        (
+            t = refreshTopology()
+            if source_vertex_before >= 1 and source_vertex_before <= t.points.count and t.validVertices[source_vertex_before] then
+            (
+                local anchor = t.points[source_vertex_before]
+                local region = componentAt t anchor
+                if region.numberSet > 0 then
+                (
+                    for slice_kind in slice_kinds do
+                    (
+                        local plane_definition = getSlicePlaneDefinition t source_vertex_before slice_kind planeMode:planeMode
+                        if plane_definition != undefined then
+                        (
+                            local axis = plane_definition[1]
+                            local aligned_vertices = plane_definition[2]
+                            local second_vertex = plane_definition[3]
+                            local defining_edge = plane_definition[4]
+                            /*
+                            Test the whole connected wall region, not one individual face.
+                            Previous slices may partition a valid next cut across several faces.
+                            */
+                            local region_low = 1e30
+                            local region_high = -1e30
+                            local region_vertices = #{}
+
+
+                            for face_index in region do
+                            (
+                                if t.validFaces[face_index] then
+                                (
+                                    for vertex_index in t.faces[face_index] do
+                                    (
+                                        if vertex_index >= 1 and vertex_index <= t.points.count and t.validVertices[vertex_index] then
+                                        (
+                                            region_vertices[vertex_index] = true
+                                        )
+                                    )
+                                )
+                            )
+
+
+                            for vertex_index in region_vertices do
+                            (
+                                local region_value = dot(t.points[vertex_index]-anchor) axis
+                                region_low = amin region_low region_value
+                                region_high = amax region_high region_value
+                            )
+
+
+                            local spans = region_low < -tolerance and region_high > tolerance
+
+
+                            if spans then
+                            (
+                                local original_points = for vertex_index in t.validVertices collect t.points[vertex_index]
+                                local original_segments = #()
+                                for edge_index in t.validEdges do
+                                (
+                                    append original_segments (segment t edge_index)
+                                )
+
+
+                                if uiSelection then
+                                (
+                                    ep.useStackSelection = false
+                                    ep.SetEPolySelLevel #Vertex
+                                    ep.SetSelection #Vertex #{} node:node
+                                    ep.Select #Vertex #{source_vertex_before} node:node
+                                    completeRedraw()
+                                )
+
+
+                                local tm = node.objectTransform
+                                local localNormal = normalize [dot tm.row1 axis,dot tm.row2 axis,dot tm.row3 axis]
+                                local localPoint = (anchor + referenceWorld) * inverse tm
+                                ep.SetSlicePlane localNormal localPoint
+                                local slice_operation = if region.numberSet == t.validFaces.numberSet then #Slice else #SliceSelectedFaces
+                                format "Wall-Fixer Slice Debug: innerCorner:% direction:% planeMode:% definingEdge:% definingVerts:% operation:% region:%/% split:%\n" source_vertex_before slice_kind planeMode defining_edge aligned_vertices slice_operation region.numberSet t.validFaces.numberSet ep.split
+                                t = applyOperation #Face region slice_operation
+
+
+                                local source_vertex_after = source_vertex_before
+                                if source_vertex_after > t.points.count or not t.validVertices[source_vertex_after] then source_vertex_after = 0
+
+
+                                local new_edges = findNewEdges original_segments
+
+
+                                if new_edges.numberSet > 0 then
+                                (
+                                    cuts += 1
+                                    if uiSelection then
+                                    (
+                                        ep.useStackSelection = false
+                                        ep.SetEPolySelLevel #Edge
+                                        ep.SetSelection #Edge #{} node:node
+                                        ep.Select #Edge new_edges node:node
+                                        completeRedraw()
+                                    )
+                                    return #(anchor,source_vertex_before,source_vertex_after,slice_kind,axis,original_points,original_segments,referenceWorld,new_edges,aligned_vertices,second_vertex)
+                                )
+                                else
+                                (
+                                    format "Wall-Fixer Make 1 Slice Skip: source:% direction:% reason:no new non-border edge.\n" source_vertex_before slice_kind
+                                )
+                            )
+                            else
+                            (
+                                format "Wall-Fixer Make 1 Slice Skip: source:% direction:% reason:connected region does not cross plane.\n" source_vertex_before slice_kind
+                            )
+                        )
+                    )
+                )
+            )
+        )
+        undefined
+        -- return
+    ),
+    /*
+    Performs all cuts of one requested orientation using the selected slice-plane definition mode.
+    Global-axis mode uses the wall frame; next-vert mode derives each plane from the corner and matching border neighbour.
+    */
+    function performCuts slice_kind planeMode:#nextVert =
+    (
+        local done = #()
+
+
+        for anchor in anchors do
+        (
+            local t = refreshTopology()
+            local region = componentAt t anchor
+            if region.numberSet == 0 then throw "Cannot remap a preserved corner anchor."
+
+
+            local source_vertex = findVertexAtPoint t anchor
+            if source_vertex > 0 then
+            (
+                local plane_definition = getSlicePlaneDefinition t source_vertex slice_kind planeMode:planeMode
+                if plane_definition != undefined then
+                (
+                    local axis = plane_definition[1]
+                    local duplicate = false
+
+
+                    for item in done while not duplicate do
+                    (
+                        local parallel = abs(dot item[1] axis) >= cos(axisTolerance)
+                        local same_plane = abs(dot(anchor-item[2]) axis) <= tolerance
+                        if parallel and same_plane then duplicate = true
+                    )
+
+
+                    if not duplicate then
+                    (
+                        append done #(axis,anchor)
+                        local spans = false
+
+
+                        for face_index in region while not spans do
+                        (
+                            local low = 1e30
+                            local high = -1e30
+
+
+                            for vertex_index in t.faces[face_index] do
+                            (
+                                local value = dot(t.points[vertex_index]-anchor) axis
+                                low = amin low value
+                                high = amax high value
+                            )
+
+
+                            if low < -tolerance and high > tolerance then spans = true
+                        )
+
+
+                        if spans then
+                        (
+                            local tm = node.objectTransform
+                            local localNormal = normalize [dot tm.row1 axis,dot tm.row2 axis,dot tm.row3 axis]
+                            local localPoint = (anchor + referenceWorld) * inverse tm
+                            ep.SetSlicePlane localNormal localPoint
+                            local slice_operation = if region.numberSet == t.validFaces.numberSet then #Slice else #SliceSelectedFaces
+                            format "Wall-Fixer Slice Debug: direction:% planeMode:% definingVerts:% operation:% region:%/% split:%\n" slice_kind planeMode plane_definition[2] slice_operation region.numberSet t.validFaces.numberSet ep.split
+                            t = applyOperation #Face region slice_operation
+                            local current_region = componentAt t anchor
+
+
+                            for face_index in current_region do
+                            (
+                                local low = 1e30
+                                local high = -1e30
+
+
+                                for vertex_index in t.faces[face_index] do
+                                (
+                                    local value = dot(t.points[vertex_index]-anchor) axis
+                                    low = amin low value
+                                    high = amax high value
+                                )
+
+
+                                if low < -tolerance and high > tolerance then throw "Slice left a polygon crossing its requested plane."
+                            )
+
+
+                            for edge_index in t.validEdges do
+                            (
+                                local edge_segment = segment t edge_index
+                                if abs(dot(edge_segment[1]-anchor) axis) <= tolerance and abs(dot(edge_segment[2]-anchor) axis) <= tolerance then
+                                (
+                                    append protectedSegments edge_segment
+                                )
+                            )
+
+
+                            validateCleanTopology t
+                            cuts += 1
+                        )
+                    )
+                )
+            )
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Performs vertical cuts using the requested slice-plane definition mode.
+    */
+    function performVerticalCuts planeMode:#nextVert =
+    (
+        performCuts #vertical planeMode:planeMode
+        -- return
+    ),
+
+
+    /*
+    Performs horizontal cuts using the requested slice-plane definition mode.
+    */
+    function performHorizontalCuts planeMode:#nextVert =
+    (
+        performCuts #horizontal planeMode:planeMode
+        -- return
+    ),
+    fn removeRedundantDiagonalEdges =
+    (
+        local t = refreshTopology()
+        local changed = true
+        while changed do
+        (
+            changed = false
+            for e in t.validEdges while not changed do if canRemoveDiagonal t e then
+            (
+                local oldCount = t.validFaces.numberSet
+                t = applyOperation #Edge #{e} #RemoveEdge
+                if t.validFaces.numberSet != oldCount-1 then throw "Edit Poly did not dissolve exactly two adjacent faces."
+                validateCleanTopology t
+                removedEdges += 1
+                changed = true
+            )
+        )
+        t
+    ),
+    function run cutMode:#all planeMode:#nextVert =
+    (
+        local t = prepareSliceAnalysis()
+        cleanCollinearVertices()
+        t = refreshTopology()
+        -- Rebuild anchors after collinear cleanup because vertex indices/topology changed.
+        collectCutAnchors t
+        if cutMode == #all or cutMode == #vertical then performVerticalCuts planeMode:planeMode
+        if cutMode == #all or cutMode == #horizontal then performHorizontalCuts planeMode:planeMode
+        -- Removing diagonals can expose collinear vertices; removing those can
+        -- make another pair of faces eligible. Refresh until both reach a fixed point.
+        local changed = true
+        while changed do
+        (
+            local before = removedEdges+removedVerts
+            removeRedundantDiagonalEdges()
+            cleanCollinearVertices()
+            changed = removedEdges+removedVerts > before
+        )
+        t = refreshTopology()
+        validateCleanTopology t final:true
+        format "Wall-Fixer: % | cuts:% diagonal edges removed:% straight vertices removed:% | topology validated\n" node.name cuts removedEdges removedVerts
+        true
+    )
 )
 
 
+
+
 /*
-Prints the exact component files that the loader will use without loading them.
-Use this to verify that the unversioned codebase is complete.
+Wall-Fixer Core 0.22
+Main WallFixer_v implementation and persistent runtime instance.
+Load through Wall-Fixer.ms during normal development.
 */
-function testWallFixerLoader folder_path:undefined =
+
+
+global WallFixerVersion
+global WallFixerRollout
+global wall_fixer_version_system
+global wall_fixer_version_epoch
+global wall_fixer_core_file_version = "0.22"
+global wall_fixer_core_tool_version = 0.22
+
+
+/*
+Registers this file's shared Wall-Fixer tool version.
+Accepts legacy string or numeric global versions; the highest loaded version wins.
+*/
+if wall_fixer_version_system != 1 then
 (
-    test_folder = folder_path
-
-    if test_folder == undefined then
-    (
-        test_folder = getFilenamePath (getSourceFileName())
-    )
-
-    pipeline_file = requireWallFixerComponent test_folder "Wall-Fixer-Pipeline.ms"
-    core_file = requireWallFixerComponent test_folder "Wall-Fixer-Core.ms"
-    straight_edge_file = requireWallFixerComponent test_folder "Straight-Edge-Fixer.ms"
-    ui_file = requireWallFixerComponent test_folder "Wall-Fixer-UI.ms"
-
-    format "\n============================================================\n"
-    format "WALL-FIXER LOADER TEST %\n" wall_fixer_loader_file_version
-    format "Folder:        %\n" test_folder
-    format "Pipeline:      %\n" pipeline_file
-    format "Core:          %\n" core_file
-    format "Straight Edge: %\n" straight_edge_file
-    format "UI:            %\n" ui_file
-    format "============================================================\n"
-
-    #(pipeline_file, core_file, straight_edge_file, ui_file)
-    -- return
+    wall_fixer_version_system = 1
 )
 
-script_folder = getFilenamePath (getSourceFileName())
-pipeline_file = requireWallFixerComponent script_folder "Wall-Fixer-Pipeline.ms"
-core_file = requireWallFixerComponent script_folder "Wall-Fixer-Core.ms"
-straight_edge_file = requireWallFixerComponent script_folder "Straight-Edge-Fixer.ms"
-ui_file = requireWallFixerComponent script_folder "Wall-Fixer-UI.ms"
 
-format "Wall-Fixer loader %\n" wall_fixer_loader_file_version
-format "Pipeline: %\n" pipeline_file
-format "Core: %\n" core_file
-format "Straight Edge: %\n" straight_edge_file
-format "UI: %\n" ui_file
+if wall_fixer_version_epoch != 3 then
+(
+    wall_fixer_version_epoch = 3
+    WallFixerVersion = undefined
+)
+
+
+wall_fixer_core_current_tool_version_number = undefined
+
+
+if WallFixerVersion != undefined then
+(
+    try
+    (
+        wall_fixer_core_current_tool_version_number = WallFixerVersion as float
+    )
+    catch
+    (
+        wall_fixer_core_current_tool_version_number = undefined
+    )
+)
+
+
+if wall_fixer_core_current_tool_version_number == undefined then
+(
+    WallFixerVersion = wall_fixer_core_tool_version
+)
+else if wall_fixer_core_tool_version > wall_fixer_core_current_tool_version_number then
+(
+    WallFixerVersion = wall_fixer_core_tool_version
+)
+
+
+if WallFixerRollout != undefined then
+(
+    try
+    (
+        WallFixerRollout.title = ("Wall-Fixer " + (WallFixerVersion as string))
+    )
+    catch
+    (
+    )
+)
+
+
+
+
+global WallFixer_v
+global WallFixer
+
+
+struct WallFixer_v
+(
+    version = "0.22",
+    processed_slice_nodes = #(),
+    processed_vertical_planes = #(),
+    processed_horizontal_planes = #(),
+    processed_vertical_edges = #(),
+    processed_horizontal_edges = #(),
+    reset_inner_vert_nodes = #(),
+    reset_inner_vert_selections = #(),
+    last_slice_error = undefined,
+    last_slice_count = 0,
+    last_slice_report = "",
+    batch_quiet = false,
+    attach_weld_selection_order = #(),
+    last_debug_slice_node = undefined,
+    last_debug_slice_new_edges = #{},
+    last_debug_slice_start_vertices = #{},
+    last_debug_slice_original_vertices = #{},
+    epsilon = 0.001,
+    axis_angle_threshold = 5.0,
+    ini_path = ((getDir #userScripts) + "\\Wall-Fixer.ini"),
+
+
+    /*
+    Returns true only for the non-fatal missing last-slice cleanup context notice.
+    UI wrappers use this to keep the notice in the Listener instead of showing a modal message.
+    */
+    function isLastSliceContextNotice report_text =
+    (
+        if report_text == undefined then
+        (
+            false
+        )
+        else
+        (
+            findString report_text ": no valid last-slice anchor/direction chain was found. Run Make 1 Slice first." != undefined
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns the per-node index used only to remember processed slice planes.
+    The base mesh is analyzed fresh on every Make 1 Slice click.
+    */
+    function getProcessedSliceNodeIndex node create_if_missing:false =
+    (
+        for index = 1 to processed_slice_nodes.count do
+        (
+            if processed_slice_nodes[index] == node then return index
+        )
+
+
+        if create_if_missing then
+        (
+            append processed_slice_nodes node
+            append processed_vertical_planes #()
+            append processed_horizontal_planes #()
+            append processed_vertical_edges #{}
+            append processed_horizontal_edges #{}
+            processed_slice_nodes.count
+        )
+        else
+        (
+            0
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns true when a geometric slice plane already exists in the supplied plane records.
+    Plane identity uses direction plus signed position, independent of which corner defines it.
+    */
+    function hasSlicePlaneRecord world_anchor world_axis plane_records =
+    (
+        if world_anchor == undefined or world_axis == undefined then return false
+        if length world_axis <= epsilon then return false
+
+
+        plane_axis = normalize world_axis
+        plane_tolerance = amax epsilon 0.01
+        axis_cos = cos 0.1
+
+
+        for plane_record in plane_records do
+        (
+            stored_axis = plane_record[1]
+            stored_anchor = plane_record[2]
+            if abs(dot stored_axis plane_axis) >= axis_cos then
+            (
+                if abs(dot (world_anchor - stored_anchor) stored_axis) <= plane_tolerance then return true
+            )
+        )
+
+
+        false
+        -- return
+    ),
+
+
+    /*
+    Returns true when one unchanged base-object border edge already produced a successful Edge Direction slice.
+    Edge IDs are stable because Make 1 Slice always analyzes the unchanged Editable Poly base object.
+    */
+    function isBaseSliceEdgeProcessed node base_edge slice_kind =
+    (
+        if base_edge <= 0 then return false
+
+
+        node_index = getProcessedSliceNodeIndex node create_if_missing:false
+        if node_index == 0 then return false
+
+
+        edge_selection = if slice_kind == #vertical then processed_vertical_edges[node_index] else processed_horizontal_edges[node_index]
+        if base_edge > edge_selection.count then return false
+        edge_selection[base_edge]
+        -- return
+    ),
+
+
+    /*
+    Remembers one successfully sliced unchanged base-object border edge for Edge Direction mode.
+    Vertical and horizontal state stays separate, so one corner may still participate in both directions.
+    */
+    function markBaseSliceEdgeProcessed node base_edge slice_kind =
+    (
+        if base_edge <= 0 then return false
+
+
+        node_index = getProcessedSliceNodeIndex node create_if_missing:true
+        if slice_kind == #vertical then
+        (
+            edge_selection = processed_vertical_edges[node_index]
+            edge_selection[base_edge] = true
+            processed_vertical_edges[node_index] = edge_selection
+        )
+        else
+        (
+            edge_selection = processed_horizontal_edges[node_index]
+            edge_selection[base_edge] = true
+            processed_horizontal_edges[node_index] = edge_selection
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns true when the same geometric slice plane was already processed in this direction.
+    Plane identity is used only by Global Axis mode. Edge Direction uses the defining base edge instead.
+    */
+    function isBaseSlicePlaneProcessed node world_anchor world_axis slice_kind =
+    (
+        if world_anchor == undefined or world_axis == undefined then return false
+        if length world_axis <= epsilon then return false
+
+
+        node_index = getProcessedSliceNodeIndex node create_if_missing:false
+        if node_index == 0 then return false
+
+
+        plane_records = if slice_kind == #vertical then processed_vertical_planes[node_index] else processed_horizontal_planes[node_index]
+        hasSlicePlaneRecord world_anchor world_axis plane_records
+        -- return
+    ),
+
+
+    /*
+    Remembers one successfully processed geometric slice plane for Global Axis mode.
+    Failed attempts are never stored because later topology changes may make the same plane useful.
+    */
+    function markBaseSlicePlaneProcessed node world_anchor world_axis slice_kind =
+    (
+        if world_anchor == undefined or world_axis == undefined then return false
+        if length world_axis <= epsilon then return false
+
+
+        node_index = getProcessedSliceNodeIndex node create_if_missing:true
+        plane_record = #(normalize world_axis, world_anchor)
+
+
+        if slice_kind == #vertical then
+        (
+            append processed_vertical_planes[node_index] plane_record
+        )
+        else
+        (
+            append processed_horizontal_planes[node_index] plane_record
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns the cache index for INNER VERTS captured by Reset Slicing.
+    The cached BitArray keeps the exact base vertex IDs found during reset.
+    */
+    function getResetInnerVertNodeIndex node create_if_missing:false =
+    (
+        for index = 1 to reset_inner_vert_nodes.count do
+        (
+            if reset_inner_vert_nodes[index] == node then return index
+        )
+
+
+        if create_if_missing then
+        (
+            append reset_inner_vert_nodes node
+            append reset_inner_vert_selections #{}
+            reset_inner_vert_nodes.count
+        )
+        else
+        (
+            0
+        )
+        -- return
+    ),
+
+
+    /*
+    Stores the exact INNER VERTS reported by Reset Slicing for one wall.
+    Check Corners reuses this BitArray instead of recalculating corner availability.
+    */
+    function setResetInnerVertSelection node vertex_selection =
+    (
+        cache_index = getResetInnerVertNodeIndex node create_if_missing:true
+        reset_inner_vert_selections[cache_index] = copy vertex_selection
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns the exact INNER VERTS captured by the last successful Reset Slicing.
+    Undefined means Reset Slicing has not produced a cache for this wall yet.
+    */
+    function getResetInnerVertSelection node =
+    (
+        cache_index = getResetInnerVertNodeIndex node create_if_missing:false
+        if cache_index == 0 then
+        (
+            undefined
+        )
+        else
+        (
+            copy reset_inner_vert_selections[cache_index]
+        )
+        -- return
+    ),
+
+
+    /*
+    Clears the cached INNER VERTS before Reset Slicing analyzes the wall again.
+    A failed reset therefore cannot leave stale corner IDs available to Check Corners.
+    */
+    function clearResetInnerVertSelection node =
+    (
+        cache_index = getResetInnerVertNodeIndex node create_if_missing:false
+        if cache_index > 0 then
+        (
+            deleteItem reset_inner_vert_nodes cache_index
+            deleteItem reset_inner_vert_selections cache_index
+        )
+        true
+        -- return
+    ),
+
+
+    /*
+    Clears remembered slice-plane state for one wall.
+    Used by Reset Slicing so vertical and horizontal processing starts fresh.
+    */
+    function resetProcessedSliceState node =
+    (
+        node_index = getProcessedSliceNodeIndex node create_if_missing:false
+        if node_index > 0 then
+        (
+            deleteItem processed_slice_nodes node_index
+            deleteItem processed_vertical_planes node_index
+            deleteItem processed_horizontal_planes node_index
+            deleteItem processed_vertical_edges node_index
+            deleteItem processed_horizontal_edges node_index
+        )
+        true
+        -- return
+    ),
+
+
+    /*
+    Clears the last successful Make 1 Slice edge-cleanup context.
+    Reset Slicing and a new Make 1 Slice invalidate old Edit Poly edge IDs.
+    */
+    function clearLastDebugSliceContext node:undefined =
+    (
+        if node == undefined or last_debug_slice_node == node then
+        (
+            last_debug_slice_node = undefined
+            last_debug_slice_new_edges = #{}
+            last_debug_slice_start_vertices = #{}
+            last_debug_slice_original_vertices = #{}
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns true only for Edit Poly modifiers owned by Wall-Fixer.
+    New modifiers use the WMC prefix; exact legacy names remain recognized for older scene stacks.
+    */
+    function isWallFixerEditPolyModifier stack_modifier =
+    (
+        if stack_modifier == undefined then return false
+        if classOf stack_modifier != Edit_Poly then return false
+
+
+        modifier_name = stack_modifier.name as string
+        if findString modifier_name "WMC - " == 1 then return true
+
+
+        legacy_names = #(
+            "Cleanup LOOPS",
+            "Wall topology cleanup",
+            "FIX TWO-EDGE VERTS",
+            "CLEAN UP SLICED EDGES POSTPROCESS",
+            "SLICE ALL",
+            "SLICE HORIZONTAL",
+            "SLICE VERTICAL"
+        )
+
+
+        (findItem legacy_names modifier_name) > 0
+        -- return
+    ),
+
+
+    /*
+    Removes only Wall-Fixer-owned Edit Poly modifiers from one wall.
+    User modifiers and non-Edit-Poly modifiers are always preserved.
+    */
+    function removeWallFixerEditPolyModifiers node =
+    (
+        if node == undefined or not(isValidNode node) then return false
+
+
+        modifier_index = node.modifiers.count
+        while modifier_index >= 1 do
+        (
+            stack_modifier = node.modifiers[modifier_index]
+            if isWallFixerEditPolyModifier stack_modifier then
+            (
+                deleteModifier node stack_modifier
+            )
+
+
+            modifier_index -= 1
+        )
+
+
+        update node
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns true only for Edit Poly modifiers used by the slicing workflow.
+    Directional slice modifiers use exact user-facing names; legacy topology names remain supported.
+    */
+    function isWallFixerSliceModifier stack_modifier =
+    (
+        if stack_modifier == undefined then return false
+        if classOf stack_modifier != Edit_Poly then return false
+
+
+        modifier_name = stack_modifier.name as string
+        slice_modifier_names = #(
+            "SLICE ALL",
+            "SLICE HORIZONTAL",
+            "SLICE VERTICAL",
+            "WMC - WALL TOPOLOGY CLEANUP",
+            "Wall topology cleanup"
+        )
+
+
+        (findItem slice_modifier_names modifier_name) > 0
+        -- return
+    ),
+
+
+    /*
+    Removes only Edit Poly modifiers that belong to the slicing workflow.
+    Other Wall-Fixer modifiers and all user modifiers remain untouched.
+    */
+    function removeWallFixerSliceModifiers node =
+    (
+        if node == undefined or not(isValidNode node) then return false
+
+
+        modifier_index = node.modifiers.count
+        while modifier_index >= 1 do
+        (
+            stack_modifier = node.modifiers[modifier_index]
+            if isWallFixerSliceModifier stack_modifier then
+            (
+                deleteModifier node stack_modifier
+            )
+
+
+            modifier_index -= 1
+        )
+
+
+        update node
+        true
+        -- return
+    ),
+
+
+    /*
+    Resets one wall for Reset Slicing by clearing processed state and modifier history.
+    */
+    function resetNodeForCheckMesh node =
+    (
+        if node == undefined or not(isValidNode node) then return false
+
+
+        resetProcessedSliceState node
+        clearResetInnerVertSelection node
+        clearLastDebugSliceContext node:node
+        removeWallFixerEditPolyModifiers node
+
+
+        base_obj = node.baseObject
+        if classOf base_obj == Editable_Poly then
+        (
+            polyop.setVertSelection base_obj #{}
+            polyop.setEdgeSelection base_obj #{}
+            polyop.setFaceSelection base_obj #{}
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns batch-slice nodes after skipping simple four-vertex planar walls.
+    Four-vertex Editable Poly walls cannot contain an inner corner that needs slicing.
+    */
+    function getBatchSliceProcessNodes nodes =
+    (
+        local process_nodes = #()
+        if nodes == undefined then return process_nodes
+
+
+        for node in nodes do
+        (
+            local skip_node = false
+
+
+            if node != undefined and isValidNode node then
+            (
+                local base_obj = node.baseObject
+                if classOf base_obj == Editable_Poly then
+                (
+                    local vert_count = polyop.getNumVerts base_obj
+                    local dead_vert_count = (polyop.getDeadVerts base_obj).numberSet
+                    local live_vert_count = vert_count - dead_vert_count
+
+
+                    if live_vert_count == 4 then
+                    (
+                        skip_node = true
+                    )
+                )
+            )
+
+
+            if not skip_node then
+            (
+                append process_nodes node
+            )
+        )
+
+
+        process_nodes
+        -- return
+    ),
+
+
+    /*
+    Splits one Editable Poly base object into connected coplanar wall regions.
+    Crease edges between differently oriented walls become independent region borders.
+    */
+    function getBasePlanarWallRegions node planar_tolerance:1.0 =
+    (
+        local result = #()
+        if node == undefined or not(isValidNode node) then return result
+
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then return result
+
+
+        local vert_count = polyop.getNumVerts base_obj
+        local edge_count = polyop.getNumEdges base_obj
+        local face_count = polyop.getNumFaces base_obj
+        if vert_count < 3 or edge_count < 3 or face_count < 1 then return result
+
+
+        local object_tm = node.objectTransform
+        local world_points = #()
+        for vertex_index = 1 to vert_count do
+        (
+            append world_points ((polyop.getVert base_obj vertex_index) * object_tm)
+        )
+
+
+        local face_normals = #()
+        local face_origins = #()
+        for face_index = 1 to face_count do
+        (
+            local face_verts = polyop.getFaceVerts base_obj face_index
+            local face_normal = undefined
+            local face_origin = undefined
+
+
+            if face_verts != undefined and face_verts.count >= 3 then
+            (
+                face_origin = world_points[face_verts[1]]
+                local normal_sum = [0.0,0.0,0.0]
+
+
+                for corner_index = 2 to (face_verts.count - 1) do
+                (
+                    local point_b = world_points[face_verts[corner_index]]
+                    local point_c = world_points[face_verts[corner_index + 1]]
+                    normal_sum += cross (point_b - face_origin) (point_c - face_origin)
+                )
+
+
+                if length normal_sum > epsilon then
+                (
+                    face_normal = normalize normal_sum
+                )
+            )
+
+
+            append face_normals face_normal
+            append face_origins face_origin
+        )
+
+
+        local processed_faces = #{}
+        local normal_limit = cos 0.1
+        local region_id = 0
+
+
+        for seed_face = 1 to face_count do
+        (
+            if not processed_faces[seed_face] and face_normals[seed_face] != undefined then
+            (
+                region_id += 1
+                local region_faces = #{seed_face}
+                local face_queue = #(seed_face)
+                local queue_index = 1
+                local wall_normal = face_normals[seed_face]
+                local wall_origin = face_origins[seed_face]
+                processed_faces[seed_face] = true
+
+
+                while queue_index <= face_queue.count do
+                (
+                    local current_face = face_queue[queue_index]
+                    queue_index += 1
+
+
+                    local current_edges = polyop.getEdgesUsingFace base_obj #{current_face}
+                    for edge_index in current_edges do
+                    (
+                        local adjacent_faces = polyop.getFacesUsingEdge base_obj #{edge_index}
+                        for adjacent_face in adjacent_faces do
+                        (
+                            if not processed_faces[adjacent_face] and face_normals[adjacent_face] != undefined then
+                            (
+                                local normal_matches = abs(dot wall_normal face_normals[adjacent_face]) >= normal_limit
+                                local plane_matches = normal_matches
+
+
+                                if plane_matches then
+                                (
+                                    local adjacent_verts = polyop.getFaceVerts base_obj adjacent_face
+                                    for vertex_index in adjacent_verts while plane_matches do
+                                    (
+                                        if abs(dot (world_points[vertex_index] - wall_origin) wall_normal) > planar_tolerance then
+                                        (
+                                            plane_matches = false
+                                        )
+                                    )
+                                )
+
+
+                                if plane_matches then
+                                (
+                                    processed_faces[adjacent_face] = true
+                                    region_faces[adjacent_face] = true
+                                    append face_queue adjacent_face
+                                )
+                            )
+                        )
+                    )
+                )
+
+
+                local region_edges = polyop.getEdgesUsingFace base_obj region_faces
+                local border_edges = #{}
+                local vertex_border_edges = for vertex_index = 1 to vert_count collect #{}
+
+
+                for edge_index in region_edges do
+                (
+                    local edge_faces = polyop.getFacesUsingEdge base_obj #{edge_index}
+                    local region_face_count = 0
+                    local only_region_face = 0
+
+
+                    for face_index in edge_faces do
+                    (
+                        if region_faces[face_index] then
+                        (
+                            region_face_count += 1
+                            only_region_face = face_index
+                        )
+                    )
+
+
+                    if region_face_count == 1 then
+                    (
+                        local edge_verts = polyop.getEdgeVerts base_obj edge_index
+                        local face_verts = polyop.getFaceVerts base_obj only_region_face
+                        local face_edge_uses = 0
+
+
+                        /*
+                        A same-face bridge used twice is an internal hole bridge, not a region border.
+                        Count ordered boundary uses before accepting the edge.
+                        */
+                        if edge_verts != undefined and edge_verts.count == 2 and face_verts != undefined and face_verts.count >= 3 then
+                        (
+                            for face_corner = 1 to face_verts.count do
+                            (
+                                local next_corner = if face_corner == face_verts.count then 1 else face_corner + 1
+                                local face_vertex_a = face_verts[face_corner]
+                                local face_vertex_b = face_verts[next_corner]
+
+
+                                if (face_vertex_a == edge_verts[1] and face_vertex_b == edge_verts[2]) or \
+                                   (face_vertex_a == edge_verts[2] and face_vertex_b == edge_verts[1]) then
+                                (
+                                    face_edge_uses += 1
+                                )
+                            )
+                        )
+
+
+                        if face_edge_uses == 1 then
+                        (
+                            border_edges[edge_index] = true
+                            vertex_border_edges[edge_verts[1]][edge_index] = true
+                            vertex_border_edges[edge_verts[2]][edge_index] = true
+                        )
+                    )
+                )
+
+
+                if border_edges.numberSet > 0 then
+                (
+                    local wall_vertical = [0,0,1] - wall_normal * (dot wall_normal [0,0,1])
+                    local wall_horizontal = undefined
+
+
+                    if length wall_vertical > epsilon then
+                    (
+                        wall_vertical = normalize wall_vertical
+                        wall_horizontal = normalize (cross wall_vertical wall_normal)
+                    )
+                    else
+                    (
+                        local longest_vector = [0,0,0]
+
+
+                        for edge_index in border_edges do
+                        (
+                            local edge_verts = polyop.getEdgeVerts base_obj edge_index
+                            if edge_verts != undefined and edge_verts.count == 2 then
+                            (
+                                local edge_vector = world_points[edge_verts[2]] - world_points[edge_verts[1]]
+                                if length edge_vector > length longest_vector then
+                                (
+                                    longest_vector = edge_vector
+                                )
+                            )
+                        )
+
+
+                        if length longest_vector > epsilon then
+                        (
+                            wall_horizontal = normalize longest_vector
+                            wall_vertical = normalize (cross wall_normal wall_horizontal)
+                        )
+                    )
+
+
+                    if wall_horizontal != undefined and wall_vertical != undefined then
+                    (
+                        append result #(
+                            region_faces,
+                            wall_normal,
+                            wall_origin,
+                            border_edges,
+                            vertex_border_edges,
+                            wall_horizontal,
+                            wall_vertical,
+                            region_id,
+                            world_points
+                        )
+                    )
+                )
+            )
+        )
+
+
+        result
+        -- return
+    ),
+
+
+    /*
+    Analyzes every planar wall region in the unchanged Editable Poly base object.
+    Each candidate keeps the wall-region frame so bent wall objects do not inherit the first face normal.
+    */
+    function getBaseInnerSliceCandidates node angle_threshold:5.0 source_vertices:undefined planar_tolerance:1.0 =
+    (
+        local result = #()
+        if node == undefined or not(isValidNode node) then return result
+
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then return result
+
+
+        local edge_count = polyop.getNumEdges base_obj
+        local planar_regions = getBasePlanarWallRegions node planar_tolerance:planar_tolerance
+        if planar_regions.count == 0 then return result
+
+
+        local direction_cos = cos (amin 45.0 (amax 0.0 angle_threshold))
+
+
+        for region_data in planar_regions do
+        (
+            local wall_normal = region_data[2]
+            local wall_origin = region_data[3]
+            local border_edges = region_data[4]
+            local vertex_border_edges = region_data[5]
+            local wall_horizontal = region_data[6]
+            local wall_vertical = region_data[7]
+            local region_id = region_data[8]
+            local world_points = region_data[9]
+
+
+            local edge_kinds = for edge_index = 1 to edge_count collect #diagonal
+            for edge_index in border_edges do
+            (
+                local edge_verts = polyop.getEdgeVerts base_obj edge_index
+                if edge_verts != undefined and edge_verts.count == 2 then
+                (
+                    local edge_vector = world_points[edge_verts[2]] - world_points[edge_verts[1]]
+                    if length edge_vector > epsilon then
+                    (
+                        edge_vector = normalize edge_vector
+                        if abs(dot edge_vector wall_horizontal) >= direction_cos then
+                        (
+                            edge_kinds[edge_index] = #horizontal
+                        )
+                        else if abs(dot edge_vector wall_vertical) >= direction_cos then
+                        (
+                            edge_kinds[edge_index] = #vertical
+                        )
+                    )
+                )
+            )
+
+
+            local remaining_edges = copy border_edges
+            local loops = #()
+
+
+            while remaining_edges.numberSet > 0 do
+            (
+                local start_edge = (remaining_edges as array)[1]
+                local start_edge_verts = polyop.getEdgeVerts base_obj start_edge
+
+
+                if start_edge_verts == undefined or start_edge_verts.count != 2 then
+                (
+                    remaining_edges[start_edge] = false
+                )
+                else
+                (
+                    local start_vertex = start_edge_verts[1]
+                    local current_vertex = start_vertex
+                    local current_edge = start_edge
+                    local loop_vertices = #()
+                    local closed = false
+                    local safety = 0
+
+
+                    while not closed and safety <= edge_count do
+                    (
+                        safety += 1
+                        append loop_vertices current_vertex
+                        remaining_edges[current_edge] = false
+
+
+                        local current_edge_verts = polyop.getEdgeVerts base_obj current_edge
+                        local next_vertex = if current_edge_verts[1] == current_vertex then current_edge_verts[2] else current_edge_verts[1]
+
+
+                        if next_vertex == start_vertex then
+                        (
+                            closed = true
+                        )
+                        else
+                        (
+                            local next_edges = (vertex_border_edges[next_vertex] * border_edges) as array
+                            if next_edges.count != 2 then
+                            (
+                                safety = edge_count + 1
+                            )
+                            else
+                            (
+                                local next_edge = if next_edges[1] == current_edge then next_edges[2] else next_edges[1]
+                                current_vertex = next_vertex
+                                current_edge = next_edge
+                            )
+                        )
+                    )
+
+
+                    if closed and loop_vertices.count >= 3 then
+                    (
+                        append loops loop_vertices
+                    )
+                )
+            )
+
+
+            if loops.count > 0 then
+            (
+                local loop_areas = #()
+                for loop_vertices in loops do
+                (
+                    local loop_area = 0.0
+                    local loop_origin = world_points[loop_vertices[1]]
+
+
+                    for loop_position = 1 to loop_vertices.count do
+                    (
+                        local next_position = if loop_position == loop_vertices.count then 1 else loop_position + 1
+                        local point_a = world_points[loop_vertices[loop_position]] - loop_origin
+                        local point_b = world_points[loop_vertices[next_position]] - loop_origin
+                        local point_a_x = dot point_a wall_horizontal
+                        local point_a_y = dot point_a wall_vertical
+                        local point_b_x = dot point_b wall_horizontal
+                        local point_b_y = dot point_b wall_vertical
+                        loop_area += point_a_x * point_b_y - point_b_x * point_a_y
+                    )
+
+
+                    append loop_areas (loop_area * 0.5)
+                )
+
+
+                local outer_index = 1
+                local outer_area = abs(loop_areas[1])
+                for loop_index = 2 to loops.count do
+                (
+                    local current_area = abs(loop_areas[loop_index])
+                    if current_area > outer_area then
+                    (
+                        outer_area = current_area
+                        outer_index = loop_index
+                    )
+                )
+
+
+                for loop_index = 1 to loops.count do
+                (
+                    local loop_vertices = loops[loop_index]
+                    local signed_area = loop_areas[loop_index]
+                    local orientation = if signed_area >= 0.0 then 1.0 else -1.0
+
+
+                    for corner_index = 1 to loop_vertices.count do
+                    (
+                        local vertex_index = loop_vertices[corner_index]
+                        local border_at_vertex = (vertex_border_edges[vertex_index] * border_edges) as array
+
+
+                        if border_at_vertex.count == 2 then
+                        (
+                            local previous_index = if corner_index == 1 then loop_vertices.count else corner_index - 1
+                            local next_index = if corner_index == loop_vertices.count then 1 else corner_index + 1
+                            local previous_vertex = loop_vertices[previous_index]
+                            local next_vertex = loop_vertices[next_index]
+                            local dir_a = world_points[previous_vertex] - world_points[vertex_index]
+                            local dir_b = world_points[next_vertex] - world_points[vertex_index]
+
+
+                            if length dir_a > epsilon and length dir_b > epsilon then
+                            (
+                                dir_a = normalize dir_a
+                                dir_b = normalize dir_b
+                                local is_straight = abs(dot dir_a dir_b) >= direction_cos
+                                local is_inner = false
+
+
+                                if not is_straight then
+                                (
+                                    is_inner = loop_index != outer_index
+
+
+                                    if not is_inner then
+                                    (
+                                        local point_0 = world_points[previous_vertex]
+                                        local point_1 = world_points[vertex_index]
+                                        local point_2 = world_points[next_vertex]
+                                        local x_0 = dot point_0 wall_horizontal
+                                        local y_0 = dot point_0 wall_vertical
+                                        local x_1 = dot point_1 wall_horizontal
+                                        local y_1 = dot point_1 wall_vertical
+                                        local x_2 = dot point_2 wall_horizontal
+                                        local y_2 = dot point_2 wall_vertical
+                                        local turn_cross = ((x_1 - x_0) * (y_2 - y_1)) - ((y_1 - y_0) * (x_2 - x_1))
+                                        is_inner = (turn_cross * orientation) < -epsilon
+                                    )
+                                )
+
+
+                                if source_vertices != undefined then
+                                (
+                                    local source_enabled = vertex_index <= source_vertices.count and source_vertices[vertex_index]
+                                    is_inner = is_inner and source_enabled
+                                )
+
+
+                                if is_inner then
+                                (
+                                    local can_vertical = false
+                                    local can_horizontal = false
+                                    local vertical_base_edge = 0
+                                    local horizontal_base_edge = 0
+
+
+                                    for edge_index in border_at_vertex do
+                                    (
+                                        local edge_kind = edge_kinds[edge_index]
+
+
+                                        if edge_kind == #vertical then
+                                        (
+                                            can_vertical = true
+                                            vertical_base_edge = edge_index
+                                        )
+
+
+                                        if edge_kind == #horizontal then
+                                        (
+                                            can_horizontal = true
+                                            horizontal_base_edge = edge_index
+                                        )
+                                    )
+
+
+                                    local vertical_edge_axis = undefined
+                                    local horizontal_edge_axis = undefined
+
+
+                                    if vertical_base_edge > 0 then
+                                    (
+                                        local vertical_edge_verts = polyop.getEdgeVerts base_obj vertical_base_edge
+                                        if vertical_edge_verts != undefined and vertical_edge_verts.count == 2 then
+                                        (
+                                            local vertical_other = if vertical_edge_verts[1] == vertex_index then vertical_edge_verts[2] else vertical_edge_verts[1]
+                                            local vertical_line = world_points[vertical_other] - world_points[vertex_index]
+
+
+                                            if length vertical_line > epsilon then
+                                            (
+                                                vertical_line = normalize vertical_line
+                                                vertical_edge_axis = cross vertical_line wall_normal
+
+
+                                                if length vertical_edge_axis > epsilon then
+                                                (
+                                                    vertical_edge_axis = normalize vertical_edge_axis
+                                                )
+                                                else
+                                                (
+                                                    vertical_edge_axis = undefined
+                                                )
+                                            )
+                                        )
+                                    )
+
+
+                                    if horizontal_base_edge > 0 then
+                                    (
+                                        local horizontal_edge_verts = polyop.getEdgeVerts base_obj horizontal_base_edge
+                                        if horizontal_edge_verts != undefined and horizontal_edge_verts.count == 2 then
+                                        (
+                                            local horizontal_other = if horizontal_edge_verts[1] == vertex_index then horizontal_edge_verts[2] else horizontal_edge_verts[1]
+                                            local horizontal_line = world_points[horizontal_other] - world_points[vertex_index]
+
+
+                                            if length horizontal_line > epsilon then
+                                            (
+                                                horizontal_line = normalize horizontal_line
+                                                horizontal_edge_axis = cross horizontal_line wall_normal
+
+
+                                                if length horizontal_edge_axis > epsilon then
+                                                (
+                                                    horizontal_edge_axis = normalize horizontal_edge_axis
+                                                )
+                                                else
+                                                (
+                                                    horizontal_edge_axis = undefined
+                                                )
+                                            )
+                                        )
+                                    )
+
+
+                                    /*
+                                    Store the region normal/origin with every candidate.
+                                    The fixed queue can later remap the same planar wall after prior cuts changed face IDs.
+                                    */
+                                    append result #(
+                                        vertex_index,
+                                        can_vertical,
+                                        can_horizontal,
+                                        vertical_base_edge,
+                                        horizontal_base_edge,
+                                        world_points[vertex_index],
+                                        vertical_edge_axis,
+                                        horizontal_edge_axis,
+                                        wall_horizontal,
+                                        wall_vertical,
+                                        wall_normal,
+                                        wall_origin,
+                                        region_id
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+
+        if not batch_quiet then format "Wall-Fixer Base Planar Analysis: node:% regions:% candidates:%\n" node.name planar_regions.count result.count
+        result
+        -- return
+    ),
+
+
+    /*
+    Returns base-object inner-corner vertices still available for the next Make 1 Slice pass.
+    For All mode, vertical candidates have priority until exhausted, then horizontal candidates are returned.
+    */
+    function getAvailableBaseSliceCornerSelection node cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 =
+    (
+        local result = #{}
+        local base_candidates = getBaseInnerSliceCandidates node angle_threshold:angle_threshold planar_tolerance:planar_tolerance
+        if base_candidates.count == 0 then return result
+
+
+        local requested_kinds = #()
+        if cut_mode == #all or cut_mode == #vertical then append requested_kinds #vertical
+        if cut_mode == #all or cut_mode == #horizontal then append requested_kinds #horizontal
+
+
+        for slice_kind in requested_kinds while result.numberSet == 0 do
+        (
+            local available_plane_records = #()
+            local available_edges = #{}
+
+
+            for candidate in base_candidates do
+            (
+                local base_vertex = candidate[1]
+                local direction_available = if slice_kind == #vertical then candidate[2] else candidate[3]
+                local base_edge = if slice_kind == #vertical then candidate[4] else candidate[5]
+                local base_anchor = candidate[6]
+                local base_axis = undefined
+
+
+                if slice_plane_mode == #nextVert then
+                (
+                    base_axis = if slice_kind == #vertical then candidate[7] else candidate[8]
+                )
+                else
+                (
+                    base_axis = if slice_kind == #vertical then candidate[9] else candidate[10]
+                )
+
+
+                if direction_available and base_axis != undefined then
+                (
+                    local already_processed = false
+                    local duplicate_available = false
+
+
+                    if slice_plane_mode == #nextVert then
+                    (
+                        already_processed = isBaseSliceEdgeProcessed node base_edge slice_kind
+                        duplicate_available = base_edge > 0 and base_edge <= available_edges.count and available_edges[base_edge]
+                    )
+                    else
+                    (
+                        already_processed = isBaseSlicePlaneProcessed node base_anchor base_axis slice_kind
+                        duplicate_available = hasSlicePlaneRecord base_anchor base_axis available_plane_records
+                    )
+
+
+                    if not already_processed and not duplicate_available then
+                    (
+                        result[base_vertex] = true
+                        if slice_plane_mode == #nextVert then
+                        (
+                            if base_edge > 0 then available_edges[base_edge] = true
+                        )
+                        else
+                        (
+                            append available_plane_records #(normalize base_axis, base_anchor)
+                        )
+                    )
+                )
+            )
+        )
+
+
+        result
+        -- return
+    ),
+
+
+    /*
+    Returns Reset Slicing INNER VERTS that still need a requested slice direction.
+    A vertex is removed only after every available requested direction for that vertex was processed.
+    */
+    function getRemainingResetInnerVertSelection node cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 =
+    (
+        local reset_inner_vertices = getResetInnerVertSelection node
+        if reset_inner_vertices == undefined then return undefined
+
+
+        local remaining_vertices = copy reset_inner_vertices
+        local base_candidates = getBaseInnerSliceCandidates node angle_threshold:angle_threshold source_vertices:reset_inner_vertices planar_tolerance:planar_tolerance planar_tolerance:planar_tolerance
+        local request_vertical = cut_mode == #all or cut_mode == #vertical
+        local request_horizontal = cut_mode == #all or cut_mode == #horizontal
+
+
+        for candidate in base_candidates do
+        (
+            local base_vertex = candidate[1]
+            local requested_direction_count = 0
+            local processed_direction_count = 0
+
+
+            if request_vertical and candidate[2] then
+            (
+                local vertical_base_edge = candidate[4]
+                local vertical_anchor = candidate[6]
+                local vertical_axis = if slice_plane_mode == #nextVert then candidate[7] else candidate[9]
+
+
+                if vertical_axis != undefined then
+                (
+                    requested_direction_count += 1
+                    local vertical_processed = if slice_plane_mode == #nextVert then
+                    (
+                        isBaseSliceEdgeProcessed node vertical_base_edge #vertical
+                    )
+                    else
+                    (
+                        isBaseSlicePlaneProcessed node vertical_anchor vertical_axis #vertical
+                    )
+                    if vertical_processed then processed_direction_count += 1
+                )
+            )
+
+
+            if request_horizontal and candidate[3] then
+            (
+                local horizontal_base_edge = candidate[5]
+                local horizontal_anchor = candidate[6]
+                local horizontal_axis = if slice_plane_mode == #nextVert then candidate[8] else candidate[10]
+
+
+                if horizontal_axis != undefined then
+                (
+                    requested_direction_count += 1
+                    local horizontal_processed = if slice_plane_mode == #nextVert then
+                    (
+                        isBaseSliceEdgeProcessed node horizontal_base_edge #horizontal
+                    )
+                    else
+                    (
+                        isBaseSlicePlaneProcessed node horizontal_anchor horizontal_axis #horizontal
+                    )
+                    if horizontal_processed then processed_direction_count += 1
+                )
+            )
+
+
+            if requested_direction_count > 0 and processed_direction_count == requested_direction_count then
+            (
+                remaining_vertices[base_vertex] = false
+            )
+        )
+
+
+        remaining_vertices
+        -- return
+    ),
+
+
+    /*
+    Returns true when the exact Edit Poly modifier instance exists on the supplied node.
+    This keeps CHECK DOUBLE FACES bound to the current modifier instead of any arbitrary stack modifier.
+    */
+    function nodeHasEditPolyModifier node modifier =
+    (
+        if node == undefined or modifier == undefined then return false
+        if not(isValidNode node) or classOf modifier != Edit_Poly then return false
+
+
+        found_modifier = false
+        for stack_modifier in node.modifiers while not found_modifier do
+        (
+            if stack_modifier == modifier then found_modifier = true
+        )
+
+
+        found_modifier
+        -- return
+    ),
+
+
+    /*
+    Returns the geometry source used by CHECK DOUBLE FACES for one node.
+    The current Edit Poly modifier wins; otherwise the Editable Poly base object is used.
+    */
+    function getDoubleFaceSource node active_edit_poly =
+    (
+        if node == undefined or not(isValidNode node) then return undefined
+
+
+        if active_edit_poly != undefined and nodeHasEditPolyModifier node active_edit_poly then
+        (
+            #(#editPoly, active_edit_poly)
+        )
+        else if classOf node.baseObject == Editable_Poly then
+        (
+            #(#editablePoly, node.baseObject)
+        )
+        else
+        (
+            undefined
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns one face selection BitArray from either the current Edit Poly modifier or Editable Poly base.
+    Undefined selections are normalized to an empty BitArray.
+    */
+    function getDoubleFaceSourceSelection node source_kind source_ref =
+    (
+        face_selection = #{}
+
+
+        try
+        (
+            if source_kind == #editPoly then
+            (
+                face_selection = source_ref.GetSelection #Face node:node
+            )
+            else
+            (
+                face_selection = polyop.getFaceSelection source_ref
+            )
+        )
+        catch
+        (
+            face_selection = #{}
+        )
+
+
+        if face_selection == undefined then face_selection = #{}
+        copy face_selection
+        -- return
+    ),
+
+
+    /*
+    Writes one face selection to either the current Edit Poly modifier or Editable Poly base.
+    No modifier is created and no object is collapsed by this operation.
+    */
+    function setDoubleFaceSourceSelection node source_kind source_ref face_selection =
+    (
+        if node == undefined or not(isValidNode node) then return false
+
+
+        try
+        (
+            if source_kind == #editPoly then
+            (
+                source_ref.SetPrimaryNode node
+                source_ref.useStackSelection = false
+                source_ref.SetSelection #Face face_selection node:node
+            )
+            else
+            (
+                polyop.setFaceSelection source_ref face_selection
+            )
+            true
+        )
+        catch
+        (
+            false
+        )
+        -- return
+    ),
+
+
+    /*
+    Builds one world-space polygon record for a face at the selected editing level.
+    Record layout is #(source_index, face_index, world_points, center, normal, was_selected).
+    */
+    function buildDoubleFaceRecord node source_index source_kind source_ref face_index source_selection =
+    (
+        if node == undefined or not(isValidNode node) then return undefined
+
+
+        face_vertices = #()
+        vertex_points = #()
+
+
+        try
+        (
+            if source_kind == #editPoly then
+            (
+                face_degree = source_ref.GetFaceDegree face_index node:node
+                if face_degree == undefined or face_degree < 3 then return undefined
+
+
+                for corner_index = 1 to face_degree do
+                (
+                    vertex_index = source_ref.GetFaceVertex face_index corner_index node:node
+                    if vertex_index == undefined or vertex_index < 1 then return undefined
+                    append face_vertices vertex_index
+                )
+
+
+                for vertex_index in face_vertices do
+                (
+                    vertex_position = source_ref.GetVertex vertex_index node:node
+                    if vertex_position == undefined then return undefined
+                    append vertex_points (vertex_position * node.objectTransform)
+                )
+            )
+            else
+            (
+                face_vertices = polyop.getFaceVerts source_ref face_index
+                if face_vertices == undefined or face_vertices.count < 3 then return undefined
+
+
+                for vertex_index in face_vertices do
+                (
+                    append vertex_points ((polyop.getVert source_ref vertex_index) * node.objectTransform)
+                )
+            )
+        )
+        catch
+        (
+            return undefined
+        )
+
+
+        if vertex_points.count < 3 then return undefined
+
+
+        center_point = [0,0,0]
+        for vertex_point in vertex_points do center_point += vertex_point
+        center_point = center_point / vertex_points.count
+
+
+        normal_sum = [0,0,0]
+        origin_point = vertex_points[1]
+        for point_index = 2 to (vertex_points.count - 1) do
+        (
+            normal_sum += cross (vertex_points[point_index] - origin_point) (vertex_points[point_index + 1] - origin_point)
+        )
+
+
+        if length normal_sum <= epsilon then return undefined
+        face_normal = normalize normal_sum
+        was_selected = if face_index <= source_selection.count then source_selection[face_index] else false
+
+
+        #(source_index, face_index, vertex_points, center_point, face_normal, was_selected)
+        -- return
+    ),
+
+
+    /*
+    Projects a world-space point to a stable 2D plane by dropping the dominant normal axis.
+    The result is a two-number array so no external geometry helper is required.
+    */
+    function projectDoubleFacePoint2D point drop_axis =
+    (
+        case drop_axis of
+        (
+            1: #(point.y, point.z)
+            2: #(point.x, point.z)
+            default: #(point.x, point.y)
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns the signed 2D orientation for three projected points.
+    Positive and negative values represent opposite turn directions.
+    */
+    function getDoubleFaceOrientation2D point_a point_b point_c =
+    (
+        ((point_b[1] - point_a[1]) * (point_c[2] - point_a[2])) - \
+        ((point_b[2] - point_a[2]) * (point_c[1] - point_a[1]))
+        -- return
+    ),
+
+
+    /*
+    Returns true when a projected point lies on one projected line segment within tolerance.
+    This treats touching face boundaries as valid projected overlap.
+    */
+    function isDoubleFacePointOnSegment2D point_value point_a point_b tolerance:0.0001 =
+    (
+        orientation = getDoubleFaceOrientation2D point_a point_b point_value
+        if abs orientation > tolerance then return false
+
+
+        point_value[1] >= ((amin point_a[1] point_b[1]) - tolerance) and \
+        point_value[1] <= ((amax point_a[1] point_b[1]) + tolerance) and \
+        point_value[2] >= ((amin point_a[2] point_b[2]) - tolerance) and \
+        point_value[2] <= ((amax point_a[2] point_b[2]) + tolerance)
+        -- return
+    ),
+
+
+    /*
+    Returns true when two projected polygon edges intersect or touch.
+    The test handles both crossing and collinear boundary contact.
+    */
+    function doDoubleFaceSegmentsIntersect2D a1 a2 b1 b2 tolerance:0.0001 =
+    (
+        orientation_a = getDoubleFaceOrientation2D a1 a2 b1
+        orientation_b = getDoubleFaceOrientation2D a1 a2 b2
+        orientation_c = getDoubleFaceOrientation2D b1 b2 a1
+        orientation_d = getDoubleFaceOrientation2D b1 b2 a2
+
+
+        if (((orientation_a > tolerance) and (orientation_b < -tolerance)) or ((orientation_a < -tolerance) and (orientation_b > tolerance))) and \
+           (((orientation_c > tolerance) and (orientation_d < -tolerance)) or ((orientation_c < -tolerance) and (orientation_d > tolerance))) then return true
+
+
+        if abs orientation_a <= tolerance and isDoubleFacePointOnSegment2D b1 a1 a2 tolerance:tolerance then return true
+        if abs orientation_b <= tolerance and isDoubleFacePointOnSegment2D b2 a1 a2 tolerance:tolerance then return true
+        if abs orientation_c <= tolerance and isDoubleFacePointOnSegment2D a1 b1 b2 tolerance:tolerance then return true
+        if abs orientation_d <= tolerance and isDoubleFacePointOnSegment2D a2 b1 b2 tolerance:tolerance then return true
+
+
+        false
+        -- return
+    ),
+
+
+    /*
+    Returns true when one projected point is inside or on the boundary of a polygon.
+    A standard odd-even ray crossing test supports convex and concave wall faces.
+    */
+    function isDoubleFacePointInPolygon2D point_value polygon tolerance:0.0001 =
+    (
+        if polygon == undefined or polygon.count < 3 then return false
+
+
+        previous_index = polygon.count
+        inside = false
+
+
+        for current_index = 1 to polygon.count do
+        (
+            point_a = polygon[previous_index]
+            point_b = polygon[current_index]
+
+
+            if isDoubleFacePointOnSegment2D point_value point_a point_b tolerance:tolerance then return true
+
+
+            if ((point_a[2] > point_value[2]) != (point_b[2] > point_value[2])) then
+            (
+                crossing_x = ((point_b[1] - point_a[1]) * (point_value[2] - point_a[2]) / (point_b[2] - point_a[2])) + point_a[1]
+                if point_value[1] < crossing_x then inside = not inside
+            )
+
+
+            previous_index = current_index
+        )
+
+
+        inside
+        -- return
+    ),
+
+
+    /*
+    Returns true when two nearly parallel world-space face polygons overlap in projection.
+    Vertex containment and edge intersections avoid pairing unrelated nearby parallel walls.
+    */
+    function doDoubleFacePolygonsOverlap record_a record_b tolerance:0.0001 =
+    (
+        normal_value = record_a[5]
+        normal_abs = [abs normal_value.x, abs normal_value.y, abs normal_value.z]
+        drop_axis = 3
+        if normal_abs.x >= normal_abs.y and normal_abs.x >= normal_abs.z then
+        (
+            drop_axis = 1
+        )
+        else if normal_abs.y >= normal_abs.z then
+        (
+            drop_axis = 2
+        )
+
+
+        polygon_a = #()
+        polygon_b = #()
+        for point_value in record_a[3] do append polygon_a (projectDoubleFacePoint2D point_value drop_axis)
+        for point_value in record_b[3] do append polygon_b (projectDoubleFacePoint2D point_value drop_axis)
+
+
+        for point_value in polygon_a do
+        (
+            if isDoubleFacePointInPolygon2D point_value polygon_b tolerance:tolerance then return true
+        )
+
+
+        for point_value in polygon_b do
+        (
+            if isDoubleFacePointInPolygon2D point_value polygon_a tolerance:tolerance then return true
+        )
+
+
+        for index_a = 1 to polygon_a.count do
+        (
+            next_a = if index_a == polygon_a.count then 1 else index_a + 1
+            for index_b = 1 to polygon_b.count do
+            (
+                next_b = if index_b == polygon_b.count then 1 else index_b + 1
+                if doDoubleFaceSegmentsIntersect2D polygon_a[index_a] polygon_a[next_a] polygon_b[index_b] polygon_b[next_b] tolerance:tolerance then return true
+            )
+        )
+
+
+        false
+        -- return
+    ),
+
+
+    /*
+    Finds opposing overlapping face pairs on selected objects and writes the resulting face selections.
+    RMB mode can keep only already-selected faces whose normals point toward their paired wall faces.
+    */
+    function checkDoubleFaces max_distance:100.0 inward_only:false use_existing_selection:false angle_threshold:5.0 =
+    (
+        selected_nodes = selection as array
+        last_slice_report = ""
+        last_slice_error = undefined
+
+
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select one or more wall objects before running CHECK DOUBLE FACES."
+            return false
+        )
+
+
+        active_edit_poly = undefined
+        try
+        (
+            current_object = modPanel.getCurrentObject()
+            if current_object != undefined and classOf current_object == Edit_Poly then active_edit_poly = current_object
+        )
+        catch
+        (
+            active_edit_poly = undefined
+        )
+
+
+        source_records = #()
+        face_records = #()
+        had_face_selection = false
+
+
+        for node in selected_nodes do
+        (
+            source_data = getDoubleFaceSource node active_edit_poly
+            if source_data != undefined then
+            (
+                source_kind = source_data[1]
+                source_ref = source_data[2]
+                source_selection = getDoubleFaceSourceSelection node source_kind source_ref
+                if source_selection.numberSet > 0 then had_face_selection = true
+
+
+                face_count = 0
+                try
+                (
+                    face_count = if source_kind == #editPoly then source_ref.GetNumFaces node:node else polyop.getNumFaces source_ref
+                )
+                catch
+                (
+                    face_count = 0
+                )
+
+
+                if face_count > 0 then
+                (
+                    source_index = source_records.count + 1
+                    append source_records #(node, source_kind, source_ref, face_count, source_selection)
+
+
+                    for face_index = 1 to face_count do
+                    (
+                        face_record = buildDoubleFaceRecord node source_index source_kind source_ref face_index source_selection
+                        if face_record != undefined then append face_records face_record
+                    )
+                )
+            )
+        )
+
+
+        if source_records.count == 0 or face_records.count < 2 then
+        (
+            last_slice_report = "CHECK DOUBLE FACES requires Editable Poly objects or the current Edit Poly modifier with at least two valid faces."
+            return false
+        )
+
+
+        output_selections = #()
+        for source_record in source_records do append output_selections #{}
+
+
+        opposite_cos = cos angle_threshold
+        pair_count = 0
+        inward_pair_count = 0
+
+
+        for record_a_index = 1 to (face_records.count - 1) do
+        (
+            record_a = face_records[record_a_index]
+
+
+            for record_b_index = (record_a_index + 1) to face_records.count do
+            (
+                record_b = face_records[record_b_index]
+                normal_dot = dot record_a[5] record_b[5]
+
+
+                if normal_dot <= -opposite_cos then
+                (
+                    center_delta = record_b[4] - record_a[4]
+                    distance_a = abs(dot center_delta record_a[5])
+                    distance_b = abs(dot center_delta record_b[5])
+                    plane_distance = amax distance_a distance_b
+
+
+                    if plane_distance <= max_distance and doDoubleFacePolygonsOverlap record_a record_b then
+                    (
+                        pair_count += 1
+                        faces_point_toward = (dot record_a[5] center_delta) > epsilon and (dot record_b[5] (-center_delta)) > epsilon
+                        if faces_point_toward then inward_pair_count += 1
+
+
+                        if inward_only then
+                        (
+                            if faces_point_toward then
+                            (
+                                if (not use_existing_selection) or (not had_face_selection) or record_a[6] then
+                                (
+                                    output_selections[record_a[1]][record_a[2]] = true
+                                )
+                                if (not use_existing_selection) or (not had_face_selection) or record_b[6] then
+                                (
+                                    output_selections[record_b[1]][record_b[2]] = true
+                                )
+                            )
+                        )
+                        else
+                        (
+                            output_selections[record_a[1]][record_a[2]] = true
+                            output_selections[record_b[1]][record_b[2]] = true
+                        )
+                    )
+                )
+            )
+        )
+
+
+        selected_face_count = 0
+        for source_index = 1 to source_records.count do
+        (
+            source_record = source_records[source_index]
+            setDoubleFaceSourceSelection source_record[1] source_record[2] source_record[3] output_selections[source_index]
+            selected_face_count += output_selections[source_index].numberSet
+        )
+
+
+        max modify mode
+        if active_edit_poly != undefined then
+        (
+            primary_node = undefined
+            for source_record in source_records while primary_node == undefined do
+            (
+                if source_record[2] == #editPoly then primary_node = source_record[1]
+            )
+
+
+            if primary_node != undefined then
+            (
+                active_edit_poly.SetPrimaryNode primary_node
+                modPanel.setCurrentObject active_edit_poly
+                active_edit_poly.SetEPolySelLevel #Face
+                subObjectLevel = 4
+            )
+        )
+        else if source_records.count > 0 then
+        (
+            first_source = source_records[1]
+            if first_source[2] == #editablePoly then
+            (
+                modPanel.setCurrentObject first_source[3]
+                subObjectLevel = 4
+            )
+        )
+
+
+        last_slice_report = "CHECK DOUBLE FACES:\n" + \
+            "  PAIRS: " + (pair_count as string) + "\n" + \
+            "  INWARD PAIRS: " + (inward_pair_count as string) + "\n" + \
+            "  SELECTED FACES: " + (selected_face_count as string) + "\n" + \
+            "  MAX DISTANCE: " + (max_distance as string)
+
+
+        if not batch_quiet then format "%\n" last_slice_report
+        completeRedraw()
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns true when node can be processed directly by PolyOp.
+    The current baseline processes nodes whose base object is Editable Poly.
+    */
+    function isSupportedNode node =
+    (
+        if node == undefined then
+        (
+            false
+        )
+        else
+        (
+            base_obj = node.baseObject
+            ((classOf base_obj) == Editable_Poly)
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns true when the slicer can evaluate an Editable Poly base or an existing Edit Poly modifier.
+    This is intentionally separate from isSupportedNode because PolyOp-only tools still require Editable Poly.
+    */
+    function isSliceSupportedNode node =
+    (
+        if node == undefined or not(isValidNode node) then
+        (
+            false
+        )
+        else
+        (
+            if classOf node.baseObject == Editable_Poly then
+            (
+                true
+            )
+            else
+            (
+                supported = false
+                for modifier in node.modifiers while not supported do
+                (
+                    if classOf modifier == Edit_Poly then supported = true
+                )
+                supported
+            )
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns a normalized direction from one modifier vertex along one incident edge.
+    Undefined is returned for dead, disconnected or zero-length edges.
+    */
+    function getRedundantLoopEdgeDirection node modifier vertex_index edge_index edge_vertices vertex_points =
+    (
+        if vertex_index < 1 or vertex_index > vertex_points.count then return undefined
+        if edge_index < 1 or edge_index > edge_vertices.count then return undefined
+
+
+        edge_pair = edge_vertices[edge_index]
+        if edge_pair == undefined or edge_pair.count != 2 then return undefined
+
+
+        other_vertex = 0
+        if edge_pair[1] == vertex_index then
+        (
+            other_vertex = edge_pair[2]
+        )
+        else if edge_pair[2] == vertex_index then
+        (
+            other_vertex = edge_pair[1]
+        )
+
+
+        if other_vertex < 1 or other_vertex > vertex_points.count then return undefined
+        if vertex_points[vertex_index] == undefined or vertex_points[other_vertex] == undefined then return undefined
+
+
+        edge_direction = vertex_points[other_vertex] - vertex_points[vertex_index]
+        if length edge_direction <= epsilon then return undefined
+
+
+        normalize edge_direction
+        -- return
+    ),
+
+
+    /*
+    Returns true when all supplied incident edges can be paired as straight continuations through one vertex.
+    An empty set is valid; any unpaired or bent continuation is rejected.
+    */
+    function areRedundantLoopEdgesStraightPairs node modifier vertex_index edge_set edge_vertices vertex_points angle_threshold:0.1 =
+    (
+        if edge_set.numberSet == 0 then return true
+        if (mod edge_set.numberSet 2) != 0 then return false
+
+
+        pending_edges = edge_set as array
+        straight_limit = cos angle_threshold
+
+
+        while pending_edges.count > 0 do
+        (
+            first_edge = pending_edges[1]
+            first_direction = getRedundantLoopEdgeDirection node modifier vertex_index first_edge edge_vertices vertex_points
+            if first_direction == undefined then return false
+
+
+            pair_index = 0
+            for index = 2 to pending_edges.count while pair_index == 0 do
+            (
+                pair_direction = getRedundantLoopEdgeDirection node modifier vertex_index pending_edges[index] edge_vertices vertex_points
+                if pair_direction != undefined then
+                (
+                    if dot first_direction pair_direction <= -straight_limit then pair_index = index
+                )
+            )
+
+
+            if pair_index == 0 then return false
+            deleteItem pending_edges pair_index
+            deleteItem pending_edges 1
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns true when every live face incident to one vertex stays on the reference plane direction.
+    Smoothing groups are intentionally ignored; only geometric face normals are tested.
+    */
+    function isRedundantLoopVertexPlanar vertex_index vertex_faces face_normals face_valid reference_normal angle_threshold:0.1 =
+    (
+        if vertex_index < 1 or vertex_index > vertex_faces.count then return false
+        if reference_normal == undefined or length reference_normal <= epsilon then return false
+
+
+        normal_limit = cos angle_threshold
+        live_face_count = 0
+
+
+        for face_index in vertex_faces[vertex_index] do
+        (
+            if face_index >= 1 and face_index <= face_normals.count then
+            (
+                if face_index <= face_valid.count and face_valid[face_index] then
+                (
+                    face_normal = face_normals[face_index]
+                    if face_normal == undefined then return false
+                    live_face_count += 1
+                    if abs(dot reference_normal face_normal) < normal_limit then return false
+                )
+            )
+        )
+
+
+        live_face_count > 0
+        -- return
+    ),
+
+
+    /*
+    Validates a completed border-to-border chain without changing topology.
+    Endpoints must split straight borders; internal transverse edges must continue straight and every incident face must stay planar.
+    */
+    function validateRedundantLoopChain node modifier chain_edges chain_vertices start_vertex end_vertex border_edges vertex_edges vertex_faces edge_vertices vertex_points face_normals face_valid reference_normal angle_threshold:0.1 =
+    (
+        if chain_edges.numberSet == 0 then return #(false, "empty chain")
+        if chain_vertices.count < 2 then return #(false, "chain has fewer than two vertices")
+        if start_vertex == end_vertex then return #(false, "chain returns to the same border vertex")
+
+
+        for vertex_index in chain_vertices do
+        (
+            if not(isRedundantLoopVertexPlanar vertex_index vertex_faces face_normals face_valid reference_normal angle_threshold:angle_threshold) then
+            (
+                return #(false, "incident faces are not coplanar at vertex " + (vertex_index as string))
+            )
+
+
+            incident_edges = vertex_edges[vertex_index]
+            chain_incident_edges = incident_edges * chain_edges
+            border_incident_edges = incident_edges * border_edges
+            is_endpoint = vertex_index == start_vertex or vertex_index == end_vertex
+
+
+            if is_endpoint then
+            (
+                if chain_incident_edges.numberSet != 1 then
+                (
+                    return #(false, "endpoint does not have exactly one loop edge at vertex " + (vertex_index as string))
+                )
+                if border_incident_edges.numberSet != 2 then
+                (
+                    return #(false, "endpoint is not inside one straight border segment at vertex " + (vertex_index as string))
+                )
+                if not(areRedundantLoopEdgesStraightPairs node modifier vertex_index border_incident_edges edge_vertices vertex_points angle_threshold:angle_threshold) then
+                (
+                    return #(false, "endpoint is a border corner at vertex " + (vertex_index as string))
+                )
+
+
+                extra_edges = incident_edges - chain_incident_edges - border_incident_edges
+                if extra_edges.numberSet > 0 then
+                (
+                    return #(false, "endpoint has additional geometry at vertex " + (vertex_index as string))
+                )
+            )
+            else
+            (
+                if border_incident_edges.numberSet > 0 then
+                (
+                    return #(false, "chain touches a border before its endpoint at vertex " + (vertex_index as string))
+                )
+                if chain_incident_edges.numberSet != 2 then
+                (
+                    return #(false, "internal chain vertex does not have exactly two loop edges at vertex " + (vertex_index as string))
+                )
+                if not(areRedundantLoopEdgesStraightPairs node modifier vertex_index chain_incident_edges edge_vertices vertex_points angle_threshold:angle_threshold) then
+                (
+                    return #(false, "loop changes direction at vertex " + (vertex_index as string))
+                )
+
+
+                transverse_edges = incident_edges - chain_incident_edges
+                if transverse_edges.numberSet > 0 then
+                (
+                    if not(areRedundantLoopEdgesStraightPairs node modifier vertex_index transverse_edges edge_vertices vertex_points angle_threshold:angle_threshold) then
+                    (
+                        return #(false, "transverse continuation changes direction at vertex " + (vertex_index as string))
+                    )
+                )
+            )
+        )
+
+
+        #(true, "")
+        -- return
+    ),
+
+
+    /*
+    Detects geometrically redundant straight internal loops on the current Edit Poly topology.
+    Returns #(loop_records, all_redundant_edges); each loop record is #(edge_bitarray, start_vertex, end_vertex).
+    */
+    function detectRedundantLoops node modifier angle_threshold:0.1 debug_output:false =
+    (
+        loop_records = #()
+        all_redundant_edges = #{}
+
+
+        if node == undefined or not(isValidNode node) then return #(loop_records, all_redundant_edges)
+        if modifier == undefined or classOf modifier != Edit_Poly then return #(loop_records, all_redundant_edges)
+
+
+        update node
+        vertex_count = modifier.GetNumVertices node:node
+        edge_count = modifier.GetNumEdges node:node
+        face_count = modifier.GetNumFaces node:node
+        if vertex_count < 2 or edge_count < 1 or face_count < 1 then return #(loop_records, all_redundant_edges)
+
+
+        vertex_points = #()
+        vertex_edges = #()
+        vertex_faces = #()
+        for vertex_index = 1 to vertex_count do
+        (
+            append vertex_points (modifier.GetVertex vertex_index node:node)
+            append vertex_edges #{}
+            append vertex_faces #{}
+        )
+
+
+        edge_vertices = #()
+        edge_faces = #()
+        border_edges = #{}
+        border_vertices = #{}
+
+
+        for edge_index = 1 to edge_count do
+        (
+            edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+            edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+            face_a = modifier.GetEdgeFace edge_index 1 node:node
+            face_b = modifier.GetEdgeFace edge_index 2 node:node
+            edge_live = edge_a != undefined and edge_b != undefined and face_a != undefined and face_b != undefined
+
+
+            if edge_live then
+            (
+                edge_live = edge_a >= 1 and edge_a <= vertex_count and edge_b >= 1 and edge_b <= vertex_count
+            )
+            if edge_live then
+            (
+                edge_live = vertex_points[edge_a] != undefined and vertex_points[edge_b] != undefined
+            )
+
+
+            if edge_live then
+            (
+                append edge_vertices #(edge_a, edge_b)
+                append edge_faces #(face_a, face_b)
+                vertex_edges[edge_a][edge_index] = true
+                vertex_edges[edge_b][edge_index] = true
+
+
+                if (face_a == 0) != (face_b == 0) then
+                (
+                    border_edges[edge_index] = true
+                    border_vertices[edge_a] = true
+                    border_vertices[edge_b] = true
+                )
+            )
+            else
+            (
+                append edge_vertices undefined
+                append edge_faces undefined
+            )
+        )
+
+
+        face_normals = #()
+        face_valid = #{}
+        for face_index = 1 to face_count do
+        (
+            face_degree = modifier.GetFaceDegree face_index node:node
+            face_vertex_ids = #()
+            face_normal_sum = [0,0,0]
+            face_is_valid = face_degree != undefined and face_degree >= 3
+
+
+            if face_is_valid then
+            (
+                for corner_index = 1 to face_degree while face_is_valid do
+                (
+                    face_vertex = modifier.GetFaceVertex face_index corner_index node:node
+                    if face_vertex == undefined or face_vertex < 1 or face_vertex > vertex_count then
+                    (
+                        face_is_valid = false
+                    )
+                    else if vertex_points[face_vertex] == undefined then
+                    (
+                        face_is_valid = false
+                    )
+                    else
+                    (
+                        append face_vertex_ids face_vertex
+                        vertex_faces[face_vertex][face_index] = true
+                    )
+                )
+            )
+
+
+            if face_is_valid then
+            (
+                origin_point = vertex_points[face_vertex_ids[1]]
+                for corner_index = 2 to (face_vertex_ids.count - 1) do
+                (
+                    point_b = vertex_points[face_vertex_ids[corner_index]]
+                    point_c = vertex_points[face_vertex_ids[corner_index + 1]]
+                    face_normal_sum += cross (point_b - origin_point) (point_c - origin_point)
+                )
+                if length face_normal_sum <= epsilon then face_is_valid = false
+            )
+
+
+            if face_is_valid then
+            (
+                append face_normals (normalize face_normal_sum)
+                face_valid[face_index] = true
+            )
+            else
+            (
+                append face_normals undefined
+            )
+        )
+
+
+        candidate_edges = #{}
+        normal_limit = cos angle_threshold
+        for edge_index = 1 to edge_count do
+        (
+            edge_face_pair = edge_faces[edge_index]
+            is_border_edge = edge_index <= border_edges.count and border_edges[edge_index]
+            if edge_face_pair != undefined and not is_border_edge then
+            (
+                face_a = edge_face_pair[1]
+                face_b = edge_face_pair[2]
+                if face_a > 0 and face_b > 0 and face_a <= face_count and face_b <= face_count then
+                (
+                    face_a_valid = face_a <= face_valid.count and face_valid[face_a]
+                    face_b_valid = face_b <= face_valid.count and face_valid[face_b]
+                    if face_a_valid and face_b_valid then
+                    (
+                        if abs(dot face_normals[face_a] face_normals[face_b]) >= normal_limit then candidate_edges[edge_index] = true
+                    )
+                )
+            )
+        )
+
+
+        accepted_keys = #()
+        attempted_keys = #()
+
+
+        for start_edge in candidate_edges do
+        (
+            start_edge_vertices = edge_vertices[start_edge]
+            if start_edge_vertices != undefined then
+            (
+                possible_start_vertices = #()
+                start_a_is_border = start_edge_vertices[1] <= border_vertices.count and border_vertices[start_edge_vertices[1]]
+                start_b_is_border = start_edge_vertices[2] <= border_vertices.count and border_vertices[start_edge_vertices[2]]
+                if start_a_is_border then append possible_start_vertices start_edge_vertices[1]
+                if start_b_is_border then append possible_start_vertices start_edge_vertices[2]
+
+
+                for start_vertex in possible_start_vertices do
+                (
+                    attempt_key = (start_edge as string) + ":" + (start_vertex as string)
+                    if findItem attempted_keys attempt_key == 0 then
+                    (
+                        append attempted_keys attempt_key
+                        chain_edges = #{}
+                        chain_vertices = #(start_vertex)
+                        chain_edges[start_edge] = true
+                        previous_vertex = start_vertex
+                        current_edge = start_edge
+                        current_vertex = if start_edge_vertices[1] == start_vertex then start_edge_vertices[2] else start_edge_vertices[1]
+                        append chain_vertices current_vertex
+                        rejected_reason = ""
+                        completed_chain = false
+                        step_count = 0
+
+
+                        while rejected_reason == "" and not completed_chain and step_count <= edge_count do
+                        (
+                            step_count += 1
+
+
+                            current_is_border = current_vertex <= border_vertices.count and border_vertices[current_vertex]
+                            if current_is_border then
+                            (
+                                completed_chain = true
+                            )
+                            else
+                            (
+                                incoming_direction = vertex_points[current_vertex] - vertex_points[previous_vertex]
+                                if length incoming_direction <= epsilon then
+                                (
+                                    rejected_reason = "zero-length chain segment"
+                                )
+                                else
+                                (
+                                    incoming_direction = normalize incoming_direction
+                                    straight_forward_edges = #()
+                                    incident_candidates = vertex_edges[current_vertex] * candidate_edges
+
+
+                                    for candidate_edge in incident_candidates do
+                                    (
+                                        if candidate_edge != current_edge then
+                                        (
+                                            candidate_pair = edge_vertices[candidate_edge]
+                                            next_vertex = if candidate_pair[1] == current_vertex then candidate_pair[2] else candidate_pair[1]
+                                            outgoing_direction = vertex_points[next_vertex] - vertex_points[current_vertex]
+                                            if length outgoing_direction > epsilon then
+                                            (
+                                                outgoing_direction = normalize outgoing_direction
+                                                if dot incoming_direction outgoing_direction >= normal_limit then append straight_forward_edges candidate_edge
+                                            )
+                                        )
+                                    )
+
+
+                                    if straight_forward_edges.count == 0 then
+                                    (
+                                        rejected_reason = "straight chain stops before reaching another border"
+                                    )
+                                    else if straight_forward_edges.count > 1 then
+                                    (
+                                        rejected_reason = "straight chain branches before reaching another border"
+                                    )
+                                    else
+                                    (
+                                        next_edge = straight_forward_edges[1]
+                                        if chain_edges[next_edge] then
+                                        (
+                                            rejected_reason = "chain cycles before reaching another border"
+                                        )
+                                        else
+                                        (
+                                            next_pair = edge_vertices[next_edge]
+                                            next_vertex = if next_pair[1] == current_vertex then next_pair[2] else next_pair[1]
+                                            chain_edges[next_edge] = true
+                                            previous_vertex = current_vertex
+                                            current_vertex = next_vertex
+                                            current_edge = next_edge
+                                            append chain_vertices current_vertex
+                                        )
+                                    )
+                                )
+                            )
+                        )
+
+
+                        if rejected_reason == "" and not completed_chain then rejected_reason = "chain exceeded topology traversal limit"
+
+
+                        if rejected_reason == "" then
+                        (
+                            first_edge_faces = edge_faces[start_edge]
+                            reference_normal = face_normals[first_edge_faces[1]]
+                            validation_result = validateRedundantLoopChain node modifier chain_edges chain_vertices start_vertex current_vertex border_edges vertex_edges vertex_faces edge_vertices vertex_points face_normals face_valid reference_normal angle_threshold:angle_threshold
+                            if not validation_result[1] then rejected_reason = validation_result[2]
+                        )
+
+
+                        if rejected_reason == "" then
+                        (
+                            chain_key = chain_edges as string
+                            if findItem accepted_keys chain_key == 0 then
+                            (
+                                append accepted_keys chain_key
+                                append loop_records #(copy chain_edges, start_vertex, current_vertex)
+                                all_redundant_edges = all_redundant_edges + chain_edges
+                                if debug_output and not batch_quiet then format "Wall-Fixer Redundant Loop Detected: node:% loop:% edges:% startVert:% endVert:%\n" node.name loop_records.count chain_edges start_vertex current_vertex
+                            )
+                        )
+                        else if debug_output then
+                        (
+                            if not batch_quiet then format "Wall-Fixer Redundant Loop Rejected: node:% startEdge:% startVert:% traversedEdges:% reason:%\n" node.name start_edge start_vertex chain_edges rejected_reason
+                        )
+                    )
+                )
+            )
+        )
+
+
+        if debug_output then
+        (
+            if not batch_quiet then format "Wall-Fixer Redundant Loop Detection Summary: node:% candidateEdges:% loops:% redundantEdges:%\n" node.name candidate_edges loop_records.count all_redundant_edges
+        )
+
+
+        #(loop_records, all_redundant_edges)
+        -- return
+    ),
+
+
+    /*
+    Detects and removes redundant loops in one dedicated Cleanup LOOPS Edit Poly modifier.
+    The modifier is removed again when no valid redundant loops are found.
+    */
+    function cleanupRedundantLoopsOnNode node angle_threshold:0.1 debug_output:true commit_delete:false =
+    (
+        if node == undefined or not(isValidNode node) then return #(false, 0, 0, "invalid node")
+        if not(isSliceSupportedNode node) then return #(false, 0, 0, "requires Editable Poly geometry or an Edit Poly workflow")
+
+
+        local cleanup_modifier = undefined
+        local operation_error = undefined
+        local loop_count = 0
+        local redundant_edge_count = 0
+
+
+        try
+        (
+            cleanup_modifier = Edit_Poly name:"WMC - CLEANUP LOOPS"
+            addModifier node cleanup_modifier
+            update node
+
+
+            select node
+            max modify mode
+            modPanel.setCurrentObject cleanup_modifier
+            cleanup_modifier.SetPrimaryNode node
+            cleanup_modifier.useStackSelection = false
+
+
+            local detection_data = detectRedundantLoops node cleanup_modifier angle_threshold:angle_threshold debug_output:debug_output
+            local loop_records = detection_data[1]
+            local redundant_edges = detection_data[2]
+            loop_count = loop_records.count
+            redundant_edge_count = redundant_edges.numberSet
+
+
+            if redundant_edge_count == 0 then
+            (
+                deleteModifier node cleanup_modifier
+                cleanup_modifier = undefined
+                update node
+
+
+                if debug_output then
+                (
+                    if not batch_quiet then format "Wall-Fixer Redundant Loop Cleanup: node:% no redundant loops found; Cleanup LOOPS removed.\n" node.name
+                )
+
+
+                return #(true, 0, 0, "")
+            )
+
+
+            local edge_descriptors = #()
+            for edge_index in redundant_edges do
+            (
+                local edge_a = cleanup_modifier.GetEdgeVertex edge_index 1 node:node
+                local edge_b = cleanup_modifier.GetEdgeVertex edge_index 2 node:node
+
+
+                if edge_a == undefined or edge_b == undefined then
+                (
+                    throw ("Detected redundant-loop edge became invalid before cleanup: " + (edge_index as string))
+                )
+
+
+                local point_a = cleanup_modifier.GetVertex edge_a node:node
+                local point_b = cleanup_modifier.GetVertex edge_b node:node
+
+
+                if point_a == undefined or point_b == undefined then
+                (
+                    throw ("Detected redundant-loop edge endpoints became invalid before cleanup: " + (edge_index as string))
+                )
+
+
+                append edge_descriptors #(edge_index, point_a, point_b)
+            )
+
+
+            local old_remove_ctrl = cleanup_modifier.remveEdgeCtrlKey
+            cleanup_modifier.remveEdgeCtrlKey = false
+            cleanup_modifier.SetEPolySelLevel #Edge
+            cleanup_modifier.SetSelection #Edge #{} node:node
+            cleanup_modifier.Select #Edge redundant_edges node:node
+
+
+            local stored_selection = cleanup_modifier.GetSelection #Edge node:node
+            if stored_selection != redundant_edges then
+            (
+                throw ("Cleanup LOOPS could not select the detected redundant edges. Requested:" + (redundant_edges as string) + " actual:" + (stored_selection as string))
+            )
+
+
+            cleanup_modifier.SetOperation #RemoveEdge
+            cleanup_modifier.Commit()
+            cleanup_modifier.remveEdgeCtrlKey = old_remove_ctrl
+            update node
+
+
+            local unresolved_edges = #{}
+            for edge_data in edge_descriptors do
+            (
+                if doesDebugVisibleEdgeExistByEndpointPositions node edge_data[2] edge_data[3] tolerance:0.01 then
+                (
+                    unresolved_edges[edge_data[1]] = true
+                )
+            )
+
+
+            if unresolved_edges.numberSet > 0 then
+            (
+                throw ("Cleanup LOOPS left detected redundant edges visible: " + (unresolved_edges as string))
+            )
+
+
+            if debug_output then
+            (
+                if not batch_quiet then format "Wall-Fixer Redundant Loop Cleanup Complete: node:% loops:% removedEdges:% modifier:%\n" node.name loop_count redundant_edge_count cleanup_modifier.name
+            )
+        )
+        catch
+        (
+            operation_error = getCurrentException()
+
+
+            if cleanup_modifier != undefined then
+            (
+                try(deleteModifier node cleanup_modifier)catch()
+                cleanup_modifier = undefined
+            )
+
+
+            update node
+        )
+
+
+        if operation_error == undefined then
+        (
+            #(true, loop_count, redundant_edge_count, "")
+        )
+        else
+        (
+            #(false, 0, 0, operation_error as string)
+        )
+        -- return
+    ),
+
+
+    /*
+    Runs redundant-loop cleanup on every selected supported wall and restores the original node selection.
+    Nodes with no redundant loops receive no new modifiers.
+    */
+    function cleanupRedundantLoopsSelection angle_threshold:0.1 debug_output:true =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+        selected_nodes = selection as array
+
+
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select at least one wall object."
+            return false
+        )
+
+
+        total_loops = 0
+        total_edges = 0
+        processed_nodes = 0
+        failed_nodes = #()
+        report_text = ""
+
+
+        for node in selected_nodes do
+        (
+            cleanup_result = cleanupRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output
+            if cleanup_result[1] then
+            (
+                processed_nodes += 1
+                total_loops += cleanup_result[2]
+                total_edges += cleanup_result[3]
+                report_text += node.name + ": loops " + (cleanup_result[2] as string) + ", edges " + (cleanup_result[3] as string) + ".\n"
+            )
+            else
+            (
+                append failed_nodes node.name
+                report_text += node.name + ": FAILED - " + cleanup_result[4] + ".\n"
+            )
+        )
+
+
+        select selected_nodes
+        completeRedraw()
+
+
+        if failed_nodes.count == 0 then
+        (
+            last_slice_report = "Redundant Loop Cleanup complete. Loops: " + (total_loops as string) + "; edges removed: " + (total_edges as string) + ".\n" + report_text
+            if not batch_quiet then format "%" last_slice_report
+            true
+        )
+        else
+        (
+            last_slice_report = "Redundant Loop Cleanup completed with failures.\n" + report_text
+            if not batch_quiet then format "%" last_slice_report
+            false
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns the permanent development loader path for Restart.
+    The loader resolves the canonical unversioned component filenames on each reload.
+    */
+    function getRestartScriptPath source_script_path =
+    (
+        script_dir = getFilenamePath source_script_path
+        loader_path = script_dir + "Wall-Fixer.ms"
+
+
+        if doesFileExist loader_path then
+        (
+            loader_path
+        )
+        else
+        (
+            undefined
+        )
+        -- return
+    ),
+
+
+    /*
+    Builds a safe normalized vector or returns undefined for a degenerate vector.
+    This prevents zero-length vectors from producing invalid slice planes.
+    */
+    function safeNormalize vector_value =
+    (
+        vector_length = length vector_value
+
+
+        if vector_length <= epsilon then
+        (
+            undefined
+        )
+        else
+        (
+            vector_value / vector_length
+        )
+        -- return
+    ),
+
+
+    /*
+    Reads a Boolean value from the tool INI file.
+    Missing values fall back to the supplied default.
+    */
+    function readIniBool key_name default_value =
+    (
+        default_text = if default_value then "1" else "0"
+        value_text = getIniSetting ini_path "Settings" key_name
+
+
+        if value_text == "" then
+        (
+            default_value
+        )
+        else
+        (
+            value_text == "1"
+        )
+        -- return
+    ),
+
+
+    /*
+    Reads a Float value from the tool INI file.
+    Missing or invalid values fall back to the supplied default.
+    */
+    function readIniFloat key_name default_value =
+    (
+        value_text = getIniSetting ini_path "Settings" key_name
+
+
+        if value_text == "" then
+        (
+            default_value
+        )
+        else
+        (
+            parsed_value = undefined
+
+
+            try
+            (
+                parsed_value = value_text as float
+            )
+            catch
+            (
+                parsed_value = undefined
+            )
+
+
+            if parsed_value == undefined then default_value else parsed_value
+        )
+        -- return
+    ),
+
+
+    /*
+    Reads an Integer value from the tool INI file.
+    Missing or invalid values fall back to the supplied default.
+    */
+    function readIniInt key_name default_value =
+    (
+        value_text = getIniSetting ini_path "Settings" key_name
+
+
+        if value_text == "" then
+        (
+            default_value
+        )
+        else
+        (
+            parsed_value = undefined
+
+
+            try
+            (
+                parsed_value = value_text as integer
+            )
+            catch
+            (
+                parsed_value = undefined
+            )
+
+
+            if parsed_value == undefined then default_value else parsed_value
+        )
+        -- return
+    ),
+
+
+    /*
+    Saves current UI settings to the tool INI file.
+    Dialog position is saved when supplied.
+    */
+    function saveSettings weld_enabled weld_threshold display_hidden_edges double_side auto_smooth cut_mode_index angle_threshold planar_tolerance:1.0 slice_plane_mode_index:2 border_angle_threshold:5.0 right_angle_threshold:0.1 double_vert_threshold:1.0 double_face_threshold:100.0 slice_precision:0.01 quiet_batch:false dialog_position:undefined =
+    (
+        setIniSetting ini_path "Settings" "WeldVertices" (if weld_enabled then "1" else "0")
+        setIniSetting ini_path "Settings" "WeldThreshold" (weld_threshold as string)
+        setIniSetting ini_path "Settings" "DisplayHiddenEdges" (if display_hidden_edges then "1" else "0")
+        setIniSetting ini_path "Settings" "DoubleSide" (if double_side then "1" else "0")
+        setIniSetting ini_path "Settings" "AutoSmooth" (if auto_smooth then "1" else "0")
+        setIniSetting ini_path "Settings" "CutMode" (cut_mode_index as string)
+        setIniSetting ini_path "Settings" "AngleThreshold" (angle_threshold as string)
+        setIniSetting ini_path "Settings" "PlanarTolerance" (planar_tolerance as string)
+        setIniSetting ini_path "Settings" "SlicePlaneMode" (slice_plane_mode_index as string)
+        setIniSetting ini_path "Settings" "BorderAngleThreshold" (border_angle_threshold as string)
+        setIniSetting ini_path "Settings" "RightAngleThreshold" (right_angle_threshold as string)
+        setIniSetting ini_path "Settings" "DoubleVertThreshold" (double_vert_threshold as string)
+        setIniSetting ini_path "Settings" "DoubleFaceThreshold" (double_face_threshold as string)
+        setIniSetting ini_path "Settings" "SlicePrecision" (slice_precision as string)
+        setIniSetting ini_path "Settings" "QuietBatch" (if quiet_batch then "1" else "0")
+
+
+        if dialog_position != undefined then
+        (
+            setIniSetting ini_path "Window" "X" ((dialog_position.x as integer) as string)
+            setIniSetting ini_path "Window" "Y" ((dialog_position.y as integer) as string)
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Reads an Integer from a specified INI section.
+    This helper is declared before loadDialogPosition so MaxScript resolves it correctly.
+    */
+    function readIniIntFromSection section_name key_name default_value =
+    (
+        value_text = getIniSetting ini_path section_name key_name
+
+
+        if value_text == "" then
+        (
+            default_value
+        )
+        else
+        (
+            parsed_value = undefined
+
+
+            try
+            (
+                parsed_value = value_text as integer
+            )
+            catch
+            (
+                parsed_value = undefined
+            )
+
+
+            if parsed_value == undefined then default_value else parsed_value
+        )
+        -- return
+    ),
+
+
+    /*
+    Loads the saved rollout/dialog position from the INI file.
+    Undefined is returned when no position has been saved yet.
+    */
+    function loadDialogPosition =
+    (
+        x_text = getIniSetting ini_path "Window" "X"
+        y_text = getIniSetting ini_path "Window" "Y"
+
+
+        if (x_text == "") or (y_text == "") then
+        (
+            undefined
+        )
+        else
+        (
+            x_value = readIniIntFromSection "Window" "X" 100
+            y_value = readIniIntFromSection "Window" "Y" 100
+            [x_value, y_value]
+        )
+        -- return
+    ),
+
+
+    /*
+    Welds all vertices of one selected Editable Poly using the requested threshold.
+    This follows the verified working Editable Poly weld method directly on the node.
+    */
+    function weldNodeVertices node weld_threshold =
+    (
+        if not (isSupportedNode node) then
+        (
+            false
+        )
+        else
+        (
+            previous_weld_threshold = node.weldThreshold
+            node.weldThreshold = weld_threshold
+
+
+            vert_count = polyop.getNumVerts node
+            all_verts = #{1..vert_count}
+
+
+            weld_result = false
+
+
+            try
+            (
+                weld_result = polyop.weldVertsByThreshold node all_verts
+            )
+            catch
+            (
+                weld_result = false
+                if not batch_quiet then format "Wall-Fixer Weld: weldVertsByThreshold failed on %\n" node.name
+            )
+
+
+            node.weldThreshold = previous_weld_threshold
+            completeRedraw()
+
+
+            if not batch_quiet then format "Wall-Fixer Weld: % | threshold: % | result: %\n" \
+                node.name weld_threshold weld_result
+
+
+            true
+        )
+        -- return
+    ),
+
+
+    /*
+    Welds all vertices on all currently selected supported wall objects.
+    Objects outside the current selection are never processed.
+    */
+    function weldSelection weld_threshold =
+    (
+        selected_nodes = selection as array
+
+
+        for node in selected_nodes do
+        (
+            weldNodeVertices node weld_threshold
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Tracks selected geometry in interactive selection order.
+    Existing ordered nodes stay first; newly selected nodes are appended and deselected nodes are removed.
+    */
+    function updateAttachAndWeldSelectionOrder current_selection:undefined =
+    (
+        local current_nodes = if current_selection == undefined then selection as array else current_selection
+        local valid_current_nodes = #()
+        local updated_order = #()
+
+
+        for node in current_nodes do
+        (
+            if node != undefined and isValidNode node and superClassOf node == GeometryClass then
+            (
+                append valid_current_nodes node
+            )
+        )
+
+
+        if valid_current_nodes.count == 0 then
+        (
+            attach_weld_selection_order = #()
+            return #()
+        )
+
+
+        for node in attach_weld_selection_order do
+        (
+            if node != undefined and isValidNode node and (findItem valid_current_nodes node) > 0 then
+            (
+                append updated_order node
+            )
+        )
+
+
+        for node in valid_current_nodes do
+        (
+            if (findItem updated_order node) == 0 then
+            (
+                append updated_order node
+            )
+        )
+
+
+        attach_weld_selection_order = updated_order
+
+
+        /* Shallow-copy only the array container.
+           Plain copy is mapped and would clone every scene node in this node array. */
+        copy attach_weld_selection_order #noMap
+        -- return
+    ),
+
+
+    /*
+    Returns selected geometry in tracked interactive order.
+    If no click history exists, current Max selection order is used as a deterministic fallback.
+    */
+    function getAttachAndWeldSelectionOrder =
+    (
+        updateAttachAndWeldSelectionOrder()
+        -- return
+    ),
+
+
+    /*
+    Attaches all selected geometry into the first interactively selected target and welds the result.
+    Participating objects are baked to Editable Poly before attach; the tracked first object remains the target.
+    */
+    function attachAndWeldSelection weld_threshold =
+    (
+        local selected_nodes = getAttachAndWeldSelectionOrder()
+        local geometry_nodes = #()
+        local target_node = undefined
+        local attached_count = 0
+        local failed_nodes = #()
+
+
+        if weld_threshold < 0.0 then weld_threshold = 0.0
+
+
+        for node in selected_nodes do
+        (
+            if node != undefined and isValidNode node and superClassOf node == GeometryClass then
+            (
+                append geometry_nodes node
+            )
+        )
+
+
+        if geometry_nodes.count < 2 then
+        (
+            last_slice_report = "ATTACH AND WELD: select at least two geometry objects."
+            if not batch_quiet then format "%\n" last_slice_report
+            return false
+        )
+
+
+        target_node = geometry_nodes[1]
+
+
+        if not batch_quiet then format "Wall-Fixer Attach And Weld Target: %\n" target_node.name
+
+
+        /* Bake every participant first so Attach always receives Editable Poly nodes.
+           The first interactively selected geometry object remains the target and keeps its node identity. */
+        for node in geometry_nodes do
+        (
+            if isValidNode node then
+            (
+                try(convertToPoly node)catch()
+
+
+                if not(isValidNode node) or classOf node.baseObject != Editable_Poly then
+                (
+                    append failed_nodes node
+                )
+            )
+        )
+
+
+        if failed_nodes.count > 0 or not(isValidNode target_node) or classOf target_node.baseObject != Editable_Poly then
+        (
+            last_slice_report = "ATTACH AND WELD: one or more selected objects could not be converted to Editable Poly."
+            if not batch_quiet then format "%\n" last_slice_report
+            select geometry_nodes
+            return false
+        )
+
+
+        for source_index = 2 to geometry_nodes.count do
+        (
+            local source_node = geometry_nodes[source_index]
+
+
+            if isValidNode source_node then
+            (
+                local attach_error = undefined
+
+
+                try
+                (
+                    polyop.attach target_node source_node
+                )
+                catch
+                (
+                    attach_error = getCurrentException()
+                )
+
+
+                if attach_error == undefined and not(isValidNode source_node) then
+                (
+                    attached_count += 1
+                )
+                else
+                (
+                    if isValidNode source_node then append failed_nodes source_node
+                    if not batch_quiet then format "Wall-Fixer Attach And Weld Attach FAILED: target:% source:% error:%\n" \
+                        target_node.name (if isValidNode source_node then source_node.name else "<deleted>") attach_error
+                )
+            )
+        )
+
+
+        update target_node
+        weldNodeVertices target_node weld_threshold
+        select target_node
+        completeRedraw()
+
+
+        if failed_nodes.count > 0 then
+        (
+            last_slice_report = "ATTACH AND WELD: attached " + (attached_count as string) +                 " object(s); " + (failed_nodes.count as string) + " object(s) failed. Weld was applied to the merged target."
+            if not batch_quiet then format "%\n" last_slice_report
+            false
+        )
+        else
+        (
+            last_slice_report = "ATTACH AND WELD: attached " + (attached_count as string) +                 " object(s) and welded all target vertices with threshold " + (weld_threshold as string) + "."
+            if not batch_quiet then format "%\n" last_slice_report
+            true
+        )
+        -- return
+    ),
+
+
+    /*
+    Adds an integer to an array only when it is not already present.
+    This helper is used while building merged face boundaries.
+    */
+    function appendUniqueInteger value_array value =
+    (
+        if (findItem value_array value) == 0 then
+        (
+            append value_array value
+        )
+
+
+        value_array
+        -- return
+    ),
+
+
+    /*
+    Applies viewport display option states to the provided nodes.
+    Undefined option values are ignored so each UI option can still be changed independently.
+    */
+    function setNodesDisplayOptions nodes hidden_edges:undefined double_side:undefined =
+    (
+        for node in nodes do
+        (
+            if isValidNode node then
+            (
+                if hidden_edges != undefined then
+                (
+                    node.allEdges = hidden_edges
+                )
+
+
+                if double_side != undefined then
+                (
+                    node.backFaceCull = not double_side
+                )
+            )
+        )
+
+
+        redrawViews()
+        true
+        -- return
+    ),
+
+
+    /*
+    Selects visible unfrozen mesh/poly objects whose every evaluated face points toward the active viewport.
+    A world-state TriMesh snapshot keeps face-normal testing consistent across supported geometry types and modifier stacks.
+    */
+    function selectFrontFacingObjects =
+    (
+        local view_tm = undefined
+        local matching_objects = #()
+        local checked_count = 0
+        local failed_count = 0
+        local view_error = undefined
+
+
+        try
+        (
+            view_tm = inverse (viewport.getTM())
+            view_tm.row4 = [0,0,0]
+        )
+        catch
+        (
+            view_error = getCurrentException()
+        )
+
+
+        if view_tm == undefined then
+        (
+            last_slice_report = "SELECTION: could not read the active viewport transform. " + (view_error as string)
+            if not batch_quiet then format "%\n" last_slice_report
+            return false
+        )
+
+
+        for node in geometry where not node.isHidden and not node.isFrozen do
+        (
+            local supported_node = isKindOf node Editable_Poly or isKindOf node Editable_Mesh or isKindOf node PolyMeshObject
+
+
+            if supported_node then
+            (
+                local all_faces_front = true
+                local node_failed = false
+
+
+                try
+                (
+                    local poly_node = isKindOf node Editable_Poly
+                    local face_count = if poly_node then polyOp.getNumFaces node else meshOp.getNumFaces node
+
+
+                    for face_index = 1 to face_count while all_faces_front do
+                    (
+                        local face_normal = if poly_node then polyOp.getFaceNormal node face_index else getFaceNormal node face_index
+                        local view_normal = face_normal * view_tm
+
+
+                        if view_normal.z < 0.0 then
+                        (
+                            all_faces_front = false
+                        )
+                    )
+                )
+                catch
+                (
+                    node_failed = true
+                )
+
+
+                if node_failed then
+                (
+                    failed_count += 1
+                )
+                else
+                (
+                    checked_count += 1
+                    if all_faces_front then append matching_objects node
+                )
+            )
+        )
+
+
+        select matching_objects
+        completeRedraw()
+
+
+        last_slice_report = "SELECTION: " + (matching_objects.count as string) + " fully front-facing object(s) selected from " + (checked_count as string) + " checked object(s)."
+        if failed_count > 0 then
+        (
+            last_slice_report += " " + (failed_count as string) + " object(s) could not be evaluated."
+        )
+        if not batch_quiet then format "%\n" last_slice_report
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Applies viewport edge-display state to all selected nodes.
+    Checked Display Hidden Edges corresponds to the node allEdges property.
+    */
+    function setSelectionDisplayHiddenEdges enabled =
+    (
+        selected_nodes = selection as array
+        setNodesDisplayOptions selected_nodes hidden_edges:enabled
+        -- return
+    ),
+
+
+    /*
+    Applies double-sided viewport display to all selected nodes.
+    Checked Double Side means backface culling is disabled on the object.
+    */
+    function setSelectionDoubleSide enabled =
+    (
+        selected_nodes = selection as array
+        setNodesDisplayOptions selected_nodes double_side:enabled
+        -- return
+    ),
+
+
+    /*
+    Applies Editable Poly Auto Smooth to all faces of the whole object.
+    All faces are temporarily selected, Auto Smooth is run, then face selection is restored.
+    */
+    function autoSmoothNode node =
+    (
+        if not (isSupportedNode node) then
+        (
+            false
+        )
+        else
+        (
+            base_obj = node.baseObject
+            face_count = polyop.getNumFaces base_obj
+            previous_face_selection = polyop.getFaceSelection base_obj
+            all_faces = #{}
+
+
+            for face_index = 1 to face_count do
+            (
+                all_faces[face_index] = true
+            )
+
+
+            polyop.setFaceSelection base_obj all_faces
+            polyop.autoSmooth base_obj
+            polyop.setFaceSelection base_obj previous_face_selection
+
+
+            update node
+
+
+            if not batch_quiet then format "Wall-Fixer Auto Smooth: % | faces: % | threshold: %\n" \
+                node.name face_count base_obj.autoSmoothThreshold
+
+
+            true
+        )
+        -- return
+    ),
+
+
+    /*
+    Applies Auto Smooth to all selected supported wall objects.
+    Objects outside the current selection are never modified.
+    */
+    function autoSmoothSelection =
+    (
+        selected_nodes = selection as array
+
+
+        for node in selected_nodes do
+        (
+            autoSmoothNode node
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns edges that separate faces which do not share any smoothing-group bit.
+    Border edges are ignored because they already delimit an element boundary.
+    */
+    function getHardSmoothingEdges node =
+    (
+        hard_edges = #{}
+
+
+        if not (isValidNode node) then return hard_edges
+        if classOf node.baseObject != Editable_Poly then return hard_edges
+
+
+        base_obj = node.baseObject
+        edge_count = polyop.getNumEdges base_obj
+
+
+        for edge_index = 1 to edge_count do
+        (
+            edge_faces = polyop.getEdgeFaces base_obj edge_index
+
+
+            if edge_faces.count == 2 then
+            (
+                smooth_group_a = polyop.getFaceSmoothGroup base_obj edge_faces[1]
+                smooth_group_b = polyop.getFaceSmoothGroup base_obj edge_faces[2]
+
+
+                if (bit.and smooth_group_a smooth_group_b) == 0 then
+                (
+                    hard_edges[edge_index] = true
+                )
+            )
+        )
+
+
+        hard_edges
+        -- return
+    ),
+
+
+    /*
+    Detaches every disconnected element of one Editable Poly into its own scene node.
+    The original node keeps its first element; all newly detached nodes are returned with it.
+    */
+    function explodeNodeByElements node =
+    (
+        result_nodes = #()
+
+
+        if not (isValidNode node) then return result_nodes
+        if classOf node.baseObject != Editable_Poly then return result_nodes
+
+
+        append result_nodes node
+        base_obj = node.baseObject
+        continue_explode = true
+
+
+        while continue_explode do
+        (
+            face_count = polyop.getNumFaces base_obj
+
+
+            if face_count <= 0 then
+            (
+                continue_explode = false
+            )
+            else
+            (
+                first_element = polyop.getElementsUsingFace base_obj #{1}
+
+
+                if first_element.numberSet >= face_count then
+                (
+                    continue_explode = false
+                )
+                else
+                (
+                    all_faces = #{1..face_count}
+                    remaining_faces = all_faces - first_element
+                    remaining_face_array = remaining_faces as array
+
+
+                    if remaining_face_array.count == 0 then
+                    (
+                        continue_explode = false
+                    )
+                    else
+                    (
+                        element_faces = polyop.getElementsUsingFace base_obj #{remaining_face_array[1]}
+                        new_name = uniqueName (node.name + "_WALL")
+                        detached = polyop.detachFaces base_obj element_faces delete:true asNode:true name:new_name node:node
+
+
+                        if detached then
+                        (
+                            new_node = getNodeByName new_name
+
+
+                            if isValidNode new_node then
+                            (
+                                new_node.material = node.material
+                                new_node.wirecolor = node.wirecolor
+                                append result_nodes new_node
+                            )
+                            else
+                            (
+                                continue_explode = false
+                            )
+                        )
+                        else
+                        (
+                            continue_explode = false
+                        )
+                    )
+                )
+            )
+        )
+
+
+        result_nodes
+        -- return
+    ),
+
+
+    /*
+    Prepares selected geometry as individual planar wall objects.
+    One instanced Smooth modifier auto-smooths the selection, hard smoothing boundaries become elements, then elements become objects with smoothing groups cleared.
+    */
+    function prepareObjects angle_threshold:5.0 =
+    (
+        selected_nodes = selection as array
+        supported_nodes = #()
+        prepared_nodes = #()
+
+
+        for node in selected_nodes do
+        (
+            if isValidNode node and superClassOf node == GeometryClass then
+            (
+                append supported_nodes node
+            )
+        )
+
+
+        if supported_nodes.count == 0 then
+        (
+            last_slice_report = "Prepare object: select at least one geometry object."
+            return false
+        )
+
+
+        smooth_modifier = Smooth()
+        smooth_modifier.name = "PREPARE OBJECT - AUTO SMOOTH"
+        smooth_modifier.autosmooth = true
+        smooth_modifier.threshold = angle_threshold
+        addModifier supported_nodes smooth_modifier
+
+
+        for node in supported_nodes do
+        (
+            convertToPoly node
+
+
+            if isValidNode node and classOf node.baseObject == Editable_Poly then
+            (
+                base_obj = node.baseObject
+                hard_edges = getHardSmoothingEdges node
+
+
+                if hard_edges.numberSet > 0 then
+                (
+                    polyop.splitEdges base_obj hard_edges
+                    update node
+                )
+
+
+                node_results = explodeNodeByElements node
+
+
+                for result_node in node_results do
+                (
+                    if isValidNode result_node then append prepared_nodes result_node
+                )
+            )
+        )
+
+
+        if prepared_nodes.count > 0 then
+        (
+            for prepared_node in prepared_nodes do
+            (
+                if isValidNode prepared_node and classOf prepared_node.baseObject == Editable_Poly then
+                (
+                    prepared_base_obj = prepared_node.baseObject
+                    prepared_face_count = polyop.getNumFaces prepared_base_obj
+
+
+                    if prepared_face_count > 0 then
+                    (
+                        polyop.setFaceSmoothGroup prepared_base_obj #{1..prepared_face_count} 0
+                        update prepared_node
+                    )
+                )
+            )
+
+
+            select prepared_nodes
+            completeRedraw()
+
+
+            last_slice_report = (
+                "Prepare object complete. Input objects: " + (supported_nodes.count as string) +
+                "; planar wall objects: " + (prepared_nodes.count as string) +
+                "; Auto Smooth threshold: " + (angle_threshold as string) + " degrees."
+            )
+            if not batch_quiet then format "Wall-Fixer Prepare Object: input:% output:% threshold:%\n" supported_nodes.count prepared_nodes.count angle_threshold
+            true
+        )
+        else
+        (
+            last_slice_report = "Prepare object failed: no planar wall objects were produced."
+            false
+        )
+        -- return
+    ),
+
+
+    /*
+    Merges selected geometry objects whose pivot positions match within the supplied tolerance.
+    Each matching group keeps its first object as the Editable Poly target; singleton groups remain untouched.
+    */
+    function mergeSelectedObjectsByPivot pivot_tolerance:0.001 =
+    (
+        selected_nodes = selection as array
+        supported_nodes = #()
+        pivot_groups = #()
+        result_nodes = #()
+        merged_group_count = 0
+        attached_object_count = 0
+
+
+        if pivot_tolerance < 0.0 then pivot_tolerance = 0.0
+
+
+        for node in selected_nodes do
+        (
+            if isValidNode node and superClassOf node == GeometryClass then
+            (
+                append supported_nodes node
+            )
+        )
+
+
+        if supported_nodes.count == 0 then
+        (
+            last_slice_report = "Merge Objects by Pivot: select at least one geometry object."
+            return false
+        )
+
+
+        for node in supported_nodes do
+        (
+            matched_group_index = 0
+            node_pivot = node.transform.pos
+
+
+            for group_index = 1 to pivot_groups.count while matched_group_index == 0 do
+            (
+                group_data = pivot_groups[group_index]
+                group_pivot = group_data[1]
+
+
+                if distance node_pivot group_pivot <= pivot_tolerance then
+                (
+                    matched_group_index = group_index
+                )
+            )
+
+
+            if matched_group_index > 0 then
+            (
+                group_nodes = pivot_groups[matched_group_index][2]
+                append group_nodes node
+            )
+            else
+            (
+                append pivot_groups #(node_pivot, #(node))
+            )
+        )
+
+
+        for group_data in pivot_groups do
+        (
+            group_nodes = group_data[2]
+
+
+            if group_nodes.count <= 1 then
+            (
+                if group_nodes.count == 1 and isValidNode group_nodes[1] then
+                (
+                    append result_nodes group_nodes[1]
+                )
+            )
+            else
+            (
+                target_node = group_nodes[1]
+
+
+                if isValidNode target_node then
+                (
+                    try(convertToPoly target_node)catch()
+
+
+                    if isValidNode target_node and classOf target_node.baseObject == Editable_Poly then
+                    (
+                        merged_group_count += 1
+
+
+                        for source_index = 2 to group_nodes.count do
+                        (
+                            source_node = group_nodes[source_index]
+
+
+                            if isValidNode source_node then
+                            (
+                                try(convertToPoly source_node)catch()
+
+
+                                if isValidNode source_node and classOf source_node.baseObject == Editable_Poly then
+                                (
+                                    try(polyop.attach target_node source_node)catch()
+
+
+                                    if not (isValidNode source_node) then
+                                    (
+                                        attached_object_count += 1
+                                    )
+                                )
+
+
+                                if isValidNode source_node then
+                                (
+                                    append result_nodes source_node
+                                )
+                            )
+                        )
+
+
+                        if isValidNode target_node then
+                        (
+                            update target_node
+                            append result_nodes target_node
+                        )
+                    )
+                    else
+                    (
+                        for group_node in group_nodes do
+                        (
+                            if isValidNode group_node then append result_nodes group_node
+                        )
+                    )
+                )
+            )
+        )
+
+
+        if result_nodes.count > 0 then
+        (
+            select result_nodes
+            completeRedraw()
+        )
+
+
+        last_slice_report = (
+            "Merge Objects by Pivot complete. Input objects: " + (supported_nodes.count as string) +
+            "; pivot groups: " + (pivot_groups.count as string) +
+            "; merged groups: " + (merged_group_count as string) +
+            "; attached objects: " + (attached_object_count as string) + "."
+        )
+        if not batch_quiet then format "Wall-Fixer Merge Objects by Pivot: input:% groups:% mergedGroups:% attached:% tolerance:%\n" \
+            supported_nodes.count pivot_groups.count merged_group_count attached_object_count pivot_tolerance
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns the current Make 1 Slice vertex-selection filter mapped to unchanged base-object vertex IDs.
+    Edit Poly selections are mapped by world position; Editable Poly selections already use base IDs.
+    */
+    function getActiveMakeOneSliceVertexSelection node match_tolerance:0.01 =
+    (
+        local mapped_selection = #{}
+        local had_vertex_selection = false
+        local selection_source = #none
+
+
+        if node == undefined or not(isValidNode node) then return #(mapped_selection, had_vertex_selection, selection_source)
+
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then return #(mapped_selection, had_vertex_selection, selection_source)
+
+
+        local current_object = undefined
+        try
+        (
+            current_object = modPanel.getCurrentObject()
+        )
+        catch
+        (
+            current_object = undefined
+        )
+
+
+        if current_object != undefined and classOf current_object == Edit_Poly then
+        (
+            local belongs_to_node = false
+            for modifier in node.modifiers while not belongs_to_node do
+            (
+                if modifier == current_object then belongs_to_node = true
+            )
+
+
+            if belongs_to_node then
+            (
+                local modifier_selection = #{}
+                try
+                (
+                    modifier_selection = current_object.GetSelection #Vertex node:node
+                )
+                catch
+                (
+                    modifier_selection = #{}
+                )
+
+
+                if modifier_selection != undefined and modifier_selection.numberSet > 0 then
+                (
+                    had_vertex_selection = true
+                    selection_source = #editPoly
+
+
+                    local object_tm = node.objectTransform
+                    local base_vertex_count = polyop.getNumVerts base_obj
+                    local search_tolerance = amax epsilon match_tolerance
+
+
+                    for modifier_vertex in modifier_selection do
+                    (
+                        local modifier_position = undefined
+                        try
+                        (
+                            modifier_position = current_object.GetVertex modifier_vertex node:node
+                        )
+                        catch
+                        (
+                            modifier_position = undefined
+                        )
+
+
+                        if modifier_position != undefined then
+                        (
+                            local modifier_world = modifier_position * object_tm
+                            local best_base_vertex = 0
+                            local best_distance = 1e30
+
+
+                            for base_vertex = 1 to base_vertex_count do
+                            (
+                                local base_position = undefined
+                                try
+                                (
+                                    base_position = polyop.getVert base_obj base_vertex
+                                )
+                                catch
+                                (
+                                    base_position = undefined
+                                )
+
+
+                                if base_position != undefined then
+                                (
+                                    local base_world = base_position * object_tm
+                                    local current_distance = distance modifier_world base_world
+
+
+                                    if current_distance < best_distance then
+                                    (
+                                        best_distance = current_distance
+                                        best_base_vertex = base_vertex
+                                    )
+                                )
+                            )
+
+
+                            if best_base_vertex > 0 and best_distance <= search_tolerance then
+                            (
+                                mapped_selection[best_base_vertex] = true
+                            )
+                        )
+                    )
+
+
+                    return #(mapped_selection, had_vertex_selection, selection_source)
+                )
+            )
+        )
+
+
+        local base_selection = polyop.getVertSelection base_obj
+        if base_selection != undefined and base_selection.numberSet > 0 then
+        (
+            mapped_selection = copy base_selection
+            had_vertex_selection = true
+            selection_source = #editablePoly
+        )
+
+
+        #(mapped_selection, had_vertex_selection, selection_source)
+        -- return
+    ),
+
+
+    /* Slice and Fix N-gons now share one native Edit Poly pipeline.
+       Legacy weld keywords are accepted, but cleanup never welds borders. */
+    function processNode node cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 reset_clean_edges:true clear_clean_edges:true auto_smooth:false operation_mode:#full update_viewport_selection:true =
+    (
+        last_slice_error = undefined
+        last_slice_count = 0
+        if not isValidNode node then
+        (
+            last_slice_error = "The selected node is no longer valid."
+            return false
+        )
+        local supported = isSliceSupportedNode node
+        if not supported then
+        (
+            last_slice_error = "Requires Editable Poly geometry or an Edit Poly modifier."
+            return false
+        )
+        local oldSelection = selection as array
+        local oldPanel = getCommandPanelTaskMode()
+        local oldCurrent = modPanel.getCurrentObject()
+        local oldLevel = subObjectLevel
+        local one_slice_selection_data = #(#{}, false, #none)
+        if operation_mode == #oneSlice then
+        (
+            one_slice_selection_data = getActiveMakeOneSliceVertexSelection node match_tolerance:(amax epsilon 0.01)
+            if not batch_quiet then format "Wall-Fixer Make 1 Slice Vertex Filter: source:% hadSelection:% mapped:%\n" one_slice_selection_data[3] one_slice_selection_data[2] one_slice_selection_data[1]
+        )
+        local modifier = undefined
+        local backup = undefined
+        local added = false
+        local success = false
+        local failure = undefined
+        local settings = undefined
+        local debug_vertex_selection = #{}
+        local debug_edge_selection = #{}
+        local debug_start_vertices = #{}
+        local debug_original_vertices = #{}
+        try
+        (
+            -- An instanced object shares its whole evaluated modifier pipeline.
+            -- Copy that pipeline for this node before changing any modifier data.
+            local stackInstances = #()
+            InstanceMgr.GetInstances node &stackInstances
+            if stackInstances.count > 1 do
+            (
+                if not(InstanceMgr.MakeObjectsUnique #(node) #individual) do throw "Cannot isolate the selected wall instance."
+                if node.modifiers.count > 0 then oldCurrent = node.modifiers[1] else oldCurrent = node.baseObject
+            )
+            if node.modifiers.count > 0 do
+                if classOf node.modifiers[1] == Edit_Poly do modifier = node.modifiers[1]
+            -- Isolate a shared top modifier without changing its base geometry.
+            if modifier != undefined do
+                if (refs.dependentNodes modifier).count > 1 do
+                (
+                    if modifier.animationMode != 0 or modifier.currentOperation != 0 do throw "Commit the active Edit Poly operation before slicing."
+                    local sharedModifier = modifier
+                    if not(InstanceMgr.MakeModifiersUnique #(node) #(modifier) #individual) do throw "Cannot isolate the shared Edit Poly modifier."
+                    modifier = node.modifiers[1]
+                    if oldCurrent == sharedModifier do oldCurrent = modifier
+                )
+            if modifier == undefined then
+            (
+                modifier = Edit_Poly name:"WMC - WALL TOPOLOGY CLEANUP"
+                addModifier node modifier
+                added = true
+            )
+            else
+            (
+                if modifier.animationMode != 0 or modifier.currentOperation != 0 do throw "Commit the active Edit Poly operation before slicing."
+                backup = copy modifier
+            )
+            settings = #(modifier.split,modifier.useStackSelection,modifier.useSoftSel,modifier.remveEdgeCtrlKey)
+
+
+            /* Edit Poly component Select/Commit needs this modifier to be the active
+               Modify-panel object. Keep this mandatory context for topology work even
+               when viewport/debug selection is disabled. */
+            if update_viewport_selection or operation_mode == #oneSlice or operation_mode == #full then
+            (
+                select node
+                max modify mode
+                modPanel.setCurrentObject modifier
+            )
+            modifier.SetPrimaryNode node
+            modifier.split = false
+            modifier.useStackSelection = false
+            modifier.useSoftSel = false
+            modifier.remveEdgeCtrlKey = false
+            local pipeline = WMCWallSlicePipeline node:node ep:modifier planarTolerance:(amax 0.0 planar_tolerance) axisTolerance:(amin 45.0 (amax 0.0 angle_threshold)) uiSelection:update_viewport_selection
+            case operation_mode of
+            (
+                #check:
+                (
+                    local stats = pipeline.checkMesh()
+                    local inner_vertex_selection = pipeline.getInnerCornerVertexSelection()
+                    setResetInnerVertSelection node inner_vertex_selection
+                    debug_vertex_selection = pipeline.getSliceAnchorVertexSelection()
+                    last_slice_report = node.name + ":\n" + \
+                        "  SLICING STATE: RESET\n" + \
+                        "  MESH: OK\n" + \
+                        "  INNER VERTS: " + (inner_vertex_selection as string) + "\n" + \
+                        "  VERTS: " + (stats[1] as string) + "\n" + \
+                        "  EDGES: " + (stats[2] as string) + "\n" + \
+                        "  FACES: " + (stats[3] as string) + "\n" + \
+                        "  BORDER EDGES: " + (stats[4] as string) + "\n" + \
+                        "  CORNERS: " + (stats[5] as string) + "\n" + \
+                        "  SLICE ANCHORS: " + (stats[6] as string) + "\n" + \
+                        "  SELECTED ANCHORS: " + (debug_vertex_selection.numberSet as string)
+                )
+                #innerCorners:
+                (
+                    local stats = pipeline.checkMesh()
+                    debug_vertex_selection = pipeline.getInnerCornerVertexSelection()
+                    last_slice_report = node.name + ": mesh OK | inner corners selected:" + (debug_vertex_selection.numberSet as string)
+                )
+                #sliceAlignment:
+                (
+                    local alignment_debug = pipeline.getOneSliceAlignmentVertices cutMode:cut_mode planeMode:slice_plane_mode
+                    if alignment_debug == undefined then throw "No inner corner can define a slice plane in the current direction."
+                    debug_vertex_selection = alignment_debug[1]
+                    last_slice_report = node.name + ": slice plane aligned to vertices:" + (debug_vertex_selection.numberSet as string) + "; source corner:" + (alignment_debug[2] as string) + "; direction:" + (alignment_debug[3] as string) + "; mode:" + (slice_plane_mode as string) + "; edge:" + (alignment_debug[7] as string) + "."
+                    if not batch_quiet then format "Wall-Fixer Slice Alignment Debug: source:% direction:% mode:% edge:% vertices:% count:%\n" alignment_debug[2] alignment_debug[3] slice_plane_mode alignment_debug[7] debug_vertex_selection debug_vertex_selection.numberSet
+                )
+                #checkCorners:
+                (
+                    debug_vertex_selection = getResetInnerVertSelection node
+                    if debug_vertex_selection == undefined then throw "Run Reset Slicing before Check Corners."
+
+
+                    last_slice_report = node.name + ":\n" + \
+                        "  INNER VERTS FROM RESET SLICING: " + (debug_vertex_selection as string) + "\n" + \
+                        "  COUNT: " + (debug_vertex_selection.numberSet as string)
+                    if not batch_quiet then format "Wall-Fixer Check Corners:\n%\n" last_slice_report
+                )
+                #oneSlice:
+                (
+                    clearLastDebugSliceContext node:node
+
+
+                    /* Analyze only the unchanged base object to choose the next source corner.
+                       Edge Direction consumes successful base edges; Global Axis consumes successful planes. */
+                    local reset_inner_vertices = getResetInnerVertSelection node
+                    if reset_inner_vertices == undefined then throw "Run Reset Slicing before Make 1 Slice."
+
+
+                    local one_slice_source_vertices = copy reset_inner_vertices
+                    if one_slice_selection_data[2] then
+                    (
+                        local selected_inner_vertices = reset_inner_vertices * one_slice_selection_data[1]
+                        if selected_inner_vertices.numberSet == 0 then
+                        (
+                            throw "The current vertex selection contains no available Reset Slicing inner corner."
+                        )
+
+
+                        one_slice_source_vertices = selected_inner_vertices
+                        if not batch_quiet then format "Wall-Fixer Make 1 Slice Selected INNER VERTS: %\n" one_slice_source_vertices
+                    )
+
+
+                    local base_candidates = getBaseInnerSliceCandidates node angle_threshold:angle_threshold source_vertices:one_slice_source_vertices
+                    if base_candidates.count == 0 then throw "Selected/available INNER VERTS cannot define any base slice candidates."
+
+
+                    local candidate_vertices = #{}
+                    for candidate in base_candidates do
+                    (
+                        candidate_vertices[candidate[1]] = true
+                    )
+                    local missing_candidate_vertices = one_slice_source_vertices - candidate_vertices
+                    if not batch_quiet then format "Wall-Fixer Base Candidates: sourceInner:% candidates:% missing:%\n" one_slice_source_vertices candidate_vertices missing_candidate_vertices
+
+
+                    local slice_kinds = #()
+                    if cut_mode == #all or cut_mode == #vertical then append slice_kinds #vertical
+                    if cut_mode == #all or cut_mode == #horizontal then append slice_kinds #horizontal
+
+
+                    local slice_debug = undefined
+                    local used_base_vertex = 0
+                    local used_base_edge = 0
+                    local used_slice_kind = undefined
+
+
+                    for slice_kind in slice_kinds while slice_debug == undefined do
+                    (
+                        /* Failed attempts are remembered only for this click.
+                           They remain pending globally so another successful slice can make them useful later. */
+                        local attempted_edges = #{}
+                        local attempted_planes = #()
+
+
+                        for candidate in base_candidates while slice_debug == undefined do
+                        (
+                            local base_vertex = candidate[1]
+                            local direction_available = if slice_kind == #vertical then candidate[2] else candidate[3]
+                            local base_edge = if slice_kind == #vertical then candidate[4] else candidate[5]
+                            local base_anchor = candidate[6]
+                            local base_axis = undefined
+                            if slice_plane_mode == #nextVert then
+                            (
+                                base_axis = if slice_kind == #vertical then candidate[7] else candidate[8]
+                            )
+                            else
+                            (
+                                base_axis = if slice_kind == #vertical then candidate[9] else candidate[10]
+                            )
+
+
+                            local item_processed = false
+                            local attempted_this_click = false
+                            if direction_available and base_axis != undefined then
+                            (
+                                if slice_plane_mode == #nextVert then
+                                (
+                                    item_processed = isBaseSliceEdgeProcessed node base_edge slice_kind
+                                    attempted_this_click = base_edge > 0 and base_edge <= attempted_edges.count and attempted_edges[base_edge]
+                                )
+                                else
+                                (
+                                    item_processed = isBaseSlicePlaneProcessed node base_anchor base_axis slice_kind
+                                    attempted_this_click = hasSlicePlaneRecord base_anchor base_axis attempted_planes
+                                )
+                            )
+
+
+                            if direction_available and base_axis != undefined and not item_processed and not attempted_this_click then
+                            (
+                                if slice_plane_mode == #nextVert then
+                                (
+                                    if base_edge > 0 then attempted_edges[base_edge] = true
+                                )
+                                else
+                                (
+                                    append attempted_planes #(normalize base_axis, base_anchor)
+                                )
+
+
+                                local wall_normal = candidate[11]
+                                local wall_origin = candidate[12]
+                                local region_id = candidate[13]
+
+
+                                if not batch_quiet then format "Wall-Fixer Base Slice: node:% region:% baseVert:% baseEdge:% direction:% mode:% processed:%\n"                                     node.name region_id base_vertex base_edge slice_kind slice_plane_mode item_processed
+
+
+                                slice_debug = pipeline.makeOneSliceFromBasePlane                                     base_vertex                                     base_anchor                                     base_axis                                     slice_kind                                     wall_normal:wall_normal                                     wall_origin:wall_origin                                     plane_tolerance:(amax 0.0 planar_tolerance)
+
+
+                                if slice_debug != undefined then
+                                (
+                                    if slice_plane_mode == #nextVert then
+                                    (
+                                        markBaseSliceEdgeProcessed node base_edge slice_kind
+                                    )
+                                    else
+                                    (
+                                        markBaseSlicePlaneProcessed node base_anchor base_axis slice_kind
+                                    )
+                                    used_base_vertex = base_vertex
+                                    used_base_edge = base_edge
+                                    used_slice_kind = slice_kind
+                                )
+                                else
+                                (
+                                    /* Do not retire a failed edge or plane.
+                                       Later successful slices can repartition faces and make this pending cut valid. */
+                                    if not batch_quiet then format "Wall-Fixer Base Slice Pending: baseVert:% baseEdge:% direction:% reason:no topology change; keep for retry.\n" base_vertex base_edge slice_kind
+                                )
+                            )
+                            else if direction_available and base_axis != undefined and item_processed then
+                            (
+                                if slice_plane_mode == #nextVert then
+                                (
+                                    if not batch_quiet then format "Wall-Fixer Base Slice Skip: baseVert:% baseEdge:% direction:% reason:base edge already sliced.\n" base_vertex base_edge slice_kind
+                                )
+                                else
+                                (
+                                    if not batch_quiet then format "Wall-Fixer Base Slice Skip: baseVert:% direction:% reason:same geometric slice plane already processed.\n" base_vertex slice_kind
+                                )
+                            )
+                            else if direction_available and base_axis != undefined and attempted_this_click then
+                            (
+                                if not batch_quiet then format "Wall-Fixer Base Slice Skip: baseVert:% baseEdge:% direction:% reason:same pending item already attempted this click.\n" base_vertex base_edge slice_kind
+                            )
+                            else if direction_available and base_axis == undefined then
+                            (
+                                if not batch_quiet then format "Wall-Fixer Base Slice Skip: baseVert:% direction:% reason:base slice plane is undefined.\n" base_vertex slice_kind
+                            )
+                            else if not direction_available then
+                            (
+                                if not batch_quiet then format "Wall-Fixer Base Slice Skip: baseVert:% direction:% reason:no matching base border edge.\n" base_vertex slice_kind
+                            )
+                        )
+                    )
+
+
+                    if slice_debug == undefined then
+                    (
+                        debug_edge_selection = #{}
+                        last_slice_report = node.name + ": no pending base edge/plane can change the current topology yet."
+                        if not batch_quiet then format "Wall-Fixer Base Slice: %\n" last_slice_report
+                    )
+                    else
+                    (
+                        debug_edge_selection = slice_debug[9]
+                        debug_original_vertices = copy slice_debug[12]
+                        debug_start_vertices = #{}
+
+
+                        if used_base_edge > 0 then
+                        (
+                            local defining_edge_vertices = polyop.getEdgeVerts node.baseObject used_base_edge
+                            if defining_edge_vertices != undefined and defining_edge_vertices.count == 2 then
+                            (
+                                debug_start_vertices[defining_edge_vertices[1]] = true
+                                debug_start_vertices[defining_edge_vertices[2]] = true
+                            )
+                        )
+
+
+                        last_slice_report = node.name + ": base vert " + (used_base_vertex as string) + " sliced " + (used_slice_kind as string) + "; new non-border edges selected:" + (debug_edge_selection.numberSet as string) + "."
+                    )
+                )
+                default:
+                (
+                    pipeline.run cutMode:cut_mode planeMode:slice_plane_mode
+                    if auto_smooth then
+                    (
+                        local t = pipeline.refreshTopology()
+                        local ids = copy t.validFaces
+                        t = pipeline.applyOperation #Face ids #Autosmooth
+                        pipeline.validateStructure t
+                    )
+                )
+            )
+            if operation_mode != #oneSlice and operation_mode != #check and operation_mode != #innerCorners and operation_mode != #sliceAlignment and operation_mode != #checkCorners then
+            (
+                modifier.SetSelection #Vertex #{} node:node
+                modifier.SetSelection #Edge #{} node:node
+                modifier.SetSelection #Face #{} node:node
+            )
+            modifier.split = settings[1]
+            modifier.useStackSelection = settings[2]
+            modifier.useSoftSel = settings[3]
+            modifier.remveEdgeCtrlKey = settings[4]
+            last_slice_count = pipeline.cuts
+            success = true
+            -- Keep the debug Edit Poly when Reset Slicing created it so the selected
+            -- anchor vertices remain visible in the viewport. No topology is changed.
+        )
+        catch
+        (
+            failure = getCurrentException()
+            if modifier != undefined then
+            (
+                if added then
+                (
+                    deleteModifier node modifier
+                )
+                else if backup != undefined then
+                (
+                    deleteModifier node modifier
+                    addModifier node backup
+                    if oldCurrent == modifier then oldCurrent = backup
+                )
+            )
+        )
+        if operation_mode == #check and success then
+        (
+            /* Reset Slicing is a hard reset point. The temporary Edit Poly used for
+               pipeline analysis is removed and the debug selection is applied
+               directly to the base Editable Poly. */
+            if modifier != undefined and added then
+            (
+                deleteModifier node modifier
+                modifier = undefined
+            )
+
+
+            if update_viewport_selection then
+            (
+                select node
+                max modify mode
+                base_obj = node.baseObject
+                if classOf base_obj == Editable_Poly then
+                (
+                    modPanel.setCurrentObject base_obj
+                    subObjectLevel = 1
+                    polyop.setVertSelection base_obj debug_vertex_selection
+                    if not batch_quiet then format "Wall-Fixer Debug Base Selection: selected:%\n" (polyop.getVertSelection base_obj)
+                )
+                completeRedraw()
+            )
+        )
+        else if (operation_mode == #oneSlice or operation_mode == #innerCorners or operation_mode == #sliceAlignment) and success and modifier != undefined then
+        (
+            if operation_mode == #oneSlice then
+            (
+                last_debug_slice_node = node
+                last_debug_slice_new_edges = copy debug_edge_selection
+                last_debug_slice_start_vertices = copy debug_start_vertices
+                last_debug_slice_original_vertices = copy debug_original_vertices
+                if not batch_quiet then format "Wall-Fixer Slice Edge Cleanup Context: newEdges:% startVerts:% originalVerts:%\n" last_debug_slice_new_edges last_debug_slice_start_vertices last_debug_slice_original_vertices.numberSet
+
+
+                if update_viewport_selection then
+                (
+                    select node
+                    max modify mode
+                    modPanel.setCurrentObject modifier
+                    modifier.SetPrimaryNode node
+                    modifier.useStackSelection = false
+                    modifier.SetEPolySelLevel #Edge
+                    modifier.SetSelection #Edge #{} node:node
+                    local debug_selected_ok = modifier.Select #Edge debug_edge_selection node:node
+                    local debug_actual_selection = modifier.GetSelection #Edge node:node
+                    if not batch_quiet then format "Wall-Fixer Debug New Edges: requested:% selected:% result:%\n" debug_edge_selection debug_actual_selection debug_selected_ok
+                    if debug_actual_selection != debug_edge_selection then
+                    (
+                        last_slice_report += " | WARNING: edge selection mismatch requested:" + (debug_edge_selection as string) + " actual:" + (debug_actual_selection as string)
+                    )
+                    completeRedraw()
+                )
+                if not update_viewport_selection then
+                (
+                    select oldSelection
+                    if oldPanel == #modify and oldCurrent != undefined then
+                    (
+                        try (modPanel.setCurrentObject oldCurrent) catch ()
+                    )
+                    setCommandPanelTaskMode oldPanel
+                )
+            )
+            else
+            (
+                select node
+                max modify mode
+                modPanel.setCurrentObject modifier
+                modifier.SetPrimaryNode node
+                modifier.useStackSelection = false
+                modifier.SetEPolySelLevel #Vertex
+                subObjectLevel = 1
+                modifier.SetSelection #Vertex #{} node:node
+                local debug_selected_ok = modifier.Select #Vertex debug_vertex_selection node:node
+                local debug_actual_selection = modifier.GetSelection #Vertex node:node
+                if not batch_quiet then format "Wall-Fixer Debug Selection: requested:% selected:% result:%\n" debug_vertex_selection debug_actual_selection debug_selected_ok
+                if debug_actual_selection != debug_vertex_selection then
+                (
+                    last_slice_report += " | WARNING: viewport selection mismatch requested:" + (debug_vertex_selection as string) + " actual:" + (debug_actual_selection as string)
+                )
+                completeRedraw()
+            )
+        )
+        else
+        (
+            select oldSelection
+            if oldPanel == #modify and oldCurrent != undefined then
+            (
+                try (modPanel.setCurrentObject oldCurrent; subObjectLevel = oldLevel) catch ()
+            )
+            setCommandPanelTaskMode oldPanel
+        )
+        last_slice_error = failure
+        if failure != undefined then
+        (
+            if not batch_quiet then format "Wall-Fixer: % | restored after failure: %\n" node.name failure
+        )
+        success
+    ),
+    /*
+    Initializes Reset Slicing directly from the unchanged Editable Poly base object.
+    Multiple connected planar wall regions are accepted and their INNER VERTS are merged into one base-ID cache.
+    */
+    function initializeBaseSliceAnalysis node angle_threshold:5.0 planar_tolerance:1.0 update_viewport_selection:true =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+
+
+        if node == undefined or not(isValidNode node) then
+        (
+            last_slice_error = "The selected wall is no longer valid."
+            return false
+        )
+
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then
+        (
+            last_slice_error = "Reset Slicing requires an Editable Poly base object."
+            return false
+        )
+
+
+        local planar_regions = getBasePlanarWallRegions node planar_tolerance:(amax 0.0 planar_tolerance)
+        if planar_regions.count == 0 then
+        (
+            last_slice_error = "No valid planar wall region was found in the base object."
+            return false
+        )
+
+
+        local base_candidates = getBaseInnerSliceCandidates \
+            node \
+            angle_threshold:angle_threshold \
+            planar_tolerance:(amax 0.0 planar_tolerance)
+
+
+        local inner_vertices = #{}
+        for candidate in base_candidates do
+        (
+            inner_vertices[candidate[1]] = true
+        )
+
+
+        setResetInnerVertSelection node inner_vertices
+
+
+        local vert_count = polyop.getNumVerts base_obj
+        local edge_count = polyop.getNumEdges base_obj
+        local face_count = polyop.getNumFaces base_obj
+        local region_border_edges = #{}
+
+
+        for region_data in planar_regions do
+        (
+            region_border_edges = region_border_edges + region_data[4]
+        )
+
+
+        last_slice_report = node.name + ":\n" + \
+            "  SLICING STATE: RESET\n" + \
+            "  MESH: OK\n" + \
+            "  PLANAR WALLS: " + (planar_regions.count as string) + "\n" + \
+            "  INNER VERTS: " + (inner_vertices as string) + "\n" + \
+            "  VERTS: " + (vert_count as string) + "\n" + \
+            "  EDGES: " + (edge_count as string) + "\n" + \
+            "  FACES: " + (face_count as string) + "\n" + \
+            "  REGION BORDER EDGES: " + (region_border_edges.numberSet as string) + "\n" + \
+            "  SLICE CANDIDATES: " + (base_candidates.count as string)
+
+
+        if update_viewport_selection then
+        (
+            select node
+            max modify mode
+            modPanel.setCurrentObject base_obj
+            subObjectLevel = 1
+            polyop.setVertSelection base_obj inner_vertices
+            completeRedraw()
+            if not batch_quiet then format "Wall-Fixer Debug Base Selection: selected:%\n" (polyop.getVertSelection base_obj)
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Checks selected walls using the same planar/topology validation as Slice Walls.
+    No topology changes are made; available slice-anchor vertices remain selected.
+    */
+    function debugCheckSelection angle_threshold:5.0 planar_tolerance:1.0 update_viewport_selection:true =
+    (
+        clearListener()
+
+
+        local selected_nodes = selection as array
+        last_slice_report = ""
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select at least one wall before running Reset Slicing."
+            return false
+        )
+        local all_ok = true
+        local report = ""
+        for node in selected_nodes do
+        (
+            if resetNodeForCheckMesh node then
+            (
+                if initializeBaseSliceAnalysis                     node                     angle_threshold:angle_threshold                     planar_tolerance:planar_tolerance                     update_viewport_selection:update_viewport_selection then
+                (
+                    report += last_slice_report + "\n"
+                )
+                else
+                (
+                    report += node.name + ": " + (last_slice_error as string) + "\n"
+                    all_ok = false
+                )
+            )
+            else
+            (
+                report += node.name + ": RESET FAILED\n"
+                all_ok = false
+            )
+        )
+        last_slice_report = report
+        if not batch_quiet then format "Wall-Fixer Reset Slicing:\n%\n" last_slice_report
+        all_ok
+        -- return
+    ),
+    /*
+    Checks selected walls and selects wall-inner corners on openings and the outer border.
+    Used by right-click on the Reset Slicing debug button.
+    */
+    function debugSelectInnerCorners angle_threshold:5.0 planar_tolerance:1.0 =
+    (
+        local selected_nodes = selection as array
+        last_slice_report = ""
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select at least one wall before selecting inner corners."
+            return false
+        )
+        local all_ok = true
+        local report = ""
+        for node in selected_nodes do
+        (
+            if processNode node angle_threshold:angle_threshold planar_tolerance:planar_tolerance operation_mode:#innerCorners then
+            (
+                report += last_slice_report + "\n"
+            )
+            else
+            (
+                report += node.name + ": " + (last_slice_error as string) + "\n"
+                all_ok = false
+            )
+        )
+        last_slice_report = report
+        if not batch_quiet then format "Wall-Fixer Inner Corners: %\n" last_slice_report
+        all_ok
+        -- return
+    ),
+    /*
+    Selects every existing vertex lying on the plane that Make 1 Slice would use next.
+    No slice or topology modification is performed; this is RMB inspection for Make 1 Slice.
+    */
+    function debugSelectOneSliceAlignment cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 =
+    (
+        local selected_nodes = selection as array
+        last_slice_report = ""
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select one wall before inspecting Make 1 Slice alignment."
+            return false
+        )
+        local node = selected_nodes[1]
+        if not(processNode node cut_mode:cut_mode slice_plane_mode:slice_plane_mode angle_threshold:angle_threshold planar_tolerance:planar_tolerance operation_mode:#sliceAlignment) then
+        (
+            last_slice_report = node.name + ": " + (last_slice_error as string)
+        )
+        completeRedraw()
+        last_slice_error == undefined
+        -- return
+    ),
+
+
+    /*
+    Selects the exact INNER VERTS captured by the last successful Reset Slicing.
+    The cached base vertex IDs are reused directly and no corner availability is recalculated.
+    */
+    function debugCheckCorners cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 =
+    (
+        selected_nodes = selection as array
+        last_slice_report = ""
+        last_slice_error = undefined
+
+
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select one wall before running Check Corners."
+            return false
+        )
+
+
+        node = selected_nodes[1]
+        cached_inner_verts = getResetInnerVertSelection node
+        if cached_inner_verts == undefined then
+        (
+            last_slice_report = node.name + ": no Reset Slicing INNER VERTS cache. Run Reset Slicing first."
+            return false
+        )
+
+
+        select node
+        max modify mode
+
+
+        current_edit_poly = undefined
+        for modifier in node.modifiers while current_edit_poly == undefined do
+        (
+            if classOf modifier == Edit_Poly then current_edit_poly = modifier
+        )
+
+
+        if current_edit_poly != undefined then
+        (
+            current_edit_poly.SetPrimaryNode node
+            current_edit_poly.useStackSelection = false
+            modPanel.setCurrentObject current_edit_poly
+            current_edit_poly.SetEPolySelLevel #Vertex
+            subObjectLevel = 1
+            current_edit_poly.SetSelection #Vertex #{} node:node
+            current_edit_poly.Select #Vertex cached_inner_verts node:node
+        )
+        else
+        (
+            base_obj = node.baseObject
+            if classOf base_obj != Editable_Poly then
+            (
+                last_slice_report = node.name + ": Check Corners requires Editable Poly or Edit Poly."
+                return false
+            )
+
+
+            modPanel.setCurrentObject base_obj
+            subObjectLevel = 1
+            polyop.setVertSelection base_obj cached_inner_verts
+        )
+
+
+        last_slice_report = node.name + ":\n" + \
+            "  INNER VERTS FROM RESET SLICING: " + (cached_inner_verts as string) + "\n" + \
+            "  COUNT: " + (cached_inner_verts.numberSet as string)
+
+
+        if not batch_quiet then format "Wall-Fixer Check Corners:\n%\n" last_slice_report
+        completeRedraw()
+        true
+        -- return
+    ),
+
+
+    /*
+    Performs exactly one debug slice through one detected inner corner on the first selected wall.
+    The raw slice result is kept for inspection and every edge not present before the slice remains selected.
+    */
+    function debugMakeOneSlice cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 update_viewport_selection:true =
+    (
+        if not batch_quiet then format "\n"
+
+
+        local selected_nodes = selection as array
+        last_slice_report = ""
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select one wall before running Make 1 Slice."
+            return false
+        )
+        local node = selected_nodes[1]
+        undo "Wall-Fixer - Debug Make 1 Slice" on
+        (
+            if not(processNode node cut_mode:cut_mode slice_plane_mode:slice_plane_mode angle_threshold:angle_threshold planar_tolerance:planar_tolerance operation_mode:#oneSlice update_viewport_selection:update_viewport_selection) then
+            (
+                last_slice_report = node.name + ": " + (last_slice_error as string)
+            )
+        )
+
+
+        local remaining_inner_vertices = getRemainingResetInnerVertSelection node \
+            cut_mode:cut_mode \
+            slice_plane_mode:slice_plane_mode \
+            angle_threshold:angle_threshold \
+            planar_tolerance:planar_tolerance
+        if remaining_inner_vertices != undefined then
+        (
+            if not batch_quiet then format "REMAINING INNER VERTS: %\n" remaining_inner_vertices
+        )
+
+
+        if update_viewport_selection then completeRedraw()
+        last_slice_error == undefined
+        -- return
+    ),
+    /*
+    Adds a fresh Mass Slice working Edit Poly above a manual Cleanup LOOPS modifier when needed.
+    The existing loop-cleanup modifier stays untouched and inspectable below the new slicing modifier.
+    */
+    function ensureMassSliceWorkingModifier node =
+    (
+        if node == undefined or not(isValidNode node) then return false
+
+
+        if node.modifiers.count > 0 then
+        (
+            local top_modifier = node.modifiers[1]
+            if classOf top_modifier == Edit_Poly and top_modifier.name == "WMC - CLEANUP LOOPS" then
+            (
+                local working_modifier = Edit_Poly name:"WMC - WALL TOPOLOGY CLEANUP"
+                addModifier node working_modifier
+                update node
+                if not batch_quiet then format "Wall-Fixer Slice Selected Walls: added fresh working Edit Poly above %.\n" top_modifier.name
+            )
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns the number of currently live Edit Poly vertex slots.
+    Dead topology slots are ignored because GetVertex returns undefined for them.
+    */
+    function getLiveEditPolyVertexCount node modifier =
+    (
+        local live_count = 0
+        local vertex_count = modifier.GetNumVertices node:node
+
+
+        for vertex_index = 1 to vertex_count do
+        (
+            local vertex_position = undefined
+            try
+            (
+                vertex_position = modifier.GetVertex vertex_index node:node
+            )
+            catch
+            (
+                vertex_position = undefined
+            )
+            if vertex_position != undefined then live_count += 1
+        )
+
+
+        live_count
+        -- return
+    ),
+
+
+    /*
+    Finds the current live Edit Poly vertex nearest to one base-anchor world position.
+    This remaps the anchor after topology commits without relying on a specific surviving vertex ID.
+    */
+    function findLiveEditPolyVertexAtWorldPoint node modifier target_world precision_threshold:0.01 exclude_vertex:0 =
+    (
+        local best_vertex = 0
+        local best_distance = 1e30
+        local vertex_count = modifier.GetNumVertices node:node
+        local object_tm = node.objectTransform
+        local search_tolerance = amax precision_threshold epsilon
+
+
+        for vertex_index = 1 to vertex_count do
+        (
+            local vertex_position = undefined
+            if vertex_index != exclude_vertex then
+            (
+                try
+                (
+                    vertex_position = modifier.GetVertex vertex_index node:node
+                )
+                catch
+                (
+                    vertex_position = undefined
+                )
+            )
+
+
+            if vertex_position != undefined then
+            (
+                local world_position = vertex_position * object_tm
+                local current_distance = distance world_position target_world
+                if current_distance < best_distance then
+                (
+                    best_distance = current_distance
+                    best_vertex = vertex_index
+                )
+            )
+        )
+
+
+        if best_distance <= search_tolerance then best_vertex else 0
+        -- return
+    ),
+
+
+    /*
+    Moves one confirmed new slice vertex exactly onto one existing pre-slice vertex and collapses only that pair.
+    The precision threshold authorizes this targeted repair; the normal Weld Threshold is never used here.
+    */
+    function weldMassSliceVertexToAnchor node modifier new_vertex_index anchor_world precision_threshold:0.01 =
+    (
+        local anchor_vertex_index = findLiveEditPolyVertexAtWorldPoint node modifier anchor_world precision_threshold:precision_threshold exclude_vertex:new_vertex_index
+        if anchor_vertex_index <= 0 then return false
+        if new_vertex_index == anchor_vertex_index then return true
+
+
+        local new_position = undefined
+        local anchor_position = undefined
+        try
+        (
+            new_position = modifier.GetVertex new_vertex_index node:node
+            anchor_position = modifier.GetVertex anchor_vertex_index node:node
+        )
+        catch
+        (
+            new_position = undefined
+            anchor_position = undefined
+        )
+        if new_position == undefined or anchor_position == undefined then return false
+
+
+        local object_tm = node.objectTransform
+        local world_distance = distance (new_position * object_tm) (anchor_position * object_tm)
+        if world_distance > precision_threshold then return false
+
+
+        local before_live_count = getLiveEditPolyVertexCount node modifier
+        local single_selection = #{}
+        single_selection[new_vertex_index] = true
+
+
+        modifier.SetEPolySelLevel #Vertex
+        modifier.SetSelection #Vertex #{} node:node
+        modifier.Select #Vertex single_selection node:node
+        if (modifier.GetSelection #Vertex node:node) != single_selection then return false
+        modifier.SetOperation #Transform
+        modifier.MoveSelection (anchor_position - new_position) parent:(modifier.GetNodeTM node:node) axis:(modifier.GetNodeTM node:node)
+        modifier.Commit()
+        update node
+        modifier.RefreshScreen()
+
+
+        anchor_vertex_index = findLiveEditPolyVertexAtWorldPoint node modifier anchor_world precision_threshold:precision_threshold exclude_vertex:new_vertex_index
+        if anchor_vertex_index <= 0 then return false
+
+
+        local moved_position = undefined
+        try
+        (
+            moved_position = modifier.GetVertex new_vertex_index node:node
+            anchor_position = modifier.GetVertex anchor_vertex_index node:node
+        )
+        catch
+        (
+            moved_position = undefined
+            anchor_position = undefined
+        )
+        if moved_position == undefined then return true
+        if anchor_position == undefined then return false
+        if distance moved_position anchor_position > epsilon then return false
+
+
+        local pair_selection = #{}
+        pair_selection[new_vertex_index] = true
+        pair_selection[anchor_vertex_index] = true
+        local repair_method = #none
+        local repair_success = false
+
+
+        /* Use the same proven Collapse/Weld sequence as sliced-edge vertex cleanup. */
+        modifier.SetSelection #Vertex #{} node:node
+        modifier.Select #Vertex pair_selection node:node
+        if (modifier.GetSelection #Vertex node:node) != pair_selection then return false
+        modifier.ButtonOp #CollapseVertex
+        modifier.Commit()
+        update node
+        modifier.RefreshScreen()
+
+
+        local after_live_count = getLiveEditPolyVertexCount node modifier
+        local anchor_after = findLiveEditPolyVertexAtWorldPoint node modifier anchor_world precision_threshold:precision_threshold
+        repair_success = after_live_count < before_live_count and anchor_after > 0
+        if repair_success then repair_method = #buttonCollapse
+
+
+        if not repair_success then
+        (
+            anchor_vertex_index = findLiveEditPolyVertexAtWorldPoint node modifier anchor_world precision_threshold:precision_threshold exclude_vertex:new_vertex_index
+            if anchor_vertex_index > 0 then
+            (
+                pair_selection = #{}
+                pair_selection[new_vertex_index] = true
+                pair_selection[anchor_vertex_index] = true
+                modifier.SetSelection #Vertex #{} node:node
+                modifier.Select #Vertex pair_selection node:node
+                if (modifier.GetSelection #Vertex node:node) != pair_selection then return false
+                modifier.SetOperation #CollapseVertex
+                modifier.Commit()
+                update node
+                modifier.RefreshScreen()
+
+
+                after_live_count = getLiveEditPolyVertexCount node modifier
+                anchor_after = findLiveEditPolyVertexAtWorldPoint node modifier anchor_world precision_threshold:precision_threshold
+                repair_success = after_live_count < before_live_count and anchor_after > 0
+                if repair_success then repair_method = #operationCollapse
+            )
+        )
+
+
+        if not repair_success then
+        (
+            anchor_vertex_index = findLiveEditPolyVertexAtWorldPoint node modifier anchor_world precision_threshold:precision_threshold exclude_vertex:new_vertex_index
+            if anchor_vertex_index > 0 then
+            (
+                pair_selection = #{}
+                pair_selection[new_vertex_index] = true
+                pair_selection[anchor_vertex_index] = true
+                modifier.SetSelection #Vertex #{} node:node
+                modifier.Select #Vertex pair_selection node:node
+                if (modifier.GetSelection #Vertex node:node) != pair_selection then return false
+                modifier.ButtonOp #WeldVertex
+                modifier.Commit()
+                update node
+                modifier.RefreshScreen()
+
+
+                after_live_count = getLiveEditPolyVertexCount node modifier
+                anchor_after = findLiveEditPolyVertexAtWorldPoint node modifier anchor_world precision_threshold:precision_threshold
+                repair_success = after_live_count < before_live_count and anchor_after > 0
+                if repair_success then repair_method = #buttonWeld
+            )
+        )
+
+
+        if not batch_quiet then format "Wall-Fixer Slice Precision Repair: newVert:% anchor:% distance:% threshold:% liveBefore:% liveAfter:% method:% success:%\n" new_vertex_index anchor_vertex_index world_distance precision_threshold before_live_count after_live_count repair_method repair_success
+        repair_success
+        -- return
+    ),
+
+
+    /*
+    Finds every vertex created by the latest Make 1 Slice inside the Slice Precision radius of either slice-end anchor.
+    All live new vertices around each anchor are collected, including multiple vertices created by hidden-edge intersections.
+    */
+    function getMassSlicePrecisionCandidates node precision_threshold:0.01 =
+    (
+        local candidate_vertices = #{}
+        local repair_pairs = #()
+        local inspection_vertices = #{}
+        if precision_threshold <= 0.0 then return #(candidate_vertices, repair_pairs, inspection_vertices)
+        if node == undefined or not(isValidNode node) then return #(candidate_vertices, repair_pairs, inspection_vertices)
+        if last_debug_slice_node != node then return #(candidate_vertices, repair_pairs, inspection_vertices)
+        if last_debug_slice_original_vertices.numberSet == 0 then return #(candidate_vertices, repair_pairs, inspection_vertices)
+        if node.modifiers.count == 0 then return #(candidate_vertices, repair_pairs, inspection_vertices)
+
+
+        local modifier = node.modifiers[1]
+        if classOf modifier != Edit_Poly then return #(candidate_vertices, repair_pairs, inspection_vertices)
+
+
+        local current_vertex_count = modifier.GetNumVertices node:node
+        local object_tm = node.objectTransform
+        local anchor_vertices = #()
+        local anchor_candidate_sets = #()
+
+
+        for anchor_vertex_index in last_debug_slice_start_vertices do
+        (
+            local anchor_is_original = anchor_vertex_index <= last_debug_slice_original_vertices.count and last_debug_slice_original_vertices[anchor_vertex_index]
+            if anchor_is_original and anchor_vertex_index >= 1 and anchor_vertex_index <= current_vertex_count then
+            (
+                local anchor_position = undefined
+                try
+                (
+                    anchor_position = modifier.GetVertex anchor_vertex_index node:node
+                )
+                catch
+                (
+                    anchor_position = undefined
+                )
+
+
+                if anchor_position != undefined then
+                (
+                    append anchor_vertices #(anchor_vertex_index, anchor_position * object_tm)
+                    append anchor_candidate_sets #{}
+                )
+            )
+        )
+
+
+        /* Fallback keeps precision repair usable if an older/manual slice cache has no explicit start vertices. */
+        if anchor_vertices.count == 0 then
+        (
+            for original_vertex_index in last_debug_slice_original_vertices do
+            (
+                if original_vertex_index >= 1 and original_vertex_index <= current_vertex_count then
+                (
+                    local original_position = undefined
+                    try
+                    (
+                        original_position = modifier.GetVertex original_vertex_index node:node
+                    )
+                    catch
+                    (
+                        original_position = undefined
+                    )
+
+
+                    if original_position != undefined then
+                    (
+                        append anchor_vertices #(original_vertex_index, original_position * object_tm)
+                        append anchor_candidate_sets #{}
+                    )
+                )
+            )
+        )
+
+
+        for vertex_index = 1 to current_vertex_count do
+        (
+            local existed_before_slice = vertex_index <= last_debug_slice_original_vertices.count and last_debug_slice_original_vertices[vertex_index]
+            if not existed_before_slice then
+            (
+                local vertex_position = undefined
+                local incident_edge_count = 0
+                local vertex_query_ok = true
+
+
+                try
+                (
+                    vertex_position = modifier.GetVertex vertex_index node:node
+                    if vertex_position != undefined then
+                    (
+                        incident_edge_count = modifier.GetVertexEdgeCount vertex_index node:node
+                    )
+                )
+                catch
+                (
+                    vertex_query_ok = false
+                )
+
+
+                if vertex_query_ok and vertex_position != undefined and incident_edge_count > 0 then
+                (
+                    local vertex_world = vertex_position * object_tm
+                    local nearest_anchor_array_index = 0
+                    local nearest_anchor_index = 0
+                    local nearest_anchor_world = undefined
+                    local nearest_distance = 1e30
+
+
+                    for anchor_array_index = 1 to anchor_vertices.count do
+                    (
+                        local anchor_item = anchor_vertices[anchor_array_index]
+                        local current_distance = distance vertex_world anchor_item[2]
+                        if current_distance <= precision_threshold and current_distance < nearest_distance then
+                        (
+                            nearest_distance = current_distance
+                            nearest_anchor_array_index = anchor_array_index
+                            nearest_anchor_index = anchor_item[1]
+                            nearest_anchor_world = anchor_item[2]
+                        )
+                    )
+
+
+                    if nearest_anchor_array_index > 0 then
+                    (
+                        candidate_vertices[vertex_index] = true
+                        inspection_vertices[vertex_index] = true
+                        inspection_vertices[nearest_anchor_index] = true
+                        anchor_candidate_sets[nearest_anchor_array_index][vertex_index] = true
+                        append repair_pairs #(vertex_index, nearest_anchor_index, nearest_anchor_world, nearest_distance)
+                    )
+                )
+            )
+        )
+
+
+        for anchor_array_index = 1 to anchor_vertices.count do
+        (
+            if not batch_quiet then format "Wall-Fixer Slice Precision Anchor: node:% anchor:% threshold:% candidates:%\n"                 node.name anchor_vertices[anchor_array_index][1] precision_threshold anchor_candidate_sets[anchor_array_index]
+        )
+        if not batch_quiet then format "Wall-Fixer Slice Precision Candidates: node:% threshold:% candidates:%\n" node.name precision_threshold candidate_vertices
+        if not batch_quiet then format "Wall-Fixer Slice Precision Inspection: node:% threshold:% inspection:%\n" node.name precision_threshold inspection_vertices
+        #(candidate_vertices, repair_pairs, inspection_vertices)
+        -- return
+    ),
+
+
+    /*
+    Returns true when one slice-created precision-candidate vertex ID is still live.
+    Pre-slice vertices are never accepted as precision candidates.
+    */
+    function isMassSlicePrecisionCandidateLive node modifier vertex_index =
+    (
+        if node == undefined or not(isValidNode node) then return false
+        if modifier == undefined then return false
+        if vertex_index < 1 or vertex_index > modifier.GetNumVertices node:node then return false
+        if vertex_index <= last_debug_slice_original_vertices.count and last_debug_slice_original_vertices[vertex_index] then return false
+
+
+        local vertex_position = undefined
+        local incident_edge_count = 0
+        local query_ok = true
+
+
+        try
+        (
+            vertex_position = modifier.GetVertex vertex_index node:node
+            if vertex_position != undefined then
+            (
+                incident_edge_count = modifier.GetVertexEdgeCount vertex_index node:node
+            )
+        )
+        catch
+        (
+            query_ok = false
+        )
+
+
+        query_ok and vertex_position != undefined and incident_edge_count > 0
+        -- return
+    ),
+
+
+    /*
+    Re-resolves one precision candidate without ever resolving onto an original pre-slice vertex.
+    Preferred vertex ID is used first so exact duplicate candidates can be repaired independently.
+    */
+    function findMassSlicePrecisionCandidate node modifier preferred_vertex saved_position tolerance:0.01 =
+    (
+        if node == undefined or not(isValidNode node) then return 0
+        if modifier == undefined or saved_position == undefined then return 0
+
+
+        if isMassSlicePrecisionCandidateLive node modifier preferred_vertex then
+        (
+            local preferred_position = modifier.GetVertex preferred_vertex node:node
+            if preferred_position != undefined and distance preferred_position saved_position <= tolerance then return preferred_vertex
+        )
+
+
+        local vertex_count = modifier.GetNumVertices node:node
+        local found_vertex = 0
+        local found_distance = undefined
+
+
+        for vertex_index = 1 to vertex_count do
+        (
+            if isMassSlicePrecisionCandidateLive node modifier vertex_index then
+            (
+                local vertex_position = modifier.GetVertex vertex_index node:node
+                if vertex_position != undefined then
+                (
+                    local vertex_distance = distance vertex_position saved_position
+                    if vertex_distance <= tolerance then
+                    (
+                        if found_distance == undefined or vertex_distance < found_distance then
+                        (
+                            found_distance = vertex_distance
+                            found_vertex = vertex_index
+                        )
+                    )
+                )
+            )
+        )
+
+
+        found_vertex
+        -- return
+    ),
+
+
+    /*
+    Finds the original pre-slice anchor nearest to one saved world-space anchor point.
+    Only vertices that existed before Make 1 Slice are eligible anchor targets.
+    */
+    function findMassSlicePrecisionOriginalAnchor node modifier preferred_anchor anchor_world precision_threshold:0.01 =
+    (
+        if node == undefined or not(isValidNode node) then return 0
+        if modifier == undefined or anchor_world == undefined then return 0
+
+
+        local object_tm = node.objectTransform
+        local vertex_count = modifier.GetNumVertices node:node
+        local best_vertex = 0
+        local best_distance = undefined
+
+
+        if preferred_anchor >= 1 and preferred_anchor <= vertex_count then
+        (
+            local preferred_is_original = preferred_anchor <= last_debug_slice_original_vertices.count and last_debug_slice_original_vertices[preferred_anchor]
+            if preferred_is_original then
+            (
+                local preferred_position = undefined
+                try
+                (
+                    preferred_position = modifier.GetVertex preferred_anchor node:node
+                )
+                catch
+                (
+                    preferred_position = undefined
+                )
+
+
+                if preferred_position != undefined then
+                (
+                    local preferred_distance = distance (preferred_position * object_tm) anchor_world
+                    if preferred_distance <= precision_threshold then return preferred_anchor
+                )
+            )
+        )
+
+
+        for vertex_index in last_debug_slice_original_vertices do
+        (
+            if vertex_index >= 1 and vertex_index <= vertex_count then
+            (
+                local vertex_position = undefined
+                try
+                (
+                    vertex_position = modifier.GetVertex vertex_index node:node
+                )
+                catch
+                (
+                    vertex_position = undefined
+                )
+
+
+                if vertex_position != undefined then
+                (
+                    local vertex_distance = distance (vertex_position * object_tm) anchor_world
+                    if vertex_distance <= precision_threshold then
+                    (
+                        if best_distance == undefined or vertex_distance < best_distance then
+                        (
+                            best_distance = vertex_distance
+                            best_vertex = vertex_index
+                        )
+                    )
+                )
+            )
+        )
+
+
+        best_vertex
+        -- return
+    ),
+
+
+    /*
+    Removes one confirmed precision vertex with the same Remove Vertex sequence proven by Clean Up Sliced Edges.
+    The selected new vertex is removed directly while the original pre-slice anchor is explicitly protected and verified.
+    */
+    function removeMassSlicePrecisionVertex node modifier preferred_vertex saved_position preferred_anchor anchor_world precision_threshold:0.01 allow_collapse_fallback:true =
+    (
+        local lookup_tolerance = amax 0.0001 (amin precision_threshold 0.01)
+        local current_vertex = findMassSlicePrecisionCandidate node modifier preferred_vertex saved_position tolerance:lookup_tolerance
+        if current_vertex <= 0 then return #(true, 0, #alreadyGone, "")
+
+
+        local anchor_vertex = findMassSlicePrecisionOriginalAnchor node modifier preferred_anchor anchor_world precision_threshold:precision_threshold
+        if anchor_vertex <= 0 then return #(false, current_vertex, #protected, "original pre-slice anchor could not be resolved")
+
+
+        local object_tm = node.objectTransform
+        local current_position = modifier.GetVertex current_vertex node:node
+        local anchor_position = modifier.GetVertex anchor_vertex node:node
+        if current_position == undefined or anchor_position == undefined then return #(false, current_vertex, #protected, "precision candidate or anchor has no live position")
+
+
+        local world_distance = distance (current_position * object_tm) (anchor_position * object_tm)
+        if world_distance > precision_threshold then return #(false, current_vertex, #protected, "precision candidate is outside Slice Precision threshold")
+
+
+        local methods = #(#buttonRemoveVertex, #operationRemoveVertex)
+        for method in methods do
+        (
+            current_vertex = findMassSlicePrecisionCandidate node modifier current_vertex saved_position tolerance:lookup_tolerance
+            if current_vertex <= 0 then return #(true, 0, method, "")
+
+
+            anchor_vertex = findMassSlicePrecisionOriginalAnchor node modifier preferred_anchor anchor_world precision_threshold:precision_threshold
+            if anchor_vertex <= 0 then return #(false, current_vertex, method, "original pre-slice anchor disappeared before precision repair")
+
+
+            local before_live_count = getLiveEditPolyVertexCount node modifier
+            local requested_selection = #{}
+            requested_selection[current_vertex] = true
+            local actual_selection = #{}
+            local operation_error = undefined
+
+
+            try
+            (
+                modifier.SetEPolySelLevel #Vertex
+                modifier.SetSelection #Vertex #{} node:node
+                modifier.Select #Vertex requested_selection node:node
+                actual_selection = modifier.GetSelection #Vertex node:node
+                if actual_selection != requested_selection then throw "Edit Poly vertex selection did not match the requested Slice Precision vertex."
+
+
+                if method == #buttonRemoveVertex then
+                (
+                    modifier.ButtonOp #RemoveVertex
+                )
+                else
+                (
+                    modifier.SetOperation #RemoveVertex
+                    modifier.Commit()
+                )
+
+
+                update node
+                modifier.RefreshScreen()
+            )
+            catch
+            (
+                operation_error = getCurrentException()
+            )
+
+
+            local after_live_count = getLiveEditPolyVertexCount node modifier
+            local candidate_still_live = isMassSlicePrecisionCandidateLive node modifier current_vertex
+            local anchor_after = findMassSlicePrecisionOriginalAnchor node modifier preferred_anchor anchor_world precision_threshold:precision_threshold
+            local removed = operation_error == undefined and not candidate_still_live and anchor_after > 0 and after_live_count < before_live_count
+            local failure_reason = ""
+
+
+            if operation_error != undefined then failure_reason = operation_error as string
+            else if candidate_still_live then failure_reason = "selected precision vertex is still live after Remove Vertex"
+            else if anchor_after <= 0 then failure_reason = "original pre-slice anchor disappeared after Remove Vertex"
+            else if after_live_count >= before_live_count then failure_reason = "live vertex count did not decrease"
+
+
+            if not batch_quiet then format "Wall-Fixer Slice Precision Remove Attempt: preferredVert:% currentVert:% anchor:% distance:% method:% selectedVerts:% liveBefore:% liveAfter:% success:% reason:%\n" \
+                preferred_vertex current_vertex anchor_vertex world_distance method actual_selection before_live_count after_live_count removed failure_reason
+
+
+            if removed then return #(true, current_vertex, method, "")
+        )
+
+
+        current_vertex = findMassSlicePrecisionCandidate node modifier preferred_vertex saved_position tolerance:lookup_tolerance
+        if current_vertex <= 0 then return #(true, 0, #alreadyGone, "")
+        if not allow_collapse_fallback then return #(false, current_vertex, #removeVertexOnly, "Remove Vertex did not remove the precision candidate; base anchor collapse is disabled.")
+
+
+        anchor_vertex = findMassSlicePrecisionOriginalAnchor node modifier preferred_anchor anchor_world precision_threshold:precision_threshold
+        if anchor_vertex <= 0 then return #(false, current_vertex, #collapseToAnchor, "original pre-slice anchor could not be resolved for collapse fallback")
+
+
+        current_position = modifier.GetVertex current_vertex node:node
+        anchor_position = modifier.GetVertex anchor_vertex node:node
+        if current_position == undefined or anchor_position == undefined then return #(false, current_vertex, #collapseToAnchor, "precision collapse fallback has no live position")
+
+
+        local move_amount = anchor_position - current_position
+        local single_selection = #{}
+        single_selection[current_vertex] = true
+        local pair_selection = #{}
+        pair_selection[current_vertex] = true
+        pair_selection[anchor_vertex] = true
+        local collapse_error = undefined
+        local collapse_before_count = getLiveEditPolyVertexCount node modifier
+
+
+        try
+        (
+            modifier.SetEPolySelLevel #Vertex
+            modifier.SetSelection #Vertex #{} node:node
+            modifier.SetSelection #Vertex single_selection node:node
+            modifier.SetOperation #Transform
+            modifier.MoveSelection move_amount parent:(modifier.GetNodeTM node:node) axis:(modifier.GetNodeTM node:node)
+            modifier.Commit()
+            update node
+            modifier.RefreshScreen()
+
+
+            modifier.SetSelection #Vertex #{} node:node
+            modifier.SetSelection #Vertex pair_selection node:node
+            modifier.SetOperation #CollapseVertex
+            modifier.Commit()
+            update node
+            modifier.RefreshScreen()
+        )
+        catch
+        (
+            collapse_error = getCurrentException()
+        )
+
+
+        local collapse_after_count = getLiveEditPolyVertexCount node modifier
+        local anchor_after = findLiveEditPolyVertexAtWorldPoint node modifier anchor_world precision_threshold:precision_threshold
+        local collapse_success = collapse_error == undefined and collapse_after_count < collapse_before_count and anchor_after > 0
+        local collapse_reason = if collapse_error != undefined then collapse_error as string else if collapse_after_count >= collapse_before_count then "live vertex count did not decrease during collapse fallback" else if anchor_after <= 0 then "no live vertex remains at the original anchor after collapse fallback" else ""
+
+
+        if not batch_quiet then format "Wall-Fixer Slice Precision Collapse Fallback: preferredVert:% currentVert:% anchor:% liveBefore:% liveAfter:% success:% reason:%\n" \
+            preferred_vertex current_vertex anchor_vertex collapse_before_count collapse_after_count collapse_success collapse_reason
+
+
+        #(collapse_success, current_vertex, #collapseToAnchor, collapse_reason)
+        -- return
+    ),
+
+
+    /*
+    Collapses one anchor plus all saved precision vertices paired to that anchor, then restores the exact anchor position.
+    The cluster is re-resolved by position so the opposite side remains safe after topology renumbering.
+    */
+    function collapseMassSlicePrecisionAnchorCluster node modifier anchor_world candidate_world_positions precision_threshold:0.01 =
+    (
+        if node == undefined or not(isValidNode node) then return #(false, #{}, 0, "invalid node")
+        if modifier == undefined then return #(false, #{}, 0, "invalid Edit Poly modifier")
+        if anchor_world == undefined then return #(false, #{}, 0, "missing anchor position")
+        if candidate_world_positions.count == 0 then return #(true, #{}, 0, "")
+
+
+        local anchor_vertex = findLiveEditPolyVertexAtWorldPoint node modifier anchor_world precision_threshold:precision_threshold
+        if anchor_vertex <= 0 then return #(false, #{}, 0, "anchor vertex could not be resolved")
+
+
+        local anchor_position = undefined
+        try
+        (
+            anchor_position = modifier.GetVertex anchor_vertex node:node
+        )
+        catch
+        (
+            anchor_position = undefined
+        )
+        if anchor_position == undefined then return #(false, #{}, 0, "anchor vertex has no live position")
+
+
+        local lookup_tolerance = amax epsilon (amin precision_threshold 0.01)
+        local object_tm = node.objectTransform
+        local cluster_selection = #{}
+        local vertex_count = modifier.GetNumVertices node:node
+
+
+        cluster_selection[anchor_vertex] = true
+
+
+        for vertex_index = 1 to vertex_count do
+        (
+            local vertex_position = undefined
+            try
+            (
+                vertex_position = modifier.GetVertex vertex_index node:node
+            )
+            catch
+            (
+                vertex_position = undefined
+            )
+
+
+            if vertex_position != undefined then
+            (
+                local vertex_world = vertex_position * object_tm
+                local matches_candidate = false
+
+
+                for candidate_world in candidate_world_positions while not matches_candidate do
+                (
+                    if distance vertex_world candidate_world <= lookup_tolerance then matches_candidate = true
+                )
+
+
+                if matches_candidate then cluster_selection[vertex_index] = true
+            )
+        )
+
+
+        if cluster_selection.numberSet <= 1 then return #(false, cluster_selection, anchor_vertex, "precision cluster contains no redundant vertex")
+
+
+        local live_before = getLiveEditPolyVertexCount node modifier
+        local actual_selection = #{}
+        local collapse_error = undefined
+
+
+        try
+        (
+            modifier.SetEPolySelLevel #Vertex
+            modifier.SetSelection #Vertex #{} node:node
+            modifier.Select #Vertex cluster_selection node:node
+            actual_selection = modifier.GetSelection #Vertex node:node
+            if actual_selection != cluster_selection then throw "Edit Poly collapse selection did not match the requested Slice Precision cluster."
+
+
+            modifier.ButtonOp #CollapseVertex
+            update node
+            ::WallFixer.refreshDebugModifierTopology node
+            modifier.RefreshScreen()
+        )
+        catch
+        (
+            collapse_error = getCurrentException()
+        )
+
+
+        local live_after_collapse = getLiveEditPolyVertexCount node modifier
+        if collapse_error != undefined then return #(false, cluster_selection, 0, collapse_error as string)
+
+
+        /*
+        Fall back to the targeted precision-pair repair when CollapseVertex refuses a valid connected cluster.
+        Each saved precision vertex is re-resolved by world position, moved onto the saved anchor, then collapsed/welded only with that anchor.
+        */
+        if live_after_collapse >= live_before then
+        (
+            local fallback_success = true
+
+
+            for candidate_world in candidate_world_positions while fallback_success do
+            (
+                local current_anchor_vertex = findLiveEditPolyVertexAtWorldPoint node modifier anchor_world precision_threshold:precision_threshold
+                local current_candidate_vertex = 0
+
+
+                if current_anchor_vertex > 0 then
+                (
+                    current_candidate_vertex = findLiveEditPolyVertexAtWorldPoint node modifier candidate_world precision_threshold:precision_threshold exclude_vertex:current_anchor_vertex
+                )
+
+
+                if current_candidate_vertex > 0 then
+                (
+                    fallback_success = weldMassSliceVertexToAnchor node modifier current_candidate_vertex anchor_world precision_threshold:precision_threshold
+                )
+            )
+
+
+            live_after_collapse = getLiveEditPolyVertexCount node modifier
+            if not batch_quiet then format "Wall-Fixer Slice Precision Cluster Fallback: anchorWorld:% selected:% liveBefore:% liveAfter:% success:%\n" anchor_world cluster_selection live_before live_after_collapse fallback_success
+
+
+            if (not fallback_success) or live_after_collapse >= live_before then
+            (
+                return #(false, cluster_selection, 0, "collapse/weld fallback did not reduce live vertex count")
+            )
+        )
+
+
+        local survivor_vertex = findLiveEditPolyVertexAtWorldPoint node modifier anchor_world precision_threshold:precision_threshold
+        if survivor_vertex <= 0 then return #(false, cluster_selection, 0, "collapsed survivor could not be resolved near original anchor")
+
+
+        local survivor_position = undefined
+        try
+        (
+            survivor_position = modifier.GetVertex survivor_vertex node:node
+        )
+        catch
+        (
+            survivor_position = undefined
+        )
+        if survivor_position == undefined then return #(false, cluster_selection, survivor_vertex, "collapsed survivor has no live position")
+
+
+        local move_amount = anchor_position - survivor_position
+        local survivor_selection = #{}
+        survivor_selection[survivor_vertex] = true
+        local move_error = undefined
+
+
+        try
+        (
+            modifier.SetSelection #Vertex #{} node:node
+            modifier.SetSelection #Vertex survivor_selection node:node
+            modifier.SetOperation #Transform
+            modifier.MoveSelection move_amount parent:(modifier.GetNodeTM node:node) axis:(modifier.GetNodeTM node:node)
+            modifier.Commit()
+            update node
+            ::WallFixer.refreshDebugModifierTopology node
+            modifier.RefreshScreen()
+        )
+        catch
+        (
+            move_error = getCurrentException()
+        )
+
+
+        if move_error != undefined then return #(false, cluster_selection, survivor_vertex, move_error as string)
+
+
+        local final_position = undefined
+        try
+        (
+            final_position = modifier.GetVertex survivor_vertex node:node
+        )
+        catch
+        (
+            final_position = undefined
+        )
+
+
+        local position_ok = final_position != undefined and distance final_position anchor_position <= epsilon
+        local cluster_success = position_ok and live_after_collapse <= (live_before - (cluster_selection.numberSet - 1))
+        local failure_reason = if not position_ok then "collapsed survivor was not restored to the exact anchor position" else if not cluster_success then "collapse did not merge the full precision cluster" else ""
+
+
+        if not batch_quiet then format "Wall-Fixer Slice Precision Cluster: anchorWorld:% selected:% liveBefore:% liveAfter:% survivor:% exactPosition:% success:% reason:%\n" \
+            anchor_world cluster_selection live_before live_after_collapse survivor_vertex position_ok cluster_success failure_reason
+
+
+        #(cluster_success, cluster_selection, survivor_vertex, failure_reason)
+        -- return
+    ),
+
+
+    /*
+    Captures Slice Precision anchor groups before another cleanup changes the latest slice topology.
+    Saved world-space positions keep the repair usable after Clean Up Sliced Edges invalidates vertex IDs.
+    */
+    function captureMassSlicePrecisionCleanupData node precision_threshold:0.01 =
+    (
+        local candidate_vertices = #{}
+        local anchor_groups = #()
+
+
+        if precision_threshold <= 0.0 then return #(true, candidate_vertices, anchor_groups)
+        if node == undefined or not(isValidNode node) then return #(false, candidate_vertices, anchor_groups)
+        if last_debug_slice_node != node then return #(false, candidate_vertices, anchor_groups)
+        if last_debug_slice_original_vertices.numberSet == 0 then return #(false, candidate_vertices, anchor_groups)
+        if node.modifiers.count == 0 then return #(false, candidate_vertices, anchor_groups)
+
+
+        local modifier = node.modifiers[1]
+        if classOf modifier != Edit_Poly then return #(false, candidate_vertices, anchor_groups)
+
+
+        local precision_data = getMassSlicePrecisionCandidates node precision_threshold:precision_threshold
+        candidate_vertices = precision_data[1]
+        local repair_pairs = precision_data[2]
+        local object_tm = node.objectTransform
+
+
+        for repair_pair in repair_pairs do
+        (
+            local candidate_vertex = repair_pair[1]
+            local anchor_vertex = repair_pair[2]
+            local anchor_world = repair_pair[3]
+            local candidate_position = undefined
+
+
+            try
+            (
+                candidate_position = modifier.GetVertex candidate_vertex node:node
+            )
+            catch
+            (
+                candidate_position = undefined
+            )
+
+
+            if candidate_position != undefined then
+            (
+                local group_index = 0
+                for anchor_group_index = 1 to anchor_groups.count while group_index == 0 do
+                (
+                    if anchor_groups[anchor_group_index][1] == anchor_vertex then group_index = anchor_group_index
+                )
+
+
+                if group_index == 0 then
+                (
+                    local candidate_positions = #()
+                    local original_candidate_vertices = #{}
+                    append candidate_positions (candidate_position * object_tm)
+                    original_candidate_vertices[candidate_vertex] = true
+                    append anchor_groups #(anchor_vertex, anchor_world, candidate_positions, original_candidate_vertices)
+                )
+                else
+                (
+                    append anchor_groups[group_index][3] (candidate_position * object_tm)
+                    anchor_groups[group_index][4][candidate_vertex] = true
+                )
+            )
+        )
+
+
+        if not batch_quiet then format "Wall-Fixer Slice Precision Capture: node:% threshold:% candidates:% groups:%\n" node.name precision_threshold candidate_vertices anchor_groups.count
+        #(true, candidate_vertices, anchor_groups)
+        -- return
+    ),
+
+
+    /*
+    Repairs previously captured Slice Precision anchor groups after other cleanup operations changed topology.
+    Each anchor side is collapsed independently and the surviving vertex is restored to the saved anchor position.
+    */
+    function cleanupCapturedMassSlicePrecisionVerts node precision_cleanup_data precision_threshold:0.01 =
+    (
+        local empty_candidates = #{}
+        if precision_threshold <= 0.0 then return #(true, 0, empty_candidates)
+        if node == undefined or not(isValidNode node) then return #(false, 0, empty_candidates)
+        if precision_cleanup_data == undefined or precision_cleanup_data.count < 3 then return #(false, 0, empty_candidates)
+        if node.modifiers.count == 0 then return #(false, 0, empty_candidates)
+
+
+        local modifier = node.modifiers[1]
+        if classOf modifier != Edit_Poly then return #(false, 0, empty_candidates)
+
+
+        local candidate_vertices = precision_cleanup_data[2]
+        local anchor_groups = precision_cleanup_data[3]
+        local repaired_vertices = #{}
+        local unresolved_vertices = #{}
+
+
+        select node
+        max modify mode
+        modPanel.setCurrentObject modifier
+        modifier.SetPrimaryNode node
+        modifier.useStackSelection = false
+
+
+        for anchor_group in anchor_groups do
+        (
+            local anchor_vertex = anchor_group[1]
+            local anchor_world = anchor_group[2]
+            local candidate_positions = anchor_group[3]
+            local original_candidate_vertices = anchor_group[4]
+            local collapse_result = collapseMassSlicePrecisionAnchorCluster node modifier anchor_world candidate_positions precision_threshold:precision_threshold
+            local already_clean = (not collapse_result[1]) and collapse_result[2].numberSet == 1 and collapse_result[3] > 0
+
+
+            if collapse_result[1] or already_clean then
+            (
+                repaired_vertices += original_candidate_vertices
+                if already_clean then
+                (
+                    if not batch_quiet then format "Wall-Fixer Slice Precision Cluster: node:% anchorVert:% candidates:% already removed by earlier cleanup.\n" node.name anchor_vertex original_candidate_vertices
+                )
+            )
+            else
+            (
+                unresolved_vertices += original_candidate_vertices
+                if not batch_quiet then format "Wall-Fixer Slice Precision Cluster FAILED: node:% anchorVert:% candidates:% reason:%\n" node.name anchor_vertex original_candidate_vertices collapse_result[4]
+            )
+        )
+
+
+        modifier.SetSelection #Vertex #{} node:node
+        if not batch_quiet then format "Wall-Fixer Slice Precision: node:% threshold:% candidates:% repaired:% unresolved:% groups:%\n" node.name precision_threshold candidate_vertices repaired_vertices unresolved_vertices anchor_groups.count
+        #(unresolved_vertices.numberSet == 0, repaired_vertices.numberSet, candidate_vertices)
+        -- return
+    ),
+
+
+    /*
+    Repairs every precision candidate from the latest Make 1 Slice while preserving all original pre-slice anchors.
+    Manual mode captures and repairs immediately; batch mode can keep the same capture across sliced-edge cleanup.
+    */
+    function cleanupMassSlicePrecisionVerts node precision_threshold:0.01 preserve_base_ids:false =
+    (
+        if preserve_base_ids then
+        (
+            local empty_candidates = #{}
+            if precision_threshold <= 0.0 then return #(true, 0, empty_candidates)
+            if node == undefined or not(isValidNode node) then return #(false, 0, empty_candidates)
+            if last_debug_slice_node != node then return #(false, 0, empty_candidates)
+            if node.modifiers.count == 0 then return #(false, 0, empty_candidates)
+
+
+            local modifier = node.modifiers[1]
+            if classOf modifier != Edit_Poly then return #(false, 0, empty_candidates)
+
+
+            local precision_data = getMassSlicePrecisionCandidates node precision_threshold:precision_threshold
+            local candidate_vertices = precision_data[1]
+            local repair_pairs = precision_data[2]
+            if candidate_vertices.numberSet == 0 then return #(true, 0, candidate_vertices)
+
+
+            /* Capture every new precision vertex before any removal can renumber Edit Poly topology. */
+            local repair_items = #()
+            for repair_pair in repair_pairs do
+            (
+                local candidate_vertex = repair_pair[1]
+                local candidate_position = undefined
+                try
+                (
+                    candidate_position = modifier.GetVertex candidate_vertex node:node
+                )
+                catch
+                (
+                    candidate_position = undefined
+                )
+
+
+                if candidate_position != undefined then
+                (
+                    append repair_items #(candidate_vertex, candidate_position, repair_pair[2], repair_pair[3])
+                )
+            )
+
+
+            local repaired_vertices = #{}
+            local unresolved_vertices = #{}
+
+
+            select node
+            max modify mode
+            modPanel.setCurrentObject modifier
+            modifier.SetPrimaryNode node
+            modifier.useStackSelection = false
+
+
+            for repair_item in repair_items do
+            (
+                local candidate_vertex = repair_item[1]
+                local removal_result = removeMassSlicePrecisionVertex \
+                    node \
+                    modifier \
+                    candidate_vertex \
+                    repair_item[2] \
+                    repair_item[3] \
+                    repair_item[4] \
+                    precision_threshold:precision_threshold \
+                    allow_collapse_fallback:false
+
+
+                if removal_result[1] then repaired_vertices[candidate_vertex] = true
+                else unresolved_vertices[candidate_vertex] = true
+            )
+
+
+            modifier.SetSelection #Vertex #{} node:node
+            if not batch_quiet then format "Wall-Fixer Slice Precision Preserve Base: node:% threshold:% candidates:% repaired:% unresolved:%\n" \
+                node.name precision_threshold candidate_vertices repaired_vertices unresolved_vertices
+
+
+            #(unresolved_vertices.numberSet == 0, repaired_vertices.numberSet, candidate_vertices)
+        )
+        else
+        (
+            local precision_cleanup_data = captureMassSlicePrecisionCleanupData node precision_threshold:precision_threshold
+            if not precision_cleanup_data[1] then return #(false, 0, precision_cleanup_data[2])
+
+
+            cleanupCapturedMassSlicePrecisionVerts node precision_cleanup_data precision_threshold:precision_threshold
+        )
+        -- return
+    ),
+
+
+    /*
+    Builds one fixed slice-task queue from unchanged base-object INNER VERTS.
+    Horizontal tasks are grouped only inside the same planar wall region so cuts stop at wall corners.
+    */
+    function buildBaseSliceTaskQueue node cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 horizontal_level_tolerance:0.001 planar_tolerance:1.0 =
+    (
+        local result = #()
+        if node == undefined or not(isValidNode node) then return result
+
+
+        local reset_inner_vertices = getResetInnerVertSelection node
+        if reset_inner_vertices == undefined then return result
+
+
+        local base_candidates = getBaseInnerSliceCandidates \
+            node \
+            angle_threshold:angle_threshold \
+            source_vertices:reset_inner_vertices \
+            planar_tolerance:planar_tolerance
+
+
+        /* Vertical mode keeps one task per candidate and planar wall region. */
+        if cut_mode == #all or cut_mode == #vertical then
+        (
+            for candidate in base_candidates do
+            (
+                local base_vertex = candidate[1]
+                local direction_available = candidate[2]
+                local base_edge = candidate[4]
+                local base_anchor = candidate[6]
+                local base_axis = if slice_plane_mode == #nextVert then candidate[7] else candidate[9]
+                local wall_normal = candidate[11]
+                local wall_origin = candidate[12]
+                local region_id = candidate[13]
+
+
+                if direction_available and base_axis != undefined then
+                (
+                    local task_edges = #{}
+                    local task_vertices = #{}
+                    if base_edge > 0 then task_edges[base_edge] = true
+                    task_vertices[base_vertex] = true
+
+
+                    append result #(
+                        base_vertex,
+                        #vertical,
+                        base_edge,
+                        base_anchor,
+                        base_axis,
+                        task_edges,
+                        task_vertices,
+                        base_anchor.z,
+                        wall_normal,
+                        wall_origin,
+                        region_id
+                    )
+                )
+            )
+        )
+
+
+        /* Horizontal mode groups equal Z levels only within the same planar wall region. */
+        if cut_mode == #all or cut_mode == #horizontal then
+        (
+            local horizontal_groups = #()
+
+
+            for candidate in base_candidates do
+            (
+                local base_vertex = candidate[1]
+                local direction_available = candidate[3]
+                local base_edge = candidate[5]
+                local base_anchor = candidate[6]
+                local base_axis = if slice_plane_mode == #nextVert then candidate[8] else candidate[10]
+                local region_id = candidate[13]
+
+
+                if direction_available and base_axis != undefined then
+                (
+                    local level_z = base_anchor.z
+                    local group_index = 0
+
+
+                    for index = 1 to horizontal_groups.count while group_index == 0 do
+                    (
+                        local same_level = abs(horizontal_groups[index][1] - level_z) <= horizontal_level_tolerance
+                        local same_region = horizontal_groups[index][5] == region_id
+
+
+                        if same_level and same_region then
+                        (
+                            group_index = index
+                        )
+                    )
+
+
+                    if group_index == 0 then
+                    (
+                        local group_edges = #{}
+                        local group_vertices = #{}
+                        if base_edge > 0 then group_edges[base_edge] = true
+                        group_vertices[base_vertex] = true
+                        append horizontal_groups #(level_z, candidate, group_edges, group_vertices, region_id)
+                    )
+                    else
+                    (
+                        local group_item = horizontal_groups[group_index]
+                        if base_edge > 0 then group_item[3][base_edge] = true
+                        group_item[4][base_vertex] = true
+                    )
+                )
+            )
+
+
+            for group_item in horizontal_groups do
+            (
+                local level_z = group_item[1]
+                local representative = group_item[2]
+                local group_edges = copy group_item[3]
+                local group_vertices = copy group_item[4]
+                local region_id = group_item[5]
+                local base_vertex = representative[1]
+                local base_edge = representative[5]
+                local base_anchor = representative[6]
+                local base_axis = if slice_plane_mode == #nextVert then representative[8] else representative[10]
+                local wall_normal = representative[11]
+                local wall_origin = representative[12]
+
+
+                append result #(
+                    base_vertex,
+                    #horizontal,
+                    base_edge,
+                    base_anchor,
+                    base_axis,
+                    group_edges,
+                    group_vertices,
+                    level_z,
+                    wall_normal,
+                    wall_origin,
+                    region_id
+                )
+
+
+                if not batch_quiet then format "Wall-Fixer Horizontal Slice Level Group: node:% region:% z:% verts:% edges:% representative:%\n" \
+                    node.name region_id level_z group_vertices group_edges base_vertex
+            )
+        )
+
+
+        if not batch_quiet then format "Wall-Fixer Base Slice Task Queue: node:% tasks:% innerVerts:%\n" node.name result.count reset_inner_vertices
+        result
+        -- return
+    ),
+
+
+    /*
+    Builds ordered slicing passes and assigns one Edit Poly modifier name to each pass.
+    All mode uses one mixed queue; directional modes run the selected direction first and the opposite direction second.
+    */
+    function buildBaseSlicePassQueue node cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 =
+    (
+        local slice_passes = #()
+
+
+        case cut_mode of
+        (
+            #horizontal:
+            (
+                local horizontal_tasks = buildBaseSliceTaskQueue \
+                    node \
+                    cut_mode:#horizontal \
+                    slice_plane_mode:slice_plane_mode \
+                    angle_threshold:angle_threshold \
+                    planar_tolerance:planar_tolerance
+
+
+                local vertical_tasks = buildBaseSliceTaskQueue \
+                    node \
+                    cut_mode:#vertical \
+                    slice_plane_mode:slice_plane_mode \
+                    angle_threshold:angle_threshold \
+                    planar_tolerance:planar_tolerance
+
+
+                append slice_passes #(#horizontal, "SLICE HORIZONTAL", horizontal_tasks)
+                append slice_passes #(#vertical, "SLICE VERTICAL", vertical_tasks)
+            )
+            #vertical:
+            (
+                local vertical_tasks = buildBaseSliceTaskQueue \
+                    node \
+                    cut_mode:#vertical \
+                    slice_plane_mode:slice_plane_mode \
+                    angle_threshold:angle_threshold \
+                    planar_tolerance:planar_tolerance
+
+
+                local horizontal_tasks = buildBaseSliceTaskQueue \
+                    node \
+                    cut_mode:#horizontal \
+                    slice_plane_mode:slice_plane_mode \
+                    angle_threshold:angle_threshold \
+                    planar_tolerance:planar_tolerance
+
+
+                append slice_passes #(#vertical, "SLICE VERTICAL", vertical_tasks)
+                append slice_passes #(#horizontal, "SLICE HORIZONTAL", horizontal_tasks)
+            )
+            default:
+            (
+                local all_tasks = buildBaseSliceTaskQueue \
+                    node \
+                    cut_mode:#all \
+                    slice_plane_mode:slice_plane_mode \
+                    angle_threshold:angle_threshold \
+                    planar_tolerance:planar_tolerance
+
+
+                append slice_passes #(#all, "SLICE ALL", all_tasks)
+            )
+        )
+
+
+        slice_passes
+        -- return
+    ),
+
+
+    /*
+    Verifies that the original base-object vertex ids still exist at their unchanged world positions.
+    Slicing may append new Edit Poly vertices, but ids 1..baseVertCount must remain immutable anchors.
+    */
+    function verifyBaseSliceVerticesPreserved node modifier position_tolerance:0.01 =
+    (
+        if node == undefined or not(isValidNode node) then return false
+        if modifier == undefined then return false
+        if classOf node.baseObject != Editable_Poly then return false
+
+
+        local base_obj = node.baseObject
+        local base_vertex_count = polyop.getNumVerts base_obj
+        local object_tm = node.objectTransform
+
+
+        for vertex_index = 1 to base_vertex_count do
+        (
+            local base_world = (polyop.getVert base_obj vertex_index) * object_tm
+            local current_world = undefined
+            try
+            (
+                current_world = modifier.GetVertex vertex_index node:node
+            )
+            catch
+            (
+                current_world = undefined
+            )
+
+
+            if current_world == undefined then
+            (
+                if not batch_quiet then format "Wall-Fixer Base Vertex Preservation FAILED: node:% vertex:% reason:missing current Edit Poly vertex.\n" node.name vertex_index
+                return false
+            )
+
+
+            if distance base_world current_world > position_tolerance then
+            (
+                if not batch_quiet then format "Wall-Fixer Base Vertex Preservation FAILED: node:% vertex:% base:% current:% distance:%\n" \
+                    node.name vertex_index base_world current_world (distance base_world current_world)
+                return false
+            )
+        )
+
+
+        if not batch_quiet then format "Wall-Fixer Base Vertex Preservation: node:% baseVerts:% success:true\n" node.name base_vertex_count
+        true
+        -- return
+    ),
+
+
+    /*
+    Executes one fixed base-object slice-task queue inside one named slicing Edit Poly modifier.
+    Each call owns exactly one pass; cleanup never controls or regenerates the fixed base-object task queue.
+    */
+    function executeBaseSliceTaskQueue node slice_tasks modifier_name:"SLICE ALL" angle_threshold:5.0 planar_tolerance:1.0 precision_threshold:0.01 task_index_offset:0 total_task_count:undefined =
+    (
+        local success_count = 0
+        local no_change_count = 0
+        local failure = undefined
+        local modifier = undefined
+        local queue_total = if total_task_count == undefined then slice_tasks.count else total_task_count
+
+
+        if node == undefined or not(isValidNode node) then return #(false, 0, 0)
+        if classOf node.baseObject != Editable_Poly then return #(false, 0, 0)
+
+
+        try
+        (
+            modifier = Edit_Poly name:modifier_name
+            addModifier node modifier
+
+
+            select node
+            max modify mode
+            modPanel.setCurrentObject modifier
+            modifier.SetPrimaryNode node
+            modifier.split = false
+            modifier.useStackSelection = false
+            modifier.useSoftSel = false
+            modifier.remveEdgeCtrlKey = false
+
+
+            local pipeline = WMCWallSlicePipeline \
+                node:node \
+                ep:modifier \
+                planarTolerance:(amax 0.0 planar_tolerance) \
+                axisTolerance:(amin 45.0 (amax 0.0 angle_threshold)) \
+                uiSelection:false
+
+
+            local task_index = 0
+            for slice_task in slice_tasks do
+            (
+                task_index += 1
+                local display_task_index = task_index_offset + task_index
+
+
+                local base_vertex = slice_task[1]
+                local slice_kind = slice_task[2]
+                local base_edge = slice_task[3]
+                local base_anchor = slice_task[4]
+                local base_axis = slice_task[5]
+                local task_base_edges = if slice_task.count >= 6 then copy slice_task[6] else #{}
+                local task_base_vertices = if slice_task.count >= 7 then copy slice_task[7] else #{}
+                local task_level_z = if slice_task.count >= 8 then slice_task[8] else base_anchor.z
+                local wall_normal = if slice_task.count >= 9 then slice_task[9] else undefined
+                local wall_origin = if slice_task.count >= 10 then slice_task[10] else undefined
+                local region_id = if slice_task.count >= 11 then slice_task[11] else 0
+
+
+                if task_base_edges.numberSet == 0 and base_edge > 0 then task_base_edges[base_edge] = true
+                if task_base_vertices.numberSet == 0 then task_base_vertices[base_vertex] = true
+
+
+                if batch_quiet then
+                (
+                    format "Wall-Fixer Batch Base Slice Task: node:% task:%/%\n" node.name display_task_index queue_total
+                )
+                else
+                (
+                    format "Wall-Fixer Batch Base Slice Task: node:% modifier:% task:%/% region:% baseVert:% baseEdge:% direction:% levelZ:% groupedVerts:%\n" \
+                        node.name modifier_name display_task_index queue_total region_id base_vertex base_edge slice_kind task_level_z task_base_vertices
+                )
+
+
+                local slice_result = pipeline.makeOneSliceFromBasePlane \
+                    base_vertex \
+                    base_anchor \
+                    base_axis \
+                    slice_kind \
+                    wall_normal:wall_normal \
+                    wall_origin:wall_origin \
+                    plane_tolerance:(amax 0.0 planar_tolerance)
+
+
+                if slice_result == undefined then
+                (
+                    no_change_count += 1
+                    if not batch_quiet then format "Wall-Fixer Batch Base Slice Task Skip: node:% modifier:% baseVert:% direction:% reason:no topology change.\n" \
+                        node.name modifier_name base_vertex slice_kind
+                )
+                else
+                (
+                    success_count += 1
+
+
+                    /* Manual pipeline context for this exact queued slice.
+                       The fixed base-object queue stays authoritative and never depends on cleanup results. */
+                    last_debug_slice_node = node
+                    last_debug_slice_new_edges = copy slice_result[9]
+                    last_debug_slice_original_vertices = copy slice_result[12]
+                    last_debug_slice_start_vertices = #{}
+
+
+                    for defining_edge_index in task_base_edges do
+                    (
+                        local defining_edge_vertices = polyop.getEdgeVerts node.baseObject defining_edge_index
+                        if defining_edge_vertices != undefined and defining_edge_vertices.count == 2 then
+                        (
+                            last_debug_slice_start_vertices[defining_edge_vertices[1]] = true
+                            last_debug_slice_start_vertices[defining_edge_vertices[2]] = true
+                        )
+                    )
+
+
+                    if not batch_quiet then format "Wall-Fixer Batch Manual Pipeline Context: node:% modifier:% baseVert:% direction:% groupedBaseVerts:% newEdges:% startVerts:% originalVerts:%\n" \
+                        node.name modifier_name base_vertex slice_kind task_base_vertices last_debug_slice_new_edges last_debug_slice_start_vertices last_debug_slice_original_vertices.numberSet
+
+
+                    /* 2. Fix Slice Precision only when this slice produced precision candidates.
+                       Batch uses the same candidate rules but removes only new verts so base-object ids stay unchanged. */
+                    local precision_data = ::WallFixer.getMassSlicePrecisionCandidates node precision_threshold:precision_threshold
+                    local precision_candidates = precision_data[1]
+                    local precision_ok = true
+
+
+                    if precision_candidates.numberSet > 0 then
+                    (
+                        local precision_cleanup = ::WallFixer.cleanupMassSlicePrecisionVerts \
+                            node \
+                            precision_threshold:precision_threshold \
+                            preserve_base_ids:true
+                        precision_ok = precision_cleanup[1]
+                        if not batch_quiet then format "Wall-Fixer Batch Fix Slice Precision: node:% modifier:% baseVert:% direction:% candidates:% fixed:% success:%\n" \
+                            node.name modifier_name base_vertex slice_kind precision_candidates precision_cleanup[2] precision_ok
+                    )
+                    else
+                    (
+                        if not batch_quiet then format "Wall-Fixer Batch Fix Slice Precision Skip: node:% modifier:% baseVert:% direction:% candidates:#{}\n" \
+                            node.name modifier_name base_vertex slice_kind
+                    )
+
+
+                    /* 3. Clean Up Sliced Edges only when redundant edge candidates actually exist.
+                       A precision failure skips Step 2 for this slice but never stops the fixed base-object queue. */
+                    if precision_ok then
+                    (
+                        local cleanup_data = ::WallFixer.getDebugSlicedEdgeCleanupCandidates node modifier
+                        local removable_edges = if cleanup_data == undefined then #{} else cleanup_data[1]
+
+
+                        if removable_edges.numberSet > 0 then
+                        (
+                            local cleanup_ok = ::WallFixer.debugCleanUpSlicedEdges final_redraw:false keep_modify_context:true
+                            if not batch_quiet then format "Wall-Fixer Batch Clean Up Sliced Edges: node:% modifier:% baseVert:% direction:% removeEdges:% success:%\n" \
+                                node.name modifier_name base_vertex slice_kind removable_edges cleanup_ok
+                            if not cleanup_ok then
+                            (
+                                if not batch_quiet then format "Wall-Fixer Batch Clean Up Sliced Edges WARNING: node:% modifier:% baseVert:% direction:% error:%\n" \
+                                    node.name modifier_name base_vertex slice_kind last_slice_report
+                            )
+                        )
+                        else
+                        (
+                            if not batch_quiet then format "Wall-Fixer Batch Clean Up Sliced Edges Skip: node:% modifier:% baseVert:% direction:% removeEdges:#{}\n" \
+                                node.name modifier_name base_vertex slice_kind
+                        )
+                    )
+                    else
+                    (
+                        if not batch_quiet then format "Wall-Fixer Batch Clean Up Sliced Edges Skip: node:% modifier:% baseVert:% direction:% reason:Slice Precision failed.\n" \
+                            node.name modifier_name base_vertex slice_kind
+                    )
+
+
+                    /* Return to this pass modifier and continue directly to the next stored base-object task. */
+                    select node
+                    max modify mode
+                    modPanel.setCurrentObject modifier
+                    modifier.SetPrimaryNode node
+                    modifier.split = false
+                    modifier.useStackSelection = false
+                    modifier.useSoftSel = false
+                    modifier.remveEdgeCtrlKey = false
+                )
+            )
+
+
+            if not(::WallFixer.verifyBaseSliceVerticesPreserved node modifier position_tolerance:0.01) then
+            (
+                throw ("Base-object vertex ids/positions changed in " + modifier_name + ".")
+            )
+        )
+        catch
+        (
+            failure = getCurrentException()
+        )
+
+
+        if failure != undefined then
+        (
+            last_slice_error = failure
+            last_slice_report = node.name + ": " + (failure as string)
+            if not batch_quiet then format "Wall-Fixer Batch Base Slice Queue FAILED: node:% modifier:% error:%\n" node.name modifier_name failure
+        )
+        else
+        (
+            if not batch_quiet then format "Wall-Fixer Batch Base Slice Queue Complete: node:% modifier:% tasks:% sliced:% noChange:%\n" \
+                node.name modifier_name slice_tasks.count success_count no_change_count
+        )
+
+
+        #(failure == undefined, success_count, no_change_count)
+        -- return
+    ),
+
+
+    /*
+    Runs a fixed base-object candidate queue on all selected walls.
+    The queue is captured once from Reset Slicing and executed entirely in one Wall topology cleanup Edit Poly.
+    */
+    function debugSliceSelectedWallsInternal cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 display_hidden_edges:undefined double_side:undefined progress_callback:undefined =
+    (
+        local all_selected_nodes = selection as array
+        local selected_nodes = getBatchSliceProcessNodes all_selected_nodes
+        local processed_count = 0
+        local skipped_count = all_selected_nodes.count - selected_nodes.count
+        last_slice_report = ""
+        last_slice_error = undefined
+
+
+        if all_selected_nodes.count == 0 then
+        (
+            if progress_callback != undefined then
+            (
+                try(progress_callback 0 0)catch()
+            )
+
+
+            last_slice_report = "Select at least one wall before running Slice Selected Walls."
+            return false
+        )
+
+
+        if skipped_count > 0 then
+        (
+            if not batch_quiet then format "Wall-Fixer Slice Selected Walls: skipped % four-vertex wall(s) before batch.\n" skipped_count
+        )
+
+
+        if progress_callback != undefined then
+        (
+            try(progress_callback processed_count selected_nodes.count)catch()
+        )
+
+
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Slice Selected Walls: all selected walls have only four vertices; nothing to cut."
+            select all_selected_nodes
+            return true
+        )
+
+
+        local all_ok = true
+        local automation_report = ""
+
+
+        with redraw off
+        (
+            for node in selected_nodes do
+            (
+                local node_ok = true
+                local node_error = undefined
+
+
+                if node == undefined or not(isValidNode node) then
+                (
+                    node_error = "Selected wall became invalid during Slice Selected Walls."
+                    node_ok = false
+                )
+                else
+                (
+                    /* Every batch starts from the same unchanged base object.
+                       Remove only prior slicing modifiers so the requested modifier layout is deterministic. */
+                    if not(::WallFixer.removeWallFixerSliceModifiers node) then
+                    (
+                        node_error = node.name + ": could not clear previous Wall-Fixer slicing modifiers."
+                        node_ok = false
+                    )
+                    else
+                    (
+                        ::WallFixer.clearResetInnerVertSelection node
+                        ::WallFixer.clearLastDebugSliceContext node:node
+
+
+                        if not(::WallFixer.initializeBaseSliceAnalysis \
+                            node \
+                            angle_threshold:angle_threshold \
+                            planar_tolerance:planar_tolerance \
+                            update_viewport_selection:false) then
+                        (
+                            node_error = node.name + ": base-object planar-region analysis failed before fixed base-object queue. " + (last_slice_error as string)
+                            node_ok = false
+                        )
+                    )
+
+
+                    local slice_passes = #()
+                    local total_task_count = 0
+
+
+                    if node_ok then
+                    (
+                        slice_passes = ::WallFixer.buildBaseSlicePassQueue \
+                            node \
+                            cut_mode:cut_mode \
+                            slice_plane_mode:slice_plane_mode \
+                            angle_threshold:angle_threshold \
+                            planar_tolerance:planar_tolerance
+
+
+                        for slice_pass in slice_passes do
+                        (
+                            total_task_count += slice_pass[3].count
+                        )
+                    )
+
+
+                    if node_ok and total_task_count == 0 then
+                    (
+                        node_error = node.name + ": base object has no slice tasks."
+                        node_ok = false
+                    )
+                    else if node_ok then
+                    (
+                        local task_index_offset = 0
+                        local total_sliced_count = 0
+                        local total_no_change_count = 0
+
+
+                        for slice_pass in slice_passes while node_ok do
+                        (
+                            local pass_kind = slice_pass[1]
+                            local modifier_name = slice_pass[2]
+                            local pass_tasks = slice_pass[3]
+
+
+                            local queue_result = ::WallFixer.executeBaseSliceTaskQueue \
+                                node \
+                                pass_tasks \
+                                modifier_name:modifier_name \
+                                angle_threshold:angle_threshold \
+                                planar_tolerance:planar_tolerance \
+                                precision_threshold:slice_precision \
+                                task_index_offset:task_index_offset \
+                                total_task_count:total_task_count
+
+
+                            if not queue_result[1] then
+                            (
+                                node_error = node.name + ": fixed base-object slice pass failed in " + modifier_name + ". " + last_slice_report
+                                node_ok = false
+                            )
+                            else
+                            (
+                                total_sliced_count += queue_result[2]
+                                total_no_change_count += queue_result[3]
+
+
+                                if not batch_quiet then format "Wall-Fixer Slice Selected Walls Pass Result: node:% modifier:% direction:% tasks:% sliced:% noChange:%\n" \
+                                    node.name modifier_name pass_kind pass_tasks.count queue_result[2] queue_result[3]
+                            )
+
+
+                            task_index_offset += pass_tasks.count
+                        )
+
+
+                        if node_ok and not batch_quiet then
+                        (
+                            format "Wall-Fixer Slice Selected Walls Queue Result: node:% passes:% tasks:% sliced:% noChange:%\n" \
+                                node.name slice_passes.count total_task_count total_sliced_count total_no_change_count
+                        )
+                    )
+                )
+
+
+                if node_ok then
+                (
+                    local modifier_report = if cut_mode == #all then "SLICE ALL" else if cut_mode == #horizontal then "SLICE HORIZONTAL -> SLICE VERTICAL" else "SLICE VERTICAL -> SLICE HORIZONTAL"
+                    automation_report += node.name + ": fixed base-object slice queue complete in " + modifier_report + ".\n"
+                )
+                else
+                (
+                    all_ok = false
+                    if node_error == undefined then node_error = "Slice Selected Walls stopped before completion."
+                    if last_slice_error == undefined then last_slice_error = node_error
+                    automation_report += node_error + "\n"
+                )
+
+
+                max create mode
+
+
+                processed_count += 1
+                if progress_callback != undefined then
+                (
+                    try(progress_callback processed_count selected_nodes.count)catch()
+                )
+            )
+        )
+
+
+        if display_hidden_edges != undefined or double_side != undefined then
+        (
+            setNodesDisplayOptions all_selected_nodes hidden_edges:display_hidden_edges double_side:double_side
+        )
+
+
+        select all_selected_nodes
+        completeRedraw()
+        last_slice_report = automation_report
+
+
+        all_ok
+        -- return
+    ),
+
+
+    /*
+    Runs batch slicing with optional quiet Listener output.
+    Quiet state is restored after the batch even when the internal operation throws.
+    */
+    function debugSliceSelectedWalls cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 display_hidden_edges:undefined double_side:undefined progress_callback:undefined quiet:false =
+    (
+        local previous_batch_quiet = batch_quiet
+        local completed = false
+        local batch_failure = undefined
+
+
+        batch_quiet = quiet
+
+
+        try
+        (
+            completed = debugSliceSelectedWallsInternal \
+                cut_mode:cut_mode \
+                slice_plane_mode:slice_plane_mode \
+                angle_threshold:angle_threshold \
+                planar_tolerance:planar_tolerance \
+                slice_precision:slice_precision \
+                display_hidden_edges:display_hidden_edges \
+                double_side:double_side \
+                progress_callback:progress_callback
+        )
+        catch
+        (
+            batch_failure = getCurrentException()
+        )
+
+
+        batch_quiet = previous_batch_quiet
+
+
+        if batch_failure != undefined then
+        (
+            throw (batch_failure as string)
+        )
+
+
+        completed
+        -- return
+    ),
+
+
+    /*
+    Returns the current top Edit Poly used by the debug slicer.
+    No persistent object state is stored.
+    */
+    function getDebugTopologyModifier node =
+    (
+        if node == undefined or not(isValidNode node) then return undefined
+        if node.modifiers.count < 1 then return undefined
+        if classOf node.modifiers[1] != Edit_Poly then return undefined
+        node.modifiers[1]
+        -- return
+    ),
+
+
+    /*
+    Returns redundant edges from the last Make 1 Slice.
+    The kept chain starts immediately at either defining border-edge vertex and stops when it first reaches another border vertex.
+    */
+    function getDebugSlicedEdgeCleanupCandidates node modifier =
+    (
+        if node == undefined or not(isValidNode node) then return undefined
+        if modifier == undefined then return undefined
+        if last_debug_slice_node != node then return undefined
+        if last_debug_slice_new_edges.numberSet == 0 then return undefined
+        if last_debug_slice_start_vertices.numberSet == 0 then return undefined
+
+
+        local edge_count = modifier.GetNumEdges node:node
+        local vertex_count = modifier.GetNumVertices node:node
+        local usable_new_edges = #{}
+        local border_vertices = #{}
+        local vertex_new_edges = for vertex_index = 1 to vertex_count collect #{}
+
+
+        -- Ignore border edges even if Edit Poly reports them as newly created by Slice.
+        for edge_index = 1 to edge_count do
+        (
+            local edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+            local edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+            local face_a = modifier.GetEdgeFace edge_index 1 node:node
+            local face_b = modifier.GetEdgeFace edge_index 2 node:node
+            local is_border_edge = false
+
+
+            if edge_a != undefined and edge_b != undefined and face_a != undefined and face_b != undefined then
+            (
+                is_border_edge = (face_a == 0) != (face_b == 0)
+
+
+                if is_border_edge then
+                (
+                    if edge_a > 0 then border_vertices[edge_a] = true
+                    if edge_b > 0 then border_vertices[edge_b] = true
+                )
+
+
+                if edge_index <= last_debug_slice_new_edges.count and last_debug_slice_new_edges[edge_index] and not is_border_edge then
+                (
+                    if edge_a >= 1 and edge_a <= vertex_count and edge_b >= 1 and edge_b <= vertex_count then
+                    (
+                        usable_new_edges[edge_index] = true
+                        vertex_new_edges[edge_a][edge_index] = true
+                        vertex_new_edges[edge_b][edge_index] = true
+                    )
+                )
+            )
+        )
+
+
+        local kept_edges = #{}
+        local visited_vertices = #{}
+        local queue_vertices = #()
+        local queue_index = 1
+
+
+        -- Both vertices of the defining base border edge are legal starts, even though they are border vertices.
+        for start_vertex in last_debug_slice_start_vertices do
+        (
+            if start_vertex >= 1 and start_vertex <= vertex_count then
+            (
+                if vertex_new_edges[start_vertex].numberSet > 0 then
+                (
+                    if not(start_vertex <= visited_vertices.count and visited_vertices[start_vertex]) then
+                    (
+                        visited_vertices[start_vertex] = true
+                        append queue_vertices start_vertex
+                    )
+                )
+            )
+        )
+
+
+        -- No new slice edge touches the defining anchor/direction edge: do not guess what to remove.
+        if queue_vertices.count == 0 then return undefined
+
+
+        while queue_index <= queue_vertices.count do
+        (
+            local current_vertex = queue_vertices[queue_index]
+            queue_index += 1
+
+
+            for edge_index in vertex_new_edges[current_vertex] do
+            (
+                local already_kept = edge_index <= kept_edges.count and kept_edges[edge_index]
+                if not already_kept then
+                (
+                    kept_edges[edge_index] = true
+
+
+                    local edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+                    local edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+                    local other_vertex = if edge_a == current_vertex then edge_b else edge_a
+                    local other_is_border = other_vertex <= border_vertices.count and border_vertices[other_vertex]
+                    local other_is_start = other_vertex <= last_debug_slice_start_vertices.count and last_debug_slice_start_vertices[other_vertex]
+
+
+                    -- The arriving edge is kept, but traversal never crosses the first non-start border vertex.
+                    if not other_is_border or other_is_start then
+                    (
+                        local already_visited = other_vertex <= visited_vertices.count and visited_vertices[other_vertex]
+                        if not already_visited then
+                        (
+                            visited_vertices[other_vertex] = true
+                            append queue_vertices other_vertex
+                        )
+                    )
+                )
+            )
+        )
+
+
+        local removable_edges = usable_new_edges - kept_edges
+        #(removable_edges, kept_edges, usable_new_edges, border_vertices, copy last_debug_slice_start_vertices)
+        -- return
+    ),
+
+
+    /*
+    Predicts slice-created vertices that become removable after redundant-edge removal.
+    Vertices that existed before the current slice and current corner vertices are always protected.
+    */
+    function getDebugPredictedSlicedEdgeRemovalVertices node modifier removable_edges protected_pre_slice_vertices:#{} angle_threshold:0.1 =
+    (
+        local endpoint_candidates = #{}
+        local removable_new_vertices = #{}
+        local protected_base_vertices = #{}
+        local protected_corner_vertices = #{}
+
+
+        if node == undefined or not(isValidNode node) then return #(removable_new_vertices, protected_base_vertices, protected_corner_vertices, endpoint_candidates)
+        if modifier == undefined then return #(removable_new_vertices, protected_base_vertices, protected_corner_vertices, endpoint_candidates)
+
+
+        local vertex_count = modifier.GetNumVertices node:node
+        local edge_count = modifier.GetNumEdges node:node
+
+
+        for edge_index in removable_edges do
+        (
+            if edge_index >= 1 and edge_index <= edge_count then
+            (
+                local edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+                local edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+                if edge_a != undefined and edge_a > 0 then endpoint_candidates[edge_a] = true
+                if edge_b != undefined and edge_b > 0 then endpoint_candidates[edge_b] = true
+            )
+        )
+
+
+        for vertex_index in endpoint_candidates do
+        (
+            local existed_before_slice = vertex_index <= protected_pre_slice_vertices.count and protected_pre_slice_vertices[vertex_index]
+
+
+            if existed_before_slice then
+            (
+                protected_base_vertices[vertex_index] = true
+            )
+            else if vertex_index >= 1 and vertex_index <= vertex_count then
+            (
+                local vertex_position = modifier.GetVertex vertex_index node:node
+                local neighbor_vertices = #()
+                local incident_edge_count = modifier.GetVertexEdgeCount vertex_index node:node
+
+
+                for edge_slot = 1 to incident_edge_count do
+                (
+                    local edge_index = modifier.GetVertexEdge vertex_index edge_slot node:node
+                    local edge_is_removed = edge_index != undefined and edge_index > 0 and edge_index <= removable_edges.count and removable_edges[edge_index]
+                    if edge_index != undefined and edge_index > 0 and not edge_is_removed then
+                    (
+                        local edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+                        local edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+                        local neighbor_index = if edge_a == vertex_index then edge_b else if edge_b == vertex_index then edge_a else 0
+                        if neighbor_index > 0 then append neighbor_vertices neighbor_index
+                    )
+                )
+
+
+                local is_removable = false
+                if vertex_position != undefined and neighbor_vertices.count == 2 then
+                (
+                    local neighbor_a = modifier.GetVertex neighbor_vertices[1] node:node
+                    local neighbor_b = modifier.GetVertex neighbor_vertices[2] node:node
+                    if neighbor_a != undefined and neighbor_b != undefined then
+                    (
+                        local direction_a = neighbor_a - vertex_position
+                        local direction_b = neighbor_b - vertex_position
+                        if length direction_a > epsilon and length direction_b > epsilon then
+                        (
+                            local straight_limit = -(cos angle_threshold)
+                            is_removable = (dot (normalize direction_a) (normalize direction_b)) <= straight_limit
+                        )
+                    )
+                )
+
+
+                if is_removable then removable_new_vertices[vertex_index] = true
+                else protected_corner_vertices[vertex_index] = true
+            )
+        )
+
+
+        #(removable_new_vertices, protected_base_vertices, protected_corner_vertices, endpoint_candidates)
+        -- return
+    ),
+
+
+    /*
+    Selects redundant edge candidates and their predicted removable slice-created vertices.
+    Edge and vertex selections are both stored; Vertex sub-object level is left active for inspection.
+    */
+    function debugInspectCleanUpSlicedEdges =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+
+
+        local selected_nodes = selection as array
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select the wall from the last Make 1 Slice."
+            return false
+        )
+
+
+        local node = selected_nodes[1]
+        local modifier = getDebugTopologyModifier node
+        if modifier == undefined then
+        (
+            last_slice_report = node.name + ": top Wall topology cleanup Edit Poly was not found."
+            return false
+        )
+
+
+        local cleanup_data = getDebugSlicedEdgeCleanupCandidates node modifier
+        if cleanup_data == undefined then
+        (
+            last_slice_report = node.name + ": no valid last-slice anchor/direction chain was found. Run Make 1 Slice first."
+            if not batch_quiet then format "%\n" last_slice_report
+            return false
+        )
+
+
+        local removable_edges = cleanup_data[1]
+        local kept_edges = cleanup_data[2]
+        local usable_new_edges = cleanup_data[3]
+        local start_vertices = cleanup_data[5]
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then
+        (
+            last_slice_report = node.name + ": base object must be Editable Poly."
+            return false
+        )
+
+
+        local protected_pre_slice_vertices = copy last_debug_slice_original_vertices
+        local vertex_cleanup_data = getDebugPredictedSlicedEdgeRemovalVertices \
+            node \
+            modifier \
+            removable_edges \
+            protected_pre_slice_vertices:protected_pre_slice_vertices
+        local removable_new_vertices = vertex_cleanup_data[1]
+        local protected_base_vertices = vertex_cleanup_data[2]
+        local protected_corner_vertices = vertex_cleanup_data[3]
+
+
+        select node
+        max modify mode
+        modPanel.setCurrentObject modifier
+        modifier.SetPrimaryNode node
+        modifier.useStackSelection = false
+
+
+        modifier.SetEPolySelLevel #Edge
+        subObjectLevel = 2
+        modifier.SetSelection #Edge #{} node:node
+        if removable_edges.numberSet > 0 then modifier.Select #Edge removable_edges node:node
+        local actual_edge_selection = modifier.GetSelection #Edge node:node
+
+
+        modifier.SetEPolySelLevel #Vertex
+        subObjectLevel = 1
+        modifier.SetSelection #Vertex #{} node:node
+        if removable_new_vertices.numberSet > 0 then modifier.Select #Vertex removable_new_vertices node:node
+        local actual_vertex_selection = modifier.GetSelection #Vertex node:node
+
+
+        last_slice_report = node.name + ": sliced edge cleanup candidates selected - edges:" + (actual_edge_selection.numberSet as string) + "; verts:" + (actual_vertex_selection.numberSet as string) + "."
+        if not batch_quiet then format "Wall-Fixer Clean Up Sliced Edges Select: cachedLastSlice:% keep:% removeEdges:% selectedEdges:% removeVerts:% selectedVerts:% protectedBaseVerts:% protectedCornerVerts:%\n" usable_new_edges kept_edges removable_edges actual_edge_selection removable_new_vertices actual_vertex_selection protected_base_vertices protected_corner_vertices
+        completeRedraw()
+
+
+        (actual_edge_selection == removable_edges) and (actual_vertex_selection == removable_new_vertices)
+        -- return
+    ),
+
+
+    /*
+    Returns true when a slice-created vertex has exactly two straight remaining topology edges.
+    Direct incident-edge queries keep Step 2 fast on heavily sliced walls.
+    */
+    function isDebugRemovableSliceVertex node modifier vertex_index angle_threshold:0.1 =
+    (
+        if node == undefined or not(isValidNode node) then return false
+        if modifier == undefined then return false
+
+
+        local vertex_count = modifier.GetNumVertices node:node
+        if vertex_index < 1 or vertex_index > vertex_count then return false
+
+
+        local vertex_position = modifier.GetVertex vertex_index node:node
+        if vertex_position == undefined then return false
+
+
+        local incident_edge_count = modifier.GetVertexEdgeCount vertex_index node:node
+        if incident_edge_count != 2 then return false
+
+
+        local neighbor_vertices = #()
+        for edge_slot = 1 to incident_edge_count do
+        (
+            local edge_index = modifier.GetVertexEdge vertex_index edge_slot node:node
+            if edge_index == undefined or edge_index <= 0 then return false
+
+
+            local edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+            local edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+            local neighbor_index = if edge_a == vertex_index then edge_b else if edge_b == vertex_index then edge_a else 0
+            if neighbor_index <= 0 then return false
+            append neighbor_vertices neighbor_index
+        )
+
+
+        if neighbor_vertices.count != 2 then return false
+        local neighbor_a = modifier.GetVertex neighbor_vertices[1] node:node
+        local neighbor_b = modifier.GetVertex neighbor_vertices[2] node:node
+        if neighbor_a == undefined or neighbor_b == undefined then return false
+
+
+        local direction_a = neighbor_a - vertex_position
+        local direction_b = neighbor_b - vertex_position
+        if length direction_a <= epsilon or length direction_b <= epsilon then return false
+
+
+        local straight_limit = -(cos angle_threshold)
+        (dot (normalize direction_a) (normalize direction_b)) <= straight_limit
+        -- return
+    ),
+
+
+    /*
+    Returns whether an Edit Poly vertex still exists with live connected topology.
+    Uses direct vertex-edge adjacency instead of scanning every edge in the modifier.
+    */
+    function doesDebugModifierVertexExist node modifier vertex_index =
+    (
+        if node == undefined or not(isValidNode node) then return false
+        if modifier == undefined then return false
+
+
+        local vertex_count = modifier.GetNumVertices node:node
+        if vertex_index < 1 or vertex_index > vertex_count then return false
+
+
+        local vertex_position = undefined
+        local incident_edge_count = 0
+        local query_ok = true
+
+
+        try
+        (
+            vertex_position = modifier.GetVertex vertex_index node:node
+            if vertex_position != undefined then
+            (
+                incident_edge_count = modifier.GetVertexEdgeCount vertex_index node:node
+            )
+        )
+        catch
+        (
+            query_ok = false
+        )
+
+
+        query_ok and vertex_position != undefined and incident_edge_count > 0
+        -- return
+    ),
+
+
+
+
+    /*
+    Counts currently live Edit Poly vertex slots.
+    Dead topology slots are ignored so cleanup success does not depend on GetNumVertices shrinking.
+    */
+    function getDebugLiveVertexCount node modifier =
+    (
+        if node == undefined or not(isValidNode node) then return 0
+        if modifier == undefined then return 0
+
+
+        local live_vertex_count = 0
+        local vertex_count = modifier.GetNumVertices node:node
+
+
+        for vertex_index = 1 to vertex_count do
+        (
+            local vertex_position = undefined
+            try
+            (
+                vertex_position = modifier.GetVertex vertex_index node:node
+            )
+            catch
+            (
+                vertex_position = undefined
+            )
+
+
+            if vertex_position != undefined then
+            (
+                live_vertex_count += 1
+            )
+        )
+
+
+        live_vertex_count
+        -- return
+    ),
+
+
+    /*
+    Finds the closest directly connected neighbour of one Edit Poly vertex.
+    Only vertices joined by a current topology edge are considered collapse targets.
+    */
+    function getDebugClosestNeighborVertex node modifier vertex_index =
+    (
+        if not(doesDebugModifierVertexExist node modifier vertex_index) then return 0
+
+
+        local vertex_position = modifier.GetVertex vertex_index node:node
+        local incident_edge_count = modifier.GetVertexEdgeCount vertex_index node:node
+        local closest_neighbor_index = 0
+        local closest_distance = undefined
+
+
+        for edge_slot = 1 to incident_edge_count do
+        (
+            local edge_index = modifier.GetVertexEdge vertex_index edge_slot node:node
+            if edge_index != undefined and edge_index > 0 then
+            (
+                local edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+                local edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+                local neighbor_index = 0
+
+
+                if edge_a == vertex_index then
+                (
+                    neighbor_index = edge_b
+                )
+                else if edge_b == vertex_index then
+                (
+                    neighbor_index = edge_a
+                )
+
+
+                if neighbor_index != undefined and neighbor_index > 0 then
+                (
+                    local neighbor_position = modifier.GetVertex neighbor_index node:node
+                    if neighbor_position != undefined then
+                    (
+                        local neighbor_distance = distance vertex_position neighbor_position
+                        if closest_distance == undefined or neighbor_distance < closest_distance then
+                        (
+                            closest_distance = neighbor_distance
+                            closest_neighbor_index = neighbor_index
+                        )
+                    )
+                )
+            )
+        )
+
+
+        closest_neighbor_index
+        -- return
+    ),
+
+
+    /*
+    Finds a live vertex created by the current slice using its saved object-space position.
+    Vertices that existed before this slice are excluded even when they came from a lower modifier.
+    */
+    function findDebugSliceVertexByPosition node modifier target_position protected_vertices:#{} tolerance:0.01 =
+    (
+        if node == undefined or not(isValidNode node) then return 0
+        if modifier == undefined or target_position == undefined then return 0
+
+
+        local vertex_count = modifier.GetNumVertices node:node
+        local found_vertex_index = 0
+        local closest_distance = undefined
+
+
+        for vertex_index = 1 to vertex_count do
+        (
+            local existed_before_slice = vertex_index <= protected_vertices.count and protected_vertices[vertex_index]
+
+
+            if not existed_before_slice and doesDebugModifierVertexExist node modifier vertex_index then
+            (
+                local vertex_position = modifier.GetVertex vertex_index node:node
+                if vertex_position != undefined then
+                (
+                    local vertex_distance = distance vertex_position target_position
+                    if vertex_distance <= tolerance then
+                    (
+                        if closest_distance == undefined or vertex_distance < closest_distance then
+                        (
+                            closest_distance = vertex_distance
+                            found_vertex_index = vertex_index
+                        )
+                    )
+                )
+            )
+        )
+
+
+        found_vertex_index
+        -- return
+    ),
+
+
+
+
+    /* Finds any live Edit Poly vertex by object-space position. */
+    function findDebugLiveVertexByPosition node modifier target_position tolerance:0.01 =
+    (
+        if node == undefined or not(isValidNode node) then return 0
+        if modifier == undefined or target_position == undefined then return 0
+        local vertex_count = modifier.GetNumVertices node:node
+        for vertex_index = 1 to vertex_count do
+        (
+            if doesDebugModifierVertexExist node modifier vertex_index then
+            (
+                local vertex_position = modifier.GetVertex vertex_index node:node
+                if vertex_position != undefined and distance vertex_position target_position <= tolerance then return vertex_index
+            )
+        )
+        0
+    ),
+
+
+    /*
+    Returns whether one current Edit Poly edge slot still has two readable live endpoints.
+    Direct endpoint reads avoid recursive whole-topology checks.
+    */
+    function doesDebugModifierEdgeExist node modifier edge_index =
+    (
+        if node == undefined or not(isValidNode node) or modifier == undefined then return false
+        local edge_count = modifier.GetNumEdges node:node
+        if edge_index < 1 or edge_index > edge_count then return false
+
+
+        local edge_a = undefined
+        local edge_b = undefined
+        local point_a = undefined
+        local point_b = undefined
+        try
+        (
+            edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+            edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+            if edge_a != undefined and edge_b != undefined and edge_a > 0 and edge_b > 0 then
+            (
+                point_a = modifier.GetVertex edge_a node:node
+                point_b = modifier.GetVertex edge_b node:node
+            )
+        )
+        catch
+        (
+            edge_a = undefined
+            edge_b = undefined
+        )
+
+
+        edge_a != undefined and edge_b != undefined and edge_a > 0 and edge_b > 0 and point_a != undefined and point_b != undefined
+        -- return
+    ),
+
+
+    /*
+    Resolves a current edge by saved endpoint positions.
+    Direct endpoint reads avoid nested live-topology scans.
+    */
+    function findDebugEdgeByEndpointPositions node modifier point_a point_b tolerance:0.01 =
+    (
+        if node == undefined or not(isValidNode node) or modifier == undefined then return 0
+        local edge_count = modifier.GetNumEdges node:node
+        for edge_index = 1 to edge_count do
+        (
+            local vertex_a = undefined
+            local vertex_b = undefined
+            local current_a = undefined
+            local current_b = undefined
+            try
+            (
+                vertex_a = modifier.GetEdgeVertex edge_index 1 node:node
+                vertex_b = modifier.GetEdgeVertex edge_index 2 node:node
+                if vertex_a != undefined and vertex_b != undefined and vertex_a > 0 and vertex_b > 0 then
+                (
+                    current_a = modifier.GetVertex vertex_a node:node
+                    current_b = modifier.GetVertex vertex_b node:node
+                )
+            )
+            catch
+            (
+                current_a = undefined
+                current_b = undefined
+            )
+
+
+            if current_a != undefined and current_b != undefined then
+            (
+                local same_forward = distance current_a point_a <= tolerance and distance current_b point_b <= tolerance
+                local same_reverse = distance current_a point_b <= tolerance and distance current_b point_a <= tolerance
+                if same_forward or same_reverse then return edge_index
+            )
+        )
+        0
+        -- return
+    ),
+
+
+    /* Forces evaluation before reading Edit Poly counts after a topology commit. */
+    function refreshDebugModifierTopology node =
+    (
+        if node == undefined or not(isValidNode node) then return false
+        update node
+        local evaluated_mesh = snapshotAsMesh node
+        if evaluated_mesh != undefined then free evaluated_mesh
+        true
+    ),
+
+
+    /* Returns true only when an explicit visible evaluated edge still joins the saved positions. */
+    function doesDebugVisibleEdgeExistByEndpointPositions node point_a point_b tolerance:0.01 =
+    (
+        if node == undefined or not(isValidNode node) or point_a == undefined or point_b == undefined then return false
+        local evaluated_mesh = snapshotAsMesh node
+        if evaluated_mesh == undefined then return false
+        local found = false
+        local face_count = getNumFaces evaluated_mesh
+        for face_index = 1 to face_count while not found do
+        (
+            local face_vertices = getFace evaluated_mesh face_index
+            local face_vertex_ids = #(face_vertices.x as integer, face_vertices.y as integer, face_vertices.z as integer)
+            for face_edge_index = 1 to 3 while not found do
+            (
+                if getEdgeVis evaluated_mesh face_index face_edge_index then
+                (
+                    local vertex_a = face_vertex_ids[face_edge_index]
+                    local vertex_b = face_vertex_ids[if face_edge_index == 3 then 1 else face_edge_index + 1]
+                    local current_a = getVert evaluated_mesh vertex_a
+                    local current_b = getVert evaluated_mesh vertex_b
+                    local same_forward = distance current_a point_a <= tolerance and distance current_b point_b <= tolerance
+                    local same_reverse = distance current_a point_b <= tolerance and distance current_b point_a <= tolerance
+                    if same_forward or same_reverse then found = true
+                )
+            )
+        )
+        free evaluated_mesh
+        found
+    ),
+
+
+    /*
+    Returns compact live topology state for diagnostics.
+    Vertices and edges are read once without nested full-edge scans.
+    */
+    function getDebugCleanupTopologyState node modifier =
+    (
+        local live_vertices = #{}
+        local live_edges = #{}
+        if node != undefined and isValidNode node and modifier != undefined then
+        (
+            local vertex_count = modifier.GetNumVertices node:node
+            for vertex_index = 1 to vertex_count do
+            (
+                local vertex_position = undefined
+                try
+                (
+                    vertex_position = modifier.GetVertex vertex_index node:node
+                )
+                catch
+                (
+                    vertex_position = undefined
+                )
+                if vertex_position != undefined then live_vertices[vertex_index] = true
+            )
+
+
+            local edge_count = modifier.GetNumEdges node:node
+            for edge_index = 1 to edge_count do
+            (
+                local edge_a = undefined
+                local edge_b = undefined
+                try
+                (
+                    edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+                    edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+                )
+                catch
+                (
+                    edge_a = undefined
+                    edge_b = undefined
+                )
+                if edge_a != undefined and edge_b != undefined and edge_a > 0 and edge_b > 0 then live_edges[edge_index] = true
+            )
+        )
+        #(live_vertices, live_edges)
+        -- return
+    ),
+
+
+    /*
+    Removes one redundant edge with the proven Edit Poly UI sequence.
+    Viewport refresh and evaluated-mesh snapshots are deferred until the batch ends.
+    */
+    function removeDebugCleanupEdge node modifier edge_index =
+    (
+        if not(doesDebugModifierEdgeExist node modifier edge_index) then return false
+        local edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+        local edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+        local point_a = modifier.GetVertex edge_a node:node
+        local point_b = modifier.GetVertex edge_b node:node
+        local requested_selection = #{}
+        requested_selection[edge_index] = true
+        local actual_selection = #{}
+        local operation_error = undefined
+        local old_remove_ctrl = modifier.remveEdgeCtrlKey
+        try
+        (
+            modifier.remveEdgeCtrlKey = false
+            modifier.SetEPolySelLevel #Edge
+            modifier.SetSelection #Edge #{} node:node
+            modifier.Select #Edge requested_selection node:node
+            actual_selection = modifier.GetSelection #Edge node:node
+            if actual_selection != requested_selection then throw "Edit Poly edge selection did not match the requested redundant edge."
+            modifier.ButtonOp #RemoveEdge
+            update node
+        )
+        catch
+        (
+            operation_error = getCurrentException()
+        )
+        modifier.remveEdgeCtrlKey = old_remove_ctrl
+
+
+        local resolved_after = findDebugEdgeByEndpointPositions node modifier point_a point_b tolerance:0.01
+        local topology_after = getDebugCleanupTopologyState node modifier
+        local removed = operation_error == undefined and resolved_after == 0
+        local failure_reason = if operation_error != undefined then operation_error as string else if resolved_after > 0 then "edge endpoints are still connected after ButtonOp #RemoveEdge" else ""
+        if not batch_quiet then format "Wall-Fixer Cleanup Edge Attempt: originalEdge:% currentEdge:% method:% selectedEdges:% endpoints:%/% liveVertsAfter:% liveEdgesAfter:% success:% reason:%\n" \
+            edge_index resolved_after #buttonRemoveEdge actual_selection point_a point_b topology_after[1] topology_after[2] removed failure_reason
+        removed
+        -- return
+    ),
+
+
+    /*
+    Removes one confirmed current-slice vertex while preserving every vertex that existed before this slice.
+    Lower slicing modifiers and earlier cuts in the same modifier are therefore protected.
+    */
+    function forceRemoveDebugCleanupVertex node modifier original_vertex_index saved_position protected_vertices:#{} =
+    (
+        local current_vertex_index = findDebugSliceVertexByPosition node modifier saved_position protected_vertices:protected_vertices tolerance:0.01
+        if current_vertex_index <= 0 then return #(true, 0, #alreadyGone, "")
+        local current_vertex_is_protected = current_vertex_index <= protected_vertices.count and protected_vertices[current_vertex_index]
+        if current_vertex_is_protected or not(isDebugRemovableSliceVertex node modifier current_vertex_index) then
+        (
+            local protect_reason = if current_vertex_is_protected then "resolved vertex existed before the current slice" else "current vertex is not a straight two-edge cleanup vertex"
+            local protected_position = modifier.GetVertex current_vertex_index node:node
+            local protected_state = getDebugCleanupTopologyState node modifier
+            if not batch_quiet then format "Wall-Fixer Cleanup Vert Attempt: originalVert:% currentVert:% method:% selectedVerts:% neighbor:% positionBefore:% positionAfter:% liveVertsAfter:% liveEdgesAfter:% success:false reason:%\n" \
+                original_vertex_index current_vertex_index #protected #{} 0 protected_position protected_position protected_state[1] protected_state[2] protect_reason
+            return #(false, current_vertex_index, #protected, protect_reason)
+        )
+
+
+        local methods = #(#buttonRemoveVertex, #operationRemoveVertex)
+        for method in methods do
+        (
+            current_vertex_index = findDebugSliceVertexByPosition node modifier saved_position protected_vertices:protected_vertices tolerance:0.01
+            if current_vertex_index <= 0 then return #(true, 0, method, "")
+            local before_position = modifier.GetVertex current_vertex_index node:node
+            local before_live_count = getDebugLiveVertexCount node modifier
+            local requested_selection = #{}
+            requested_selection[current_vertex_index] = true
+            local actual_selection = #{}
+            local operation_error = undefined
+            try
+            (
+                modifier.SetEPolySelLevel #Vertex
+                modifier.SetSelection #Vertex #{} node:node
+                modifier.Select #Vertex requested_selection node:node
+                actual_selection = modifier.GetSelection #Vertex node:node
+                if actual_selection != requested_selection then throw "Edit Poly vertex selection did not match the requested cleanup vertex."
+                if method == #buttonRemoveVertex then modifier.ButtonOp #RemoveVertex
+                else
+                (
+                    modifier.SetOperation #RemoveVertex
+                    modifier.Commit()
+                )
+                update node
+            )
+            catch
+            (
+                operation_error = getCurrentException()
+            )
+            local after_live_count = getDebugLiveVertexCount node modifier
+            local resolved_after = findDebugSliceVertexByPosition node modifier saved_position protected_vertices:protected_vertices tolerance:0.01
+            local after_position = if resolved_after > 0 then modifier.GetVertex resolved_after node:node else undefined
+            local topology_after = getDebugCleanupTopologyState node modifier
+            local removed = operation_error == undefined and resolved_after == 0 and after_live_count < before_live_count
+            local failure_reason = ""
+            if operation_error != undefined then failure_reason = operation_error as string
+            else if resolved_after > 0 then failure_reason = "cleanup vertex still resolves at its saved position"
+            else if after_live_count >= before_live_count then failure_reason = "live vertex count did not decrease"
+            if not batch_quiet then format "Wall-Fixer Cleanup Vert Attempt: originalVert:% currentVert:% method:% selectedVerts:% neighbor:% positionBefore:% positionAfter:% liveVertsAfter:% liveEdgesAfter:% success:% reason:%\n" \
+                original_vertex_index current_vertex_index method actual_selection 0 before_position after_position topology_after[1] topology_after[2] removed failure_reason
+            if removed then return #(true, current_vertex_index, method, "")
+            if not batch_quiet then format "Wall-Fixer Cleanup Vert Transition: originalVert:% failedMethod:% nextMethod:% reason:%\n" \
+                original_vertex_index method (if method == #buttonRemoveVertex then #operationRemoveVertex else #guardedCollapse) failure_reason
+        )
+
+
+        current_vertex_index = findDebugSliceVertexByPosition node modifier saved_position protected_vertices:protected_vertices tolerance:0.01
+        if current_vertex_index <= 0 then return #(true, 0, #alreadyGone, "")
+        local neighbor_index = getDebugClosestNeighborVertex node modifier current_vertex_index
+        local neighbor_is_protected = neighbor_index > 0 and neighbor_index <= protected_vertices.count and protected_vertices[neighbor_index]
+        if neighbor_is_protected then
+        (
+            local guarded_position = modifier.GetVertex current_vertex_index node:node
+            local guarded_state = getDebugCleanupTopologyState node modifier
+            local guarded_reason = "collapse target existed before the current slice and is protected"
+            if not batch_quiet then format "Wall-Fixer Cleanup Vert Attempt: originalVert:% currentVert:% method:% selectedVerts:% neighbor:% positionBefore:% positionAfter:% liveVertsAfter:% liveEdgesAfter:% success:false reason:%\n" \
+                original_vertex_index current_vertex_index #guardedCollapse #{} neighbor_index guarded_position guarded_position guarded_state[1] guarded_state[2] guarded_reason
+            return #(false, current_vertex_index, #guardedCollapse, guarded_reason)
+        )
+
+
+        local collapse_selection = #{current_vertex_index, neighbor_index}
+        local collapse_before_position = modifier.GetVertex current_vertex_index node:node
+        local collapse_before_count = getDebugLiveVertexCount node modifier
+        local collapse_actual_selection = #{}
+        local collapse_error = undefined
+        try
+        (
+            modifier.SetEPolySelLevel #Vertex
+            modifier.SetSelection #Vertex #{} node:node
+            modifier.Select #Vertex collapse_selection node:node
+            collapse_actual_selection = modifier.GetSelection #Vertex node:node
+            if collapse_actual_selection != collapse_selection then throw "Edit Poly collapse selection did not match the requested slice-created pair."
+            modifier.ButtonOp #CollapseVertex
+            update node
+        )
+        catch
+        (
+            collapse_error = getCurrentException()
+        )
+        local collapse_after_count = getDebugLiveVertexCount node modifier
+        local collapse_resolved_after = findDebugSliceVertexByPosition node modifier saved_position protected_vertices:protected_vertices tolerance:0.01
+        local collapse_after_position = if collapse_resolved_after > 0 then modifier.GetVertex collapse_resolved_after node:node else undefined
+        local collapse_state = getDebugCleanupTopologyState node modifier
+        local collapse_removed = collapse_error == undefined and collapse_resolved_after == 0 and collapse_after_count < collapse_before_count
+        local collapse_reason = if collapse_error != undefined then collapse_error as string else if collapse_resolved_after > 0 then "cleanup vertex still resolves after collapse" else if collapse_after_count >= collapse_before_count then "live vertex count did not decrease" else ""
+        if not batch_quiet then format "Wall-Fixer Cleanup Vert Attempt: originalVert:% currentVert:% method:% selectedVerts:% neighbor:% positionBefore:% positionAfter:% liveVertsAfter:% liveEdgesAfter:% success:% reason:%\n" \
+            original_vertex_index current_vertex_index #buttonCollapseVertex collapse_actual_selection neighbor_index collapse_before_position collapse_after_position collapse_state[1] collapse_state[2] collapse_removed collapse_reason
+        #(collapse_removed, current_vertex_index, #buttonCollapseVertex, collapse_reason)
+    ),
+    /*
+    Moves one surviving slice vertex onto its closest connected neighbour and collapses the pair.
+    The neighbour is chosen only from current incident Edit Poly edges.
+    */
+    function collapseDebugVertexToClosestNeighbor node modifier vertex_index =
+    (
+        if not(doesDebugModifierVertexExist node modifier vertex_index) then return #(false, 0, 0, 0)
+
+
+        local closest_neighbor_index = getDebugClosestNeighborVertex node modifier vertex_index
+        if closest_neighbor_index <= 0 then return #(false, 0, 0, 0)
+        if not(doesDebugModifierVertexExist node modifier closest_neighbor_index) then return #(false, 0, 0, 0)
+
+
+        local vertex_position = modifier.GetVertex vertex_index node:node
+        local neighbor_position = modifier.GetVertex closest_neighbor_index node:node
+        if vertex_position == undefined or neighbor_position == undefined then return #(false, closest_neighbor_index, 0, 0)
+
+
+        local move_amount = neighbor_position - vertex_position
+        local single_selection = #{}
+        single_selection[vertex_index] = true
+        local pair_selection = #{}
+        pair_selection[vertex_index] = true
+        pair_selection[closest_neighbor_index] = true
+        local before_vertex_count = modifier.GetNumVertices node:node
+        local before_live_vertex_count = getDebugLiveVertexCount node modifier
+        local after_vertex_count = before_vertex_count
+        local after_live_vertex_count = before_live_vertex_count
+        local collapse_ok = true
+        local move_ok = false
+        local collapse_success = false
+        local moved_position = undefined
+        local move_distance = undefined
+        local collapse_method = #none
+
+
+        try
+        (
+            -- Mirror the UI/macro-recorder sequence exactly: Vertex mode -> Transform -> Move -> Commit.
+            modifier.SetEPolySelLevel #Vertex
+            modifier.SetSelection #Vertex #{} node:node
+            modifier.SetSelection #Vertex single_selection node:node
+
+
+            if (modifier.GetSelection #Vertex node:node) != single_selection then
+            (
+                throw "Could not set surviving slice vertex selection for move."
+            )
+
+
+            modifier.SetOperation #Transform
+            modifier.MoveSelection move_amount parent:(modifier.GetNodeTM node:node) axis:(modifier.GetNodeTM node:node)
+            modifier.Commit()
+            update node
+            modifier.RefreshScreen()
+
+
+            moved_position = modifier.GetVertex vertex_index node:node
+            if moved_position != undefined then
+            (
+                move_distance = distance moved_position neighbor_position
+                move_ok = move_distance <= 0.01
+            )
+
+
+            -- Apply one measured correction if the committed transform did not land exactly.
+            if not move_ok and moved_position != undefined then
+            (
+                local correction_amount = neighbor_position - moved_position
+                modifier.SetSelection #Vertex #{} node:node
+                modifier.SetSelection #Vertex single_selection node:node
+                modifier.SetOperation #Transform
+                modifier.MoveSelection correction_amount parent:(modifier.GetNodeTM node:node) axis:(modifier.GetNodeTM node:node)
+                modifier.Commit()
+                update node
+                modifier.RefreshScreen()
+
+
+                moved_position = modifier.GetVertex vertex_index node:node
+                if moved_position != undefined then
+                (
+                    move_distance = distance moved_position neighbor_position
+                    move_ok = move_distance <= 0.01
+                )
+            )
+
+
+            if not move_ok then
+            (
+                throw ("Could not move cleanup vertex onto neighbour. Distance:" + (move_distance as string))
+            )
+
+
+            -- First choice: press the same Collapse button as the Edit Poly UI.
+            modifier.SetSelection #Vertex #{} node:node
+            modifier.SetSelection #Vertex pair_selection node:node
+            if (modifier.GetSelection #Vertex node:node) != pair_selection then
+            (
+                throw "Could not set collapse vertex pair selection."
+            )
+
+
+            modifier.ButtonOp #CollapseVertex
+            modifier.Commit()
+            update node
+            modifier.RefreshScreen()
+            after_vertex_count = modifier.GetNumVertices node:node
+            after_live_vertex_count = getDebugLiveVertexCount node modifier
+            collapse_success = after_live_vertex_count < before_live_vertex_count or not(doesDebugModifierVertexExist node modifier vertex_index) or not(doesDebugModifierVertexExist node modifier closest_neighbor_index)
+            if collapse_success then collapse_method = #buttonCollapse
+
+
+            -- Second choice: explicit Collapse operation/commit.
+            if not collapse_success then
+            (
+                modifier.SetSelection #Vertex #{} node:node
+                modifier.SetSelection #Vertex pair_selection node:node
+                modifier.SetOperation #CollapseVertex
+                modifier.Commit()
+                update node
+                modifier.RefreshScreen()
+                after_vertex_count = modifier.GetNumVertices node:node
+                after_live_vertex_count = getDebugLiveVertexCount node modifier
+                collapse_success = after_live_vertex_count < before_live_vertex_count or not(doesDebugModifierVertexExist node modifier vertex_index) or not(doesDebugModifierVertexExist node modifier closest_neighbor_index)
+                if collapse_success then collapse_method = #operationCollapse
+            )
+
+
+            -- Third choice: the pair is already coincident, so UI Weld must be safe.
+            if not collapse_success then
+            (
+                modifier.SetSelection #Vertex #{} node:node
+                modifier.SetSelection #Vertex pair_selection node:node
+                modifier.ButtonOp #WeldVertex
+                modifier.Commit()
+                update node
+                modifier.RefreshScreen()
+                after_vertex_count = modifier.GetNumVertices node:node
+                after_live_vertex_count = getDebugLiveVertexCount node modifier
+                collapse_success = after_live_vertex_count < before_live_vertex_count or not(doesDebugModifierVertexExist node modifier vertex_index) or not(doesDebugModifierVertexExist node modifier closest_neighbor_index)
+                if collapse_success then collapse_method = #buttonWeld
+            )
+
+
+            -- Last resort: remove the confirmed slice-created non-corner source vertex at the neighbour position.
+            if not collapse_success and doesDebugModifierVertexExist node modifier vertex_index then
+            (
+                single_selection = #{}
+                single_selection[vertex_index] = true
+                modifier.SetSelection #Vertex #{} node:node
+                modifier.SetSelection #Vertex single_selection node:node
+                modifier.ButtonOp #RemoveVertex
+                modifier.Commit()
+                update node
+                modifier.RefreshScreen()
+                after_vertex_count = modifier.GetNumVertices node:node
+                after_live_vertex_count = getDebugLiveVertexCount node modifier
+                collapse_success = after_live_vertex_count < before_live_vertex_count or not(doesDebugModifierVertexExist node modifier vertex_index)
+                if collapse_success then collapse_method = #removeVertex
+            )
+        )
+        catch
+        (
+            collapse_ok = false
+        )
+
+
+        if not batch_quiet then format "Wall-Fixer Collapse Cleanup Vert: source:% neighbor:% moved:% moveDistance:% beforeSlots:% afterSlots:% beforeLive:% afterLive:% method:% success:%\n" vertex_index closest_neighbor_index moved_position move_distance before_vertex_count after_vertex_count before_live_vertex_count after_live_vertex_count collapse_method (collapse_ok and move_ok and collapse_success)
+
+
+        #(collapse_ok and move_ok and collapse_success, closest_neighbor_index, before_vertex_count, after_vertex_count)
+        -- return
+    ),
+
+
+    /*
+    Returns candidate vertices that still survive after Remove Vertex.
+    Only live Edit Poly vertices with current connected topology are returned.
+    */
+    function getDebugExistingVertexCandidates node modifier vertex_candidates =
+    (
+        local existing_vertices = #{}
+        if vertex_candidates == undefined then return existing_vertices
+
+
+        for vertex_index in vertex_candidates do
+        (
+            if doesDebugModifierVertexExist node modifier vertex_index then
+            (
+                existing_vertices[vertex_index] = true
+            )
+        )
+
+
+        existing_vertices
+        -- return
+    ),
+
+
+    /*
+    Removes redundant new slice edges and their slice-created non-corner vertices.
+    Redundant visible edges are removed and verified before confirmed slice-created vertices are removed.
+    */
+    function debugCleanUpSlicedEdges final_redraw:true keep_modify_context:false =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+
+
+        local selected_nodes = selection as array
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select the wall from the last Make 1 Slice."
+            return false
+        )
+
+
+        local node = selected_nodes[1]
+        local modifier = getDebugTopologyModifier node
+        if modifier == undefined then
+        (
+            last_slice_report = node.name + ": top Wall topology cleanup Edit Poly was not found."
+            return false
+        )
+
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then
+        (
+            last_slice_report = node.name + ": base object must be Editable Poly."
+            return false
+        )
+
+
+        local cleanup_data = getDebugSlicedEdgeCleanupCandidates node modifier
+        if cleanup_data == undefined then
+        (
+            last_slice_report = node.name + ": no valid last-slice anchor/direction chain was found. Run Make 1 Slice first."
+            if not batch_quiet then format "%\n" last_slice_report
+            return false
+        )
+
+
+        local removable_edges = cleanup_data[1]
+        local kept_edges = cleanup_data[2]
+        local usable_new_edges = cleanup_data[3]
+        local start_vertices = cleanup_data[5]
+        local protected_pre_slice_vertices = copy last_debug_slice_original_vertices
+        local vertex_cleanup_data = getDebugPredictedSlicedEdgeRemovalVertices \
+            node \
+            modifier \
+            removable_edges \
+            protected_pre_slice_vertices:protected_pre_slice_vertices
+        local removable_new_vertices = vertex_cleanup_data[1]
+        local protected_base_vertices = vertex_cleanup_data[2]
+        local protected_corner_vertices = vertex_cleanup_data[3]
+        local candidate_positions = #()
+        local edge_descriptors = #()
+        local removed_new_vertices = #{}
+        local unresolved_new_vertices = #{}
+        local removal_methods = #()
+        local removed_edge_count = 0
+        local failure = undefined
+        local redraw_disabled = false
+        local old_remove_ctrl = modifier.remveEdgeCtrlKey
+
+
+        -- Save candidate positions before any topology-changing operation can invalidate their IDs.
+        for vertex_index in removable_new_vertices do
+        (
+            local candidate_position = modifier.GetVertex vertex_index node:node
+            if candidate_position != undefined then
+            (
+                append candidate_positions #(vertex_index, candidate_position)
+            )
+        )
+
+
+        -- Save redundant-edge geometry so every edge can be re-resolved and verified before vertex cleanup.
+        for edge_index in removable_edges do
+        (
+            if doesDebugModifierEdgeExist node modifier edge_index then
+            (
+                local edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+                local edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+                append edge_descriptors #(edge_index, modifier.GetVertex edge_a node:node, modifier.GetVertex edge_b node:node)
+            )
+        )
+
+
+        try
+        (
+            disableSceneRedraw()
+            redraw_disabled = true
+            select node
+                max modify mode
+                modPanel.setCurrentObject modifier
+                modifier.SetPrimaryNode node
+                modifier.useStackSelection = false
+                modifier.remveEdgeCtrlKey = false
+            -- Redundant edges are always removed and verified before any cleanup vertex is touched.
+            local unresolved_edges = #{}
+            for edge_data in edge_descriptors do
+            (
+                local original_edge_index = edge_data[1]
+                local current_edge_index = findDebugEdgeByEndpointPositions node modifier edge_data[2] edge_data[3] tolerance:0.01
+                if current_edge_index > 0 then
+                (
+                    if removeDebugCleanupEdge node modifier current_edge_index then
+                    (
+                        removed_edge_count += 1
+                    )
+                    else
+                    (
+                        unresolved_edges[original_edge_index] = true
+                    )
+                )
+                else
+                (
+                    removed_edge_count += 1
+                    if not batch_quiet then format "Wall-Fixer Cleanup Edge Attempt: originalEdge:% currentEdge:0 method:alreadyGone selectedEdges:#{} endpoints:%/% success:true reason:\n" original_edge_index edge_data[2] edge_data[3]
+                )
+            )
+
+
+            if unresolved_edges.numberSet > 0 then
+            (
+                throw ("Redundant sliced edges remain after cleanup: " + (unresolved_edges as string))
+            )
+
+
+            -- Re-resolve every saved candidate only after all redundant edges are confirmed gone.
+            for candidate_data in candidate_positions do
+            (
+                local original_vertex_index = candidate_data[1]
+                local candidate_position = candidate_data[2]
+                local current_vertex_index = findDebugSliceVertexByPosition node modifier candidate_position protected_vertices:protected_pre_slice_vertices tolerance:0.01
+
+
+                if current_vertex_index > 0 then
+                (
+                    local removal_result = forceRemoveDebugCleanupVertex node modifier original_vertex_index candidate_position protected_vertices:protected_pre_slice_vertices
+                    append removal_methods #(original_vertex_index, current_vertex_index, removal_result[3], removal_result[4])
+                    if removal_result[1] then
+                    (
+                        removed_new_vertices[original_vertex_index] = true
+                    )
+                    else
+                    (
+                        unresolved_new_vertices[original_vertex_index] = true
+                    )
+                )
+                else
+                (
+                    removed_new_vertices[original_vertex_index] = true
+                    append removal_methods #(original_vertex_index, 0, #alreadyGone, "removed by an earlier verified operation")
+                )
+            )
+            modifier.remveEdgeCtrlKey = old_remove_ctrl
+
+
+            last_slice_report = node.name + ": redundant sliced edges removed:" + (removed_edge_count as string) + "; cleanup candidates:" + (removable_new_vertices.numberSet as string) + "; removed verts:" + (removed_new_vertices.numberSet as string) + "; unresolved verts:" + (unresolved_new_vertices as string) + "."
+            if not batch_quiet then format "Wall-Fixer Clean Up Sliced Edges Summary: new:% startVerts:% keep:% requestedEdges:% removedEdges:% cleanupCandidates:% removedVerts:% methods:% unresolvedVerts:% protectedPreSliceVerts:% protectedCornerVerts:% preSliceVertCount:%\n" usable_new_edges start_vertices kept_edges removable_edges removed_edge_count removable_new_vertices removed_new_vertices removal_methods unresolved_new_vertices protected_base_vertices protected_corner_vertices protected_pre_slice_vertices.numberSet
+
+
+            if removed_edge_count > 0 then clearLastDebugSliceContext node:node
+
+
+            if redraw_disabled then
+            (
+                enableSceneRedraw()
+                redraw_disabled = false
+            )
+            if not keep_modify_context then max create mode
+            if final_redraw then completeRedraw()
+        )
+        catch
+        (
+            failure = getCurrentException()
+            modifier.remveEdgeCtrlKey = old_remove_ctrl
+            if redraw_disabled then
+            (
+                enableSceneRedraw()
+                redraw_disabled = false
+            )
+            if not keep_modify_context then max create mode
+            if final_redraw then completeRedraw()
+            last_slice_error = failure
+            last_slice_report = node.name + ": " + (failure as string)
+        )
+
+
+        failure == undefined
+        -- return
+    ),
+
+
+    /*
+    Converts the currently selected sliced edges into non-border sliced vertices.
+    The current Edit Poly selection is the only debug state.
+    */
+    function debugSelectSlicedEdgeVertices =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+
+
+        local selected_nodes = selection as array
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select the wall containing the sliced-edge selection."
+            return false
+        )
+
+
+        local node = selected_nodes[1]
+        local modifier = getDebugTopologyModifier node
+        if modifier == undefined then
+        (
+            last_slice_report = node.name + ": top Wall topology cleanup Edit Poly was not found."
+            return false
+        )
+
+
+        local sliced_edges = modifier.GetSelection #Edge node:node
+        if sliced_edges == undefined or sliced_edges.numberSet == 0 then
+        (
+            last_slice_report = node.name + ": no sliced edges are selected. Run Make 1 Slice first."
+            return false
+        )
+
+
+        local sliced_vertices = getDebugSlicedVertices node modifier sliced_edges
+
+
+        select node
+        max modify mode
+        modPanel.setCurrentObject modifier
+        modifier.SetPrimaryNode node
+        modifier.useStackSelection = false
+        modifier.SetEPolySelLevel #Vertex
+        subObjectLevel = 1
+        modifier.SetSelection #Vertex #{} node:node
+        local selected_ok = modifier.Select #Vertex sliced_vertices node:node
+        local actual_selection = modifier.GetSelection #Vertex node:node
+        completeRedraw()
+
+
+        last_slice_report = node.name + ": sliced verts selected:" + (actual_selection.numberSet as string) + "."
+        if not batch_quiet then format "Wall-Fixer Sliced Edge Verts: edges:% requested:% selected:% result:%\n" sliced_edges sliced_vertices actual_selection selected_ok
+
+
+        actual_selection == sliced_vertices
+        -- return
+    ),
+    /*
+    Returns sliced vertices from the supplied currently selected sliced edges.
+    Vertices on any current wall/opening border are excluded by definition.
+    */
+    function getDebugSlicedVertices node modifier sliced_edges =
+    (
+        local sliced_vertices = #{}
+        local border_vertices = #{}
+        local edge_count = modifier.GetNumEdges node:node
+
+
+        for edge_index = 1 to edge_count do
+        (
+            local face_a = modifier.GetEdgeFace edge_index 1 node:node
+            local face_b = modifier.GetEdgeFace edge_index 2 node:node
+            if (face_a == 0) != (face_b == 0) then
+            (
+                local border_a = modifier.GetEdgeVertex edge_index 1 node:node
+                local border_b = modifier.GetEdgeVertex edge_index 2 node:node
+                if border_a > 0 then border_vertices[border_a] = true
+                if border_b > 0 then border_vertices[border_b] = true
+            )
+        )
+
+
+        for edge_index in sliced_edges do
+        (
+            if edge_index >= 1 and edge_index <= edge_count then
+            (
+                local sliced_a = modifier.GetEdgeVertex edge_index 1 node:node
+                local sliced_b = modifier.GetEdgeVertex edge_index 2 node:node
+                if sliced_a > 0 then sliced_vertices[sliced_a] = true
+                if sliced_b > 0 then sliced_vertices[sliced_b] = true
+            )
+        )
+
+
+        sliced_vertices - border_vertices
+        -- return
+    ),
+
+
+    /*
+    Counts unique visible TriMesh edges incident to one evaluated vertex.
+    Invisible triangulation edges are ignored; shared triangle edges count only once.
+    */
+    function countVisibleEdgesAtVertex mesh_value vertex_index =
+    (
+        local visible_edge_keys = #()
+        local face_count = getNumFaces mesh_value
+
+
+        for face_index = 1 to face_count do
+        (
+            local face_vertices = getFace mesh_value face_index
+            local face_vertex_ids = #(face_vertices.x as integer, face_vertices.y as integer, face_vertices.z as integer)
+
+
+            for face_edge_index = 1 to 3 do
+            (
+                local edge_a = face_vertex_ids[face_edge_index]
+                local edge_b = face_vertex_ids[if face_edge_index == 3 then 1 else face_edge_index + 1]
+
+
+                if (edge_a == vertex_index or edge_b == vertex_index) and (getEdgeVis mesh_value face_index face_edge_index) then
+                (
+                    local min_vertex = amin edge_a edge_b
+                    local max_vertex = amax edge_a edge_b
+                    local edge_key = (min_vertex as string) + ":" + (max_vertex as string)
+                    if (findItem visible_edge_keys edge_key) == 0 then append visible_edge_keys edge_key
+                )
+            )
+        )
+
+
+        visible_edge_keys.count
+        -- return
+    ),
+
+
+    /*
+    Returns unique evaluated visible-edge neighbours of one vertex.
+    Hidden triangulation/topology edges are ignored.
+    */
+    function getVisibleEdgeNeighborVerticesAtVertex mesh_value vertex_index =
+    (
+        local neighbor_vertices = #()
+        if mesh_value == undefined then return neighbor_vertices
+
+
+        local face_count = getNumFaces mesh_value
+        for face_index = 1 to face_count do
+        (
+            local face_vertices = getFace mesh_value face_index
+            local face_vertex_ids = #(face_vertices.x as integer, face_vertices.y as integer, face_vertices.z as integer)
+
+
+            for face_edge_index = 1 to 3 do
+            (
+                if getEdgeVis mesh_value face_index face_edge_index then
+                (
+                    local edge_a = face_vertex_ids[face_edge_index]
+                    local edge_b = face_vertex_ids[if face_edge_index == 3 then 1 else face_edge_index + 1]
+
+
+                    if edge_a == vertex_index and (findItem neighbor_vertices edge_b) == 0 then
+                    (
+                        append neighbor_vertices edge_b
+                    )
+                    else if edge_b == vertex_index and (findItem neighbor_vertices edge_a) == 0 then
+                    (
+                        append neighbor_vertices edge_a
+                    )
+                )
+            )
+        )
+
+
+        neighbor_vertices
+        -- return
+    ),
+
+
+    /*
+    Returns true only for a vertex with exactly two visible straight edges.
+    Extra hidden incident edges are allowed and are cleaned before Remove Vertex.
+    */
+    function isPostProcessStraightTwoVisibleEdgeVertex mesh_value vertex_index angle_threshold:0.1 =
+    (
+        if mesh_value == undefined then return false
+        if vertex_index < 1 or vertex_index > (getNumVerts mesh_value) then return false
+
+
+        local neighbor_vertices = ::WallFixer.getVisibleEdgeNeighborVerticesAtVertex mesh_value vertex_index
+        if neighbor_vertices.count != 2 then return false
+
+
+        local vertex_position = getVert mesh_value vertex_index
+        local neighbor_a = getVert mesh_value neighbor_vertices[1]
+        local neighbor_b = getVert mesh_value neighbor_vertices[2]
+        local direction_a = neighbor_a - vertex_position
+        local direction_b = neighbor_b - vertex_position
+
+
+        if length direction_a <= epsilon or length direction_b <= epsilon then return false
+
+
+        local straight_limit = -(cos angle_threshold)
+        (dot (normalize direction_a) (normalize direction_b)) <= straight_limit
+        -- return
+    ),
+
+
+    /*
+    Returns whether one evaluated edge between the requested live vertex ids is visible.
+    The same endpoint pair can appear in two TriMesh faces; any visible occurrence makes it visible.
+    */
+    function isEvaluatedMeshEdgeVisibleByVertexPair mesh_value vertex_a vertex_b =
+    (
+        if mesh_value == undefined then return false
+        local found_visible = false
+        local face_count = getNumFaces mesh_value
+
+
+        for face_index = 1 to face_count while not found_visible do
+        (
+            local face_vertices = getFace mesh_value face_index
+            local face_vertex_ids = #(face_vertices.x as integer, face_vertices.y as integer, face_vertices.z as integer)
+
+
+            for face_edge_index = 1 to 3 while not found_visible do
+            (
+                local edge_a = face_vertex_ids[face_edge_index]
+                local edge_b = face_vertex_ids[if face_edge_index == 3 then 1 else face_edge_index + 1]
+                local same_edge = (edge_a == vertex_a and edge_b == vertex_b) or (edge_a == vertex_b and edge_b == vertex_a)
+
+
+                if same_edge and getEdgeVis mesh_value face_index face_edge_index then
+                (
+                    found_visible = true
+                )
+            )
+        )
+
+
+        found_visible
+        -- return
+    ),
+
+
+    /*
+    Returns true when one live vertex is a visible-edge corner instead of a straight continuation.
+    Any vertex without exactly two visible neighbours is treated as a corner/non-cleanup vertex.
+    */
+    function isDebugVisibleCornerVertex mesh_value vertex_index angle_threshold:0.1 =
+    (
+        if mesh_value == undefined then return true
+        if vertex_index < 1 or vertex_index > (getNumVerts mesh_value) then return true
+
+
+        local neighbor_vertices = ::WallFixer.getVisibleEdgeNeighborVerticesAtVertex mesh_value vertex_index
+        if neighbor_vertices.count != 2 then return true
+
+
+        local vertex_position = getVert mesh_value vertex_index
+        local direction_a = (getVert mesh_value neighbor_vertices[1]) - vertex_position
+        local direction_b = (getVert mesh_value neighbor_vertices[2]) - vertex_position
+        if length direction_a <= epsilon or length direction_b <= epsilon then return true
+
+
+        local straight_limit = -(cos angle_threshold)
+        (dot (normalize direction_a) (normalize direction_b)) > straight_limit
+        -- return
+    ),
+
+
+    /*
+    Selects all live vertices with exactly two visible collinear edges and excludes visible-edge corners.
+    Debug-only inspection; no topology is changed.
+    */
+    function debugFindTwoEdgeVerts angle_threshold:0.1 =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+
+
+        local selected_nodes = selection as array
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select one processed wall before Find Two-Edge Verts."
+            return false
+        )
+
+
+        local node = selected_nodes[1]
+        local modifier = getDebugTopologyModifier node
+        local modifier_created = false
+
+
+        if modifier == undefined then
+        (
+            modifier = Edit_Poly name:"WMC - FIX TWO-EDGE VERTS"
+            addModifier node modifier
+            update node
+            modifier_created = true
+        )
+
+
+        local failure = undefined
+        local evaluated_mesh = undefined
+        local candidates = #{}
+        local corner_vertices = #{}
+        local non_two_visible_vertices = #{}
+
+
+        try
+        (
+            update node
+            evaluated_mesh = snapshotAsMesh node
+            if evaluated_mesh == undefined then throw "Could not evaluate current wall mesh."
+            if getNumVerts evaluated_mesh != modifier.GetNumVertices node:node then
+            (
+                throw "Evaluated mesh vertex indices do not match Edit Poly vertex indices."
+            )
+
+
+            local vertex_count = getNumVerts evaluated_mesh
+            for vertex_index = 1 to vertex_count do
+            (
+                local visible_edge_count = ::WallFixer.countVisibleEdgesAtVertex evaluated_mesh vertex_index
+                local is_corner_vertex = ::WallFixer.isDebugVisibleCornerVertex evaluated_mesh vertex_index angle_threshold:angle_threshold
+                local is_straight_two_edge = false
+
+
+                if visible_edge_count == 2 and not is_corner_vertex then
+                (
+                    is_straight_two_edge = ::WallFixer.isPostProcessStraightTwoVisibleEdgeVertex evaluated_mesh vertex_index angle_threshold:angle_threshold
+                )
+
+
+                if is_straight_two_edge then
+                (
+                    candidates[vertex_index] = true
+                )
+                else if is_corner_vertex then
+                (
+                    corner_vertices[vertex_index] = true
+                )
+                else if visible_edge_count != 2 then
+                (
+                    non_two_visible_vertices[vertex_index] = true
+                )
+            )
+
+
+            free evaluated_mesh
+            evaluated_mesh = undefined
+
+
+            select node
+            max modify mode
+            modPanel.setCurrentObject modifier
+            modifier.SetPrimaryNode node
+            modifier.useStackSelection = false
+            modifier.SetEPolySelLevel #Vertex
+            subObjectLevel = 1
+            modifier.SetSelection #Vertex #{} node:node
+
+
+            if candidates.numberSet > 0 then
+            (
+                local selected_ok = modifier.Select #Vertex candidates node:node
+                local actual_selection = modifier.GetSelection #Vertex node:node
+                if not selected_ok or actual_selection != candidates then
+                (
+                    throw "Could not select Find Two-Edge Verts candidates."
+                )
+            )
+
+
+            if not batch_quiet then format "Wall-Fixer Find Two-Edge Verts: node:% candidates:% count:% angleTolerance:% modifier:% created:%\n" \
+                node.name candidates candidates.numberSet angle_threshold modifier.name modifier_created
+            last_slice_report = node.name + ": Find Two-Edge Verts selected " + (candidates.numberSet as string) + " vertices in " + modifier.name + "."
+            completeRedraw()
+        )
+        catch
+        (
+            if evaluated_mesh != undefined then free evaluated_mesh
+            failure = getCurrentException()
+            last_slice_error = failure
+            last_slice_report = node.name + ": " + (failure as string)
+        )
+
+
+        failure == undefined
+        -- return
+    ),
+
+
+    /*
+    Welds each current Find Two-Edge Verts candidate to the closest neighbour on one of its two visible straight edges.
+    Candidates are re-resolved by position after every weld so Edit Poly vertex renumbering cannot redirect later operations.
+    */
+    function debugWeldTwoEdgeVertsToClosestNeighbor angle_threshold:0.1 position_tolerance:0.01 =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+
+
+        local selected_nodes = selection as array
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select one processed wall before welding Find Two-Edge Verts candidates."
+            return false
+        )
+
+
+        local node = selected_nodes[1]
+        local source_modifier = getDebugTopologyModifier node
+        if source_modifier == undefined then
+        (
+            last_slice_report = node.name + ": top Edit Poly modifier was not found."
+            return false
+        )
+
+
+        local failure = undefined
+        local evaluated_mesh = undefined
+        local weld_modifier = undefined
+        local candidate_positions = #()
+        local welded_count = 0
+        local skipped_count = 0
+        local failed_positions = #()
+        local redraw_disabled = false
+
+
+        try
+        (
+            update node
+            evaluated_mesh = snapshotAsMesh node
+            if evaluated_mesh == undefined then throw "Could not evaluate current wall mesh."
+            if getNumVerts evaluated_mesh != source_modifier.GetNumVertices node:node then
+            (
+                throw "Evaluated mesh vertex indices do not match Edit Poly vertex indices."
+            )
+
+
+            local vertex_count = getNumVerts evaluated_mesh
+            for vertex_index = 1 to vertex_count do
+            (
+                local visible_edge_count = ::WallFixer.countVisibleEdgesAtVertex evaluated_mesh vertex_index
+                local is_corner_vertex = ::WallFixer.isDebugVisibleCornerVertex evaluated_mesh vertex_index angle_threshold:angle_threshold
+                if visible_edge_count == 2 and not is_corner_vertex then
+                (
+                    if ::WallFixer.isPostProcessStraightTwoVisibleEdgeVertex evaluated_mesh vertex_index angle_threshold:angle_threshold then
+                    (
+                        local candidate_position = source_modifier.GetVertex vertex_index node:node
+                        if candidate_position != undefined then append candidate_positions candidate_position
+                    )
+                )
+            )
+
+
+            free evaluated_mesh
+            evaluated_mesh = undefined
+
+
+            if candidate_positions.count == 0 then
+            (
+                last_slice_report = node.name + ": no Find Two-Edge Verts candidates to weld."
+                if not batch_quiet then format "Wall-Fixer Weld Two-Edge Verts: node:% candidates:0 welded:0 skipped:0 failed:0\n" node.name
+                return true
+            )
+
+
+            weld_modifier = Edit_Poly name:"WMC - FIX TWO-EDGE VERTS"
+            addModifier node weld_modifier
+            update node
+
+
+            select node
+            max modify mode
+            modPanel.setCurrentObject weld_modifier
+            weld_modifier.SetPrimaryNode node
+            weld_modifier.useStackSelection = false
+            weld_modifier.SetEPolySelLevel #Vertex
+
+
+            disableSceneRedraw()
+            redraw_disabled = true
+
+
+            local object_tm = node.objectTransform
+
+
+            for saved_position in candidate_positions do
+            (
+                local current_vertex = ::WallFixer.findDebugLiveVertexByPosition node weld_modifier saved_position tolerance:position_tolerance
+                if current_vertex <= 0 then
+                (
+                    skipped_count += 1
+                    if not batch_quiet then format "Wall-Fixer Weld Two-Edge Vert Skip: savedPosition:% reason:vertex already removed or could not be re-resolved\n" saved_position
+                )
+                else
+                (
+                    local current_mesh = snapshotAsMesh node
+                    local can_weld = current_mesh != undefined
+                    local visible_neighbors = #()
+
+
+                    if can_weld then
+                    (
+                        if getNumVerts current_mesh != weld_modifier.GetNumVertices node:node then
+                        (
+                            can_weld = false
+                        )
+                        else
+                        (
+                            can_weld = ::WallFixer.isPostProcessStraightTwoVisibleEdgeVertex current_mesh current_vertex angle_threshold:angle_threshold
+                            if can_weld then visible_neighbors = ::WallFixer.getVisibleEdgeNeighborVerticesAtVertex current_mesh current_vertex
+                            if visible_neighbors.count != 2 then can_weld = false
+                        )
+                    )
+
+
+                    if current_mesh != undefined then free current_mesh
+
+
+                    if not can_weld then
+                    (
+                        skipped_count += 1
+                        if not batch_quiet then format "Wall-Fixer Weld Two-Edge Vert Skip: source:% reason:no longer a valid two-visible-straight-edge vertex\n" current_vertex
+                    )
+                    else
+                    (
+                        local source_position = weld_modifier.GetVertex current_vertex node:node
+                        local neighbor_a = visible_neighbors[1]
+                        local neighbor_b = visible_neighbors[2]
+                        local position_a = weld_modifier.GetVertex neighbor_a node:node
+                        local position_b = weld_modifier.GetVertex neighbor_b node:node
+
+
+                        if source_position == undefined or position_a == undefined or position_b == undefined then
+                        (
+                            append failed_positions saved_position
+                        )
+                        else
+                        (
+                            local source_world = source_position * object_tm
+                            local distance_a = distance source_world (position_a * object_tm)
+                            local distance_b = distance source_world (position_b * object_tm)
+                            local target_vertex = if distance_a <= distance_b then neighbor_a else neighbor_b
+                            local target_position = if target_vertex == neighbor_a then position_a else position_b
+                            local target_distance = if distance_a <= distance_b then distance_a else distance_b
+                            local single_selection = #{}
+                            local pair_selection = #{}
+                            single_selection[current_vertex] = true
+                            pair_selection[current_vertex] = true
+                            pair_selection[target_vertex] = true
+                            local before_live_count = ::WallFixer.getDebugLiveVertexCount node weld_modifier
+                            local weld_success = false
+
+
+                            weld_modifier.SetSelection #Vertex #{} node:node
+                            local source_selected = weld_modifier.Select #Vertex single_selection node:node
+                            if source_selected and (weld_modifier.GetSelection #Vertex node:node) == single_selection then
+                            (
+                                weld_modifier.SetOperation #Transform
+                                weld_modifier.MoveSelection (target_position - source_position) parent:(weld_modifier.GetNodeTM node:node) axis:(weld_modifier.GetNodeTM node:node)
+                                weld_modifier.Commit()
+                                update node
+
+
+                                /* Moving vertices does not renumber topology, so keep this exact connected pair for the weld. */
+                                pair_selection = #{}
+                                pair_selection[current_vertex] = true
+                                pair_selection[target_vertex] = true
+                                weld_modifier.SetSelection #Vertex #{} node:node
+                                local pair_selected = weld_modifier.Select #Vertex pair_selection node:node
+
+
+                                if pair_selected and (weld_modifier.GetSelection #Vertex node:node) == pair_selection then
+                                (
+                                    weld_modifier.ButtonOp #WeldVertex
+                                    weld_modifier.Commit()
+                                    update node
+
+
+                                    local after_live_count = ::WallFixer.getDebugLiveVertexCount node weld_modifier
+                                    weld_success = after_live_count < before_live_count
+
+
+                                    if not batch_quiet then format "Wall-Fixer Weld Two-Edge Vert: source:% target:% distance:% liveBefore:% liveAfter:% success:% modifier:%\n" \
+                                        current_vertex target_vertex target_distance before_live_count after_live_count weld_success weld_modifier.name
+                                )
+                            )
+
+
+                            if weld_success then
+                            (
+                                welded_count += 1
+                            )
+                            else
+                            (
+                                append failed_positions saved_position
+                            )
+                        )
+                    )
+                )
+            )
+
+
+            weld_modifier.SetSelection #Vertex #{} node:node
+
+
+            if not batch_quiet then format "Wall-Fixer Weld Two-Edge Verts: node:% candidates:% welded:% skipped:% failed:% modifier:%\n" \
+                node.name candidate_positions.count welded_count skipped_count failed_positions.count weld_modifier.name
+
+
+            if failed_positions.count == 0 then
+            (
+                last_slice_report = node.name + ": welded " + (welded_count as string) + " Find Two-Edge Verts candidates in FIX TWO-EDGE VERTS."
+            )
+            else
+            (
+                last_slice_report = node.name + ": welded " + (welded_count as string) + " candidates; " + (failed_positions.count as string) + " failed after processing the full candidate list."
+            )
+        )
+        catch
+        (
+            if evaluated_mesh != undefined then free evaluated_mesh
+            failure = getCurrentException()
+            last_slice_error = failure
+            last_slice_report = node.name + ": " + (failure as string)
+
+
+            if weld_modifier != undefined and welded_count == 0 then
+            (
+                try(deleteModifier node weld_modifier)catch()
+                weld_modifier = undefined
+                update node
+            )
+        )
+
+
+        if redraw_disabled then enableSceneRedraw()
+        completeRedraw()
+
+
+        failure == undefined and failed_positions.count == 0
+        -- return
+    ),
+
+
+    /*
+    Selects only Clean Up Slice eligible verts without changing topology.
+    Eligible verts have exactly two visible edges, are not border verts, and are not cached INNER VERTS.
+    */
+    function debugInspectCleanUpSlice =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+
+
+        local selected_nodes = selection as array
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select the wall and sliced vertices before inspecting Clean Up Slice."
+            return false
+        )
+
+
+        local node = selected_nodes[1]
+        local modifier = getDebugTopologyModifier node
+        if modifier == undefined then
+        (
+            last_slice_report = node.name + ": top Wall topology cleanup Edit Poly was not found."
+            return false
+        )
+
+
+        local failure = undefined
+        local sliced_vertices = modifier.GetSelection #Vertex node:node
+        local protected_inner_vertices = getResetInnerVertSelection node
+        local selectable_vertices = #{}
+        local protected_selected_vertices = #{}
+        local non_two_visible_vertices = #{}
+        local border_vertices = #{}
+        local border_selected_vertices = #{}
+        local evaluated_mesh = undefined
+
+
+        if sliced_vertices == undefined or sliced_vertices.numberSet == 0 then
+        (
+            last_slice_report = node.name + ": no sliced verts are selected. RMB Make 1 Slice first."
+            return false
+        )
+        if protected_inner_vertices == undefined then
+        (
+            last_slice_report = node.name + ": Reset Slicing INNER VERTS cache is missing. Run Reset Slicing before Clean Up Slice."
+            return false
+        )
+
+
+        selectable_vertices = copy sliced_vertices
+        for sliced_vertex in sliced_vertices do
+        (
+            if sliced_vertex <= protected_inner_vertices.count and protected_inner_vertices[sliced_vertex] then
+            (
+                selectable_vertices[sliced_vertex] = false
+                protected_selected_vertices[sliced_vertex] = true
+            )
+        )
+
+
+        try
+        (
+            select node
+            max modify mode
+            modPanel.setCurrentObject modifier
+            modifier.SetPrimaryNode node
+            modifier.useStackSelection = false
+
+
+            update node
+            evaluated_mesh = snapshotAsMesh node
+            if getNumVerts evaluated_mesh != modifier.GetNumVertices node:node then
+            (
+                throw "Evaluated mesh vertex indices do not match Edit Poly vertex indices."
+            )
+
+
+            -- Build current Edit Poly border vertices from edges with exactly one live face.
+            local edge_count = modifier.GetNumEdges node:node
+            for edge_index = 1 to edge_count do
+            (
+                local face_a = modifier.GetEdgeFace edge_index 1 node:node
+                local face_b = modifier.GetEdgeFace edge_index 2 node:node
+                if (face_a == 0) != (face_b == 0) then
+                (
+                    local border_a = modifier.GetEdgeVertex edge_index 1 node:node
+                    local border_b = modifier.GetEdgeVertex edge_index 2 node:node
+                    if border_a > 0 then border_vertices[border_a] = true
+                    if border_b > 0 then border_vertices[border_b] = true
+                )
+            )
+
+
+            -- LMB Clean Up Slice selects only non-border, non-inner verts with exactly two visible edges.
+            for sliced_vertex in (copy selectable_vertices) do
+            (
+                local visible_edge_count = countVisibleEdgesAtVertex evaluated_mesh sliced_vertex
+                local is_border_vertex = sliced_vertex <= border_vertices.count and border_vertices[sliced_vertex]
+
+
+                if visible_edge_count != 2 then
+                (
+                    selectable_vertices[sliced_vertex] = false
+                    non_two_visible_vertices[sliced_vertex] = true
+                )
+                else if is_border_vertex then
+                (
+                    selectable_vertices[sliced_vertex] = false
+                    border_selected_vertices[sliced_vertex] = true
+                )
+            )
+
+
+            if not batch_quiet then format "Wall-Fixer Clean Up Slice Select: selected:% protectedInner:% border:% nonTwoVisible:% selectable:%\n" sliced_vertices protected_selected_vertices border_selected_vertices non_two_visible_vertices selectable_vertices
+            for sliced_vertex in sliced_vertices do
+            (
+                local visible_edge_count = countVisibleEdgesAtVertex evaluated_mesh sliced_vertex
+                local is_border_vertex = sliced_vertex <= border_vertices.count and border_vertices[sliced_vertex]
+                local select_vertex = sliced_vertex <= selectable_vertices.count and selectable_vertices[sliced_vertex]
+                if not batch_quiet then format "Wall-Fixer Clean Up Slice Select Vert:% visibleEdges:% border:% inner:% select:%\n" sliced_vertex visible_edge_count is_border_vertex (sliced_vertex <= protected_inner_vertices.count and protected_inner_vertices[sliced_vertex]) select_vertex
+            )
+
+
+            free evaluated_mesh
+            evaluated_mesh = undefined
+
+
+            modifier.SetEPolySelLevel #Vertex
+            subObjectLevel = 1
+            modifier.SetSelection #Vertex #{} node:node
+            if selectable_vertices.numberSet > 0 then
+            (
+                local selected_ok = modifier.Select #Vertex selectable_vertices node:node
+                local actual_selection = modifier.GetSelection #Vertex node:node
+                if not selected_ok or actual_selection != selectable_vertices then
+                (
+                    throw "Could not select Clean Up Slice eligible vertices."
+                )
+            )
+
+
+            last_slice_report = node.name + ": Clean Up Slice eligible verts selected:" + (selectable_vertices.numberSet as string) + "."
+            completeRedraw()
+        )
+        catch
+        (
+            if evaluated_mesh != undefined then free evaluated_mesh
+            failure = getCurrentException()
+            last_slice_error = failure
+            last_slice_report = node.name + ": " + (failure as string)
+        )
+
+
+        failure == undefined
+        -- return
+    ),
+
+
+    /*
+    Removes one already-approved Clean Up Slice vertex with the proven per-vertex Remove Vertex sequence.
+    The vertex is re-resolved by position after every topology change so later candidates stay valid.
+    */
+    function forceRemoveCleanUpSliceVertex node modifier original_vertex_index saved_position tolerance:0.01 =
+    (
+        local current_vertex_index = ::WallFixer.findDebugLiveVertexByPosition node modifier saved_position tolerance:tolerance
+        if current_vertex_index <= 0 then return #(true, 0, #alreadyGone, "")
+
+
+        local methods = #(#buttonRemoveVertex, #operationRemoveVertex)
+        for method in methods do
+        (
+            current_vertex_index = ::WallFixer.findDebugLiveVertexByPosition node modifier saved_position tolerance:tolerance
+            if current_vertex_index <= 0 then return #(true, 0, method, "")
+
+
+            local before_live_count = ::WallFixer.getDebugLiveVertexCount node modifier
+            local requested_selection = #{}
+            requested_selection[current_vertex_index] = true
+            local actual_selection = #{}
+            local operation_error = undefined
+
+
+            try
+            (
+                modifier.SetEPolySelLevel #Vertex
+                subObjectLevel = 1
+                modifier.SetSelection #Vertex #{} node:node
+                modifier.Select #Vertex requested_selection node:node
+                actual_selection = modifier.GetSelection #Vertex node:node
+                if actual_selection != requested_selection then throw "Edit Poly vertex selection did not match the requested Clean Up Slice vertex."
+
+
+                if method == #buttonRemoveVertex then
+                (
+                    modifier.ButtonOp #RemoveVertex
+                )
+                else
+                (
+                    modifier.SetOperation #RemoveVertex
+                    modifier.Commit()
+                )
+
+
+                update node
+                ::WallFixer.refreshDebugModifierTopology node
+                modifier.RefreshScreen()
+            )
+            catch
+            (
+                operation_error = getCurrentException()
+            )
+
+
+            local after_live_count = ::WallFixer.getDebugLiveVertexCount node modifier
+            local resolved_after = ::WallFixer.findDebugLiveVertexByPosition node modifier saved_position tolerance:tolerance
+            local removed = operation_error == undefined and resolved_after == 0 and after_live_count < before_live_count
+            local failure_reason = ""
+            if operation_error != undefined then failure_reason = operation_error as string
+            else if resolved_after > 0 then failure_reason = "Clean Up Slice vertex still resolves at its saved position"
+            else if after_live_count >= before_live_count then failure_reason = "live vertex count did not decrease"
+
+
+            if not batch_quiet then format "Wall-Fixer Clean Up Slice Vert Attempt: originalVert:% currentVert:% method:% selected:% liveBefore:% liveAfter:% success:% reason:%\n" \
+                original_vertex_index current_vertex_index method actual_selection before_live_count after_live_count removed failure_reason
+
+
+            if removed then return #(true, current_vertex_index, method, "")
+        )
+
+
+        current_vertex_index = ::WallFixer.findDebugLiveVertexByPosition node modifier saved_position tolerance:tolerance
+        if current_vertex_index <= 0 then return #(true, 0, #alreadyGone, "")
+
+
+        local collapse_before_live_count = ::WallFixer.getDebugLiveVertexCount node modifier
+        local collapse_result = ::WallFixer.collapseDebugVertexToClosestNeighbor node modifier current_vertex_index
+        local collapse_after_live_count = ::WallFixer.getDebugLiveVertexCount node modifier
+        local collapse_resolved_after = ::WallFixer.findDebugLiveVertexByPosition node modifier saved_position tolerance:tolerance
+        local collapse_removed = collapse_result[1] and collapse_resolved_after == 0 and collapse_after_live_count < collapse_before_live_count
+        local collapse_reason = if collapse_removed then "" else "Collapse-to-neighbor fallback did not remove the Clean Up Slice vertex"
+
+
+        if not batch_quiet then format "Wall-Fixer Clean Up Slice Vert Attempt: originalVert:% currentVert:% method:% selected:% liveBefore:% liveAfter:% success:% reason:%\n" \
+            original_vertex_index current_vertex_index #collapseToNeighbor #{} collapse_before_live_count collapse_after_live_count collapse_removed collapse_reason
+
+
+        if collapse_removed then return #(true, current_vertex_index, #collapseToNeighbor, "")
+
+
+        #(false, current_vertex_index, #failed, collapse_reason)
+        -- return
+    ),
+
+
+    /*
+    Removes selected sliced vertices only when they have exactly two visible edges and are not on a border.
+    INNER VERTS cached by Reset Slicing are always protected from removal.
+    */
+    function debugCleanUpSlice =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+
+
+        local selected_nodes = selection as array
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select the wall and sliced vertices before Clean Up Slice."
+            return false
+        )
+
+
+        local node = selected_nodes[1]
+        local modifier = getDebugTopologyModifier node
+        if modifier == undefined then
+        (
+            last_slice_report = node.name + ": top Wall topology cleanup Edit Poly was not found."
+            return false
+        )
+
+
+        local failure = undefined
+        local sliced_vertices = modifier.GetSelection #Vertex node:node
+        local protected_inner_vertices = getResetInnerVertSelection node
+        local removable_vertices = #{}
+        local protected_selected_vertices = #{}
+        local non_two_visible_vertices = #{}
+        local border_vertices = #{}
+        local border_selected_vertices = #{}
+        local evaluated_mesh = undefined
+
+
+        if sliced_vertices == undefined or sliced_vertices.numberSet == 0 then
+        (
+            last_slice_report = node.name + ": no sliced verts are selected. RMB Make 1 Slice first."
+            return false
+        )
+        if protected_inner_vertices == undefined then
+        (
+            last_slice_report = node.name + ": Reset Slicing INNER VERTS cache is missing. Run Reset Slicing before Clean Up Slice."
+            return false
+        )
+
+
+        removable_vertices = copy sliced_vertices
+        protected_selected_vertices = #{}
+        for sliced_vertex in sliced_vertices do
+        (
+            if sliced_vertex <= protected_inner_vertices.count and protected_inner_vertices[sliced_vertex] then
+            (
+                removable_vertices[sliced_vertex] = false
+                protected_selected_vertices[sliced_vertex] = true
+            )
+        )
+
+
+        try
+        (
+            select node
+            max modify mode
+            modPanel.setCurrentObject modifier
+            modifier.SetPrimaryNode node
+            modifier.useStackSelection = false
+
+
+            update node
+            evaluated_mesh = snapshotAsMesh node
+            if getNumVerts evaluated_mesh != modifier.GetNumVertices node:node then
+            (
+                throw "Evaluated mesh vertex indices do not match Edit Poly vertex indices."
+            )
+
+
+            -- Build current Edit Poly border vertices from edges with exactly one live face.
+            border_vertices = #{}
+            local edge_count = modifier.GetNumEdges node:node
+            for edge_index = 1 to edge_count do
+            (
+                local face_a = modifier.GetEdgeFace edge_index 1 node:node
+                local face_b = modifier.GetEdgeFace edge_index 2 node:node
+                if (face_a == 0) != (face_b == 0) then
+                (
+                    local border_a = modifier.GetEdgeVertex edge_index 1 node:node
+                    local border_b = modifier.GetEdgeVertex edge_index 2 node:node
+                    if border_a > 0 then border_vertices[border_a] = true
+                    if border_b > 0 then border_vertices[border_b] = true
+                )
+            )
+
+
+            -- Clean Up Slice removes only non-border vertices with exactly two visible evaluated edges.
+            non_two_visible_vertices = #{}
+            border_selected_vertices = #{}
+            for sliced_vertex in (copy removable_vertices) do
+            (
+                local visible_edge_count = countVisibleEdgesAtVertex evaluated_mesh sliced_vertex
+                local is_border_vertex = sliced_vertex <= border_vertices.count and border_vertices[sliced_vertex]
+
+
+                if visible_edge_count != 2 then
+                (
+                    removable_vertices[sliced_vertex] = false
+                    non_two_visible_vertices[sliced_vertex] = true
+                )
+                else if is_border_vertex then
+                (
+                    removable_vertices[sliced_vertex] = false
+                    border_selected_vertices[sliced_vertex] = true
+                )
+            )
+
+
+            if not batch_quiet then format "Wall-Fixer Clean Up Slice: selected:% protectedInner:% border:% nonTwoVisible:% removable:%\n" sliced_vertices protected_selected_vertices border_selected_vertices non_two_visible_vertices removable_vertices
+            for sliced_vertex in sliced_vertices do
+            (
+                local visible_edge_count = countVisibleEdgesAtVertex evaluated_mesh sliced_vertex
+                local is_border_vertex = sliced_vertex <= border_vertices.count and border_vertices[sliced_vertex]
+                local remove_vertex = sliced_vertex <= removable_vertices.count and removable_vertices[sliced_vertex]
+                if not batch_quiet then format "Wall-Fixer Clean Up Slice Vert:% visibleEdges:% border:% remove:%\n" sliced_vertex visible_edge_count is_border_vertex remove_vertex
+            )
+
+
+            free evaluated_mesh
+            evaluated_mesh = undefined
+
+
+            local removable_vertex_data = #()
+            for removable_vertex in removable_vertices do
+            (
+                local removable_position = modifier.GetVertex removable_vertex node:node
+                if removable_position != undefined then append removable_vertex_data #(removable_vertex, removable_position)
+            )
+
+
+            local removed_vertices = #{}
+            local unresolved_vertices = #{}
+            local removal_methods = #()
+
+
+            for removable_data in removable_vertex_data do
+            (
+                local original_vertex_index = removable_data[1]
+                local saved_position = removable_data[2]
+                local remove_result = ::WallFixer.forceRemoveCleanUpSliceVertex node modifier original_vertex_index saved_position tolerance:0.01
+
+
+                if remove_result[1] then
+                (
+                    removed_vertices[original_vertex_index] = true
+                    append removal_methods #(original_vertex_index, remove_result[3])
+                )
+                else
+                (
+                    unresolved_vertices[original_vertex_index] = true
+                    append removal_methods #(original_vertex_index, remove_result[3], remove_result[4])
+                )
+            )
+
+
+            modifier.SetEPolySelLevel #Vertex
+            subObjectLevel = 1
+            modifier.SetSelection #Vertex #{} node:node
+
+
+            if unresolved_vertices.numberSet > 0 then
+            (
+                throw ("Could not remove all Clean Up Slice vertices. Unresolved: " + (unresolved_vertices as string))
+            )
+
+
+            last_slice_report = node.name + ": sliced verts removed:" + (removed_vertices.numberSet as string) + "; protected inner verts:" + (protected_selected_vertices.numberSet as string) + "; skipped border verts:" + (border_selected_vertices.numberSet as string) + "; skipped non-2-visible verts:" + (non_two_visible_vertices.numberSet as string) + "."
+            if not batch_quiet then format "Wall-Fixer Clean Up Slice: requested:% removed:% methods:% protected:% skippedBorder:% skippedNonTwoVisible:%\n" removable_vertices removed_vertices removal_methods protected_selected_vertices border_selected_vertices non_two_visible_vertices
+            completeRedraw()
+        )
+        catch
+        (
+            if evaluated_mesh != undefined then free evaluated_mesh
+            failure = getCurrentException()
+            last_slice_error = failure
+            last_slice_report = node.name + ": " + (failure as string)
+        )
+
+
+        failure == undefined
+        -- return
+    ),
+    /*
+    Removes hidden incident edges from one confirmed two-visible-edge straight vertex.
+    Visible edges are never selected; hidden edges are removed only to make Remove Vertex legal.
+    */
+    function removePostProcessHiddenIncidentEdges node modifier saved_position position_tolerance:0.01 =
+    (
+        local current_vertex_index = ::WallFixer.findDebugLiveVertexByPosition node modifier saved_position tolerance:position_tolerance
+        if current_vertex_index <= 0 then return #(true, 0, 0)
+
+
+        local evaluated_mesh = snapshotAsMesh node
+        if evaluated_mesh == undefined then return #(false, 0, 1)
+
+
+        if getNumVerts evaluated_mesh != modifier.GetNumVertices node:node then
+        (
+            free evaluated_mesh
+            return #(false, 0, 1)
+        )
+
+
+        local hidden_edge_data = #()
+        local edge_count = modifier.GetNumEdges node:node
+        for edge_index = 1 to edge_count do
+        (
+            if ::WallFixer.doesDebugModifierEdgeExist node modifier edge_index then
+            (
+                local edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+                local edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+
+
+                if edge_a == current_vertex_index or edge_b == current_vertex_index then
+                (
+                    local other_vertex = if edge_a == current_vertex_index then edge_b else edge_a
+                    local edge_visible = ::WallFixer.isEvaluatedMeshEdgeVisibleByVertexPair evaluated_mesh current_vertex_index other_vertex
+
+
+                    if not edge_visible then
+                    (
+                        local point_a = modifier.GetVertex edge_a node:node
+                        local point_b = modifier.GetVertex edge_b node:node
+                        if point_a != undefined and point_b != undefined then append hidden_edge_data #(point_a, point_b)
+                    )
+                )
+            )
+        )
+
+
+        free evaluated_mesh
+        evaluated_mesh = undefined
+
+
+        local removed_count = 0
+        local unresolved_count = 0
+        local old_remove_ctrl = modifier.remveEdgeCtrlKey
+
+
+        for edge_data in hidden_edge_data do
+        (
+            local point_a = edge_data[1]
+            local point_b = edge_data[2]
+            local current_edge = ::WallFixer.findDebugEdgeByEndpointPositions node modifier point_a point_b tolerance:position_tolerance
+
+
+            if current_edge > 0 then
+            (
+                local removed = false
+                local operation_error = undefined
+                try
+                (
+                    modifier.remveEdgeCtrlKey = false
+                    modifier.SetEPolySelLevel #Edge
+                    modifier.SetSelection #Edge #{} node:node
+
+
+                    local requested_selection = #{}
+                    requested_selection[current_edge] = true
+                    modifier.Select #Edge requested_selection node:node
+
+
+                    if (modifier.GetSelection #Edge node:node) != requested_selection then
+                    (
+                        throw "Could not select hidden incident edge."
+                    )
+
+
+                    modifier.ButtonOp #RemoveEdge
+                    update node
+                    ::WallFixer.refreshDebugModifierTopology node
+                    modifier.RefreshScreen()
+
+
+                    current_edge = ::WallFixer.findDebugEdgeByEndpointPositions node modifier point_a point_b tolerance:position_tolerance
+                    removed = current_edge == 0
+
+
+                    if not removed and current_edge > 0 then
+                    (
+                        modifier.SetSelection #Edge #{} node:node
+                        requested_selection = #{}
+                        requested_selection[current_edge] = true
+                        modifier.Select #Edge requested_selection node:node
+                        modifier.SetOperation #RemoveEdge
+                        modifier.Commit()
+                        update node
+                        ::WallFixer.refreshDebugModifierTopology node
+                        modifier.RefreshScreen()
+
+
+                        current_edge = ::WallFixer.findDebugEdgeByEndpointPositions node modifier point_a point_b tolerance:position_tolerance
+                        removed = current_edge == 0
+                    )
+                )
+                catch
+                (
+                    operation_error = getCurrentException()
+                )
+
+
+                if not batch_quiet then format "Wall-Fixer Postprocess Hidden Edge Remove: endpoints:%/% success:% reason:%\n" \
+                    point_a point_b removed (if operation_error == undefined then "" else operation_error as string)
+
+
+                if removed then removed_count += 1 else unresolved_count += 1
+            )
+        )
+
+
+        modifier.remveEdgeCtrlKey = old_remove_ctrl
+
+
+        #(unresolved_count == 0, removed_count, unresolved_count)
+        -- return
+    ),
+
+
+    /*
+    Removes one live vertex with exactly two visible straight edges.
+    Hidden incident edges are removed first; then the proven single-vertex Remove Vertex dissolves the vertex.
+    */
+    function removePostProcessStraightTwoVisibleEdgeVertex node modifier original_vertex_index saved_position position_tolerance:0.01 angle_threshold:0.1 =
+    (
+        local current_vertex_index = ::WallFixer.findDebugLiveVertexByPosition node modifier saved_position tolerance:position_tolerance
+        if current_vertex_index <= 0 then return #(true, 0, #alreadyGone, "")
+
+
+        local evaluated_mesh = snapshotAsMesh node
+        if evaluated_mesh == undefined then return #(false, current_vertex_index, #protected, "could not evaluate current mesh")
+        if getNumVerts evaluated_mesh != modifier.GetNumVertices node:node then
+        (
+            free evaluated_mesh
+            return #(false, current_vertex_index, #protected, "evaluated mesh vertex ids do not match Edit Poly")
+        )
+
+
+        local is_candidate = ::WallFixer.isPostProcessStraightTwoVisibleEdgeVertex evaluated_mesh current_vertex_index angle_threshold:angle_threshold
+        free evaluated_mesh
+        evaluated_mesh = undefined
+
+
+        if not is_candidate then return #(true, current_vertex_index, #noLongerCandidate, "")
+
+
+        local hidden_cleanup = ::WallFixer.removePostProcessHiddenIncidentEdges node modifier saved_position position_tolerance:position_tolerance
+        if not hidden_cleanup[1] then
+        (
+            return #(false, current_vertex_index, #hiddenEdgeCleanup, "could not remove every hidden incident edge")
+        )
+
+
+        current_vertex_index = ::WallFixer.findDebugLiveVertexByPosition node modifier saved_position tolerance:position_tolerance
+        if current_vertex_index <= 0 then return #(true, 0, #removedWithHiddenEdges, "")
+
+
+        if not(::WallFixer.isDebugRemovableSliceVertex node modifier current_vertex_index angle_threshold:angle_threshold) then
+        (
+            return #(false, current_vertex_index, #protected, "vertex did not become an exactly-two-edge straight vertex after hidden-edge cleanup")
+        )
+
+
+        local before_live_count = ::WallFixer.getDebugLiveVertexCount node modifier
+        local requested_selection = #{}
+        requested_selection[current_vertex_index] = true
+        local actual_selection = #{}
+        local removed = false
+        local method = #buttonRemoveVertex
+        local failure_reason = ""
+
+
+        try
+        (
+            modifier.SetEPolySelLevel #Vertex
+            modifier.SetSelection #Vertex #{} node:node
+            modifier.Select #Vertex requested_selection node:node
+            actual_selection = modifier.GetSelection #Vertex node:node
+
+
+            if actual_selection != requested_selection then
+            (
+                throw "Could not select straight two-visible-edge postprocess vertex."
+            )
+
+
+            modifier.ButtonOp #RemoveVertex
+            update node
+            ::WallFixer.refreshDebugModifierTopology node
+            modifier.RefreshScreen()
+
+
+            local resolved_after = ::WallFixer.findDebugLiveVertexByPosition node modifier saved_position tolerance:position_tolerance
+            local after_live_count = ::WallFixer.getDebugLiveVertexCount node modifier
+            removed = resolved_after == 0 and after_live_count == (before_live_count - 1)
+
+
+            if not removed then
+            (
+                current_vertex_index = ::WallFixer.findDebugLiveVertexByPosition node modifier saved_position tolerance:position_tolerance
+                if current_vertex_index > 0 then
+                (
+                    requested_selection = #{}
+                    requested_selection[current_vertex_index] = true
+                    modifier.SetSelection #Vertex #{} node:node
+                    modifier.Select #Vertex requested_selection node:node
+                    modifier.SetOperation #RemoveVertex
+                    modifier.Commit()
+                    update node
+                    ::WallFixer.refreshDebugModifierTopology node
+                    modifier.RefreshScreen()
+                    method = #operationRemoveVertex
+
+
+                    resolved_after = ::WallFixer.findDebugLiveVertexByPosition node modifier saved_position tolerance:position_tolerance
+                    after_live_count = ::WallFixer.getDebugLiveVertexCount node modifier
+                    removed = resolved_after == 0 and after_live_count == (before_live_count - 1)
+                )
+            )
+
+
+            if not removed then failure_reason = "Remove Vertex did not remove the straight two-visible-edge vertex"
+        )
+        catch
+        (
+            failure_reason = getCurrentException() as string
+            removed = false
+        )
+
+
+        if not batch_quiet then format "Wall-Fixer Postprocess Remove Straight 2-Visible-Edge Vert: originalVert:% currentVert:% hiddenEdgesRemoved:% selected:% method:% success:% reason:%\n" \
+            original_vertex_index current_vertex_index hidden_cleanup[2] actual_selection method removed failure_reason
+
+
+        #(removed, current_vertex_index, method, failure_reason)
+        -- return
+    ),
+
+
+    /*
+    Selects the exact Clean Up Sliced Edges postprocess candidates without changing topology.
+    Uses the current top Edit Poly only; no modifier creation, deletion, or undo block is used.
+    */
+    function inspectPostProcessCleanUpSliceVerts node angle_threshold:0.1 =
+    (
+        local candidate_vertices = #{}
+        local evaluated_mesh = undefined
+        local modifier = undefined
+        local failure = undefined
+
+
+        if node == undefined or not(isValidNode node) then return #(false, candidate_vertices)
+
+
+        try
+        (
+            modifier = ::WallFixer.getDebugTopologyModifier node
+            if modifier == undefined then throw "The selected wall has no top Edit Poly modifier for postprocess inspection."
+
+
+            select node
+            max modify mode
+            modPanel.setCurrentObject modifier
+            modifier.SetPrimaryNode node
+            modifier.useStackSelection = false
+
+
+            evaluated_mesh = snapshotAsMesh node
+            if evaluated_mesh == undefined then throw "Could not evaluate postprocess inspection mesh."
+            if getNumVerts evaluated_mesh != modifier.GetNumVertices node:node then
+            (
+                throw "Evaluated mesh vertex indices do not match Edit Poly vertex indices."
+            )
+
+
+            local border_vertices = #{}
+            local edge_count = modifier.GetNumEdges node:node
+            for edge_index = 1 to edge_count do
+            (
+                local face_a = modifier.GetEdgeFace edge_index 1 node:node
+                local face_b = modifier.GetEdgeFace edge_index 2 node:node
+                if (face_a == 0) != (face_b == 0) then
+                (
+                    local border_a = modifier.GetEdgeVertex edge_index 1 node:node
+                    local border_b = modifier.GetEdgeVertex edge_index 2 node:node
+                    if border_a > 0 then border_vertices[border_a] = true
+                    if border_b > 0 then border_vertices[border_b] = true
+                )
+            )
+
+
+            local base_vertex_count = polyop.getNumVerts node.baseObject
+            local vertex_count = modifier.GetNumVertices node:node
+            for vertex_index = (base_vertex_count + 1) to vertex_count do
+            (
+                if ::WallFixer.doesDebugModifierVertexExist node modifier vertex_index then
+                (
+                    local is_border_vertex = vertex_index <= border_vertices.count and border_vertices[vertex_index]
+                    local is_straight_two_visible = ::WallFixer.isPostProcessStraightTwoVisibleEdgeVertex \
+                        evaluated_mesh vertex_index angle_threshold:angle_threshold
+
+
+                    if not is_border_vertex and is_straight_two_visible then
+                    (
+                        candidate_vertices[vertex_index] = true
+                    )
+                )
+            )
+
+
+            free evaluated_mesh
+            evaluated_mesh = undefined
+
+
+            modifier.SetEPolySelLevel #Vertex
+            subObjectLevel = 1
+            modifier.SetSelection #Vertex #{} node:node
+            if candidate_vertices.numberSet > 0 then
+            (
+                modifier.Select #Vertex candidate_vertices node:node
+            )
+            update node
+            modifier.RefreshScreen()
+
+
+            local actual_selection = modifier.GetSelection #Vertex node:node
+            if actual_selection != candidate_vertices then
+            (
+                throw ("Could not select every Clean Up Sliced Edges postprocess candidate. Requested:" + (candidate_vertices as string) + " actual:" + (actual_selection as string))
+            )
+
+
+            last_slice_report = node.name + ": Clean Up Sliced Edges postprocess candidates:" + (candidate_vertices as string)
+            if not batch_quiet then format "Wall-Fixer Clean Up Sliced Edges Postprocess Inspect: node:% candidates:%\n" node.name candidate_vertices
+            completeRedraw()
+        )
+        catch
+        (
+            if evaluated_mesh != undefined then free evaluated_mesh
+            failure = getCurrentException()
+            last_slice_error = failure
+            last_slice_report = node.name + ": " + (failure as string)
+        )
+
+
+        #(failure == undefined, candidate_vertices)
+        -- return
+    ),
+
+
+    /*
+    Removes only newly created non-border vertices with exactly two visible straight edges in a dedicated Edit Poly modifier.
+    Base-object ids 1..baseVertCount are immutable anchors and are never postprocessed.
+    */
+    function postProcessCleanUpSliceVerts node position_tolerance:0.01 angle_threshold:0.1 =
+    (
+        local unresolved_vertices = #{}
+        local removed_vertices = #{}
+        local candidate_vertices = #{}
+        local candidate_positions = #()
+        local post_modifier = undefined
+        local evaluated_mesh = undefined
+        local failure = undefined
+
+
+        if node == undefined or not(isValidNode node) then return #(false, 0, 0, unresolved_vertices)
+
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then return #(false, 0, 0, unresolved_vertices)
+
+
+        try
+        (
+            post_modifier = Edit_Poly name:"WMC - CLEAN UP SLICED EDGES POSTPROCESS"
+            addModifier node post_modifier
+            update node
+
+
+            select node
+            max modify mode
+            modPanel.setCurrentObject post_modifier
+            post_modifier.SetPrimaryNode node
+            post_modifier.useStackSelection = false
+
+
+            evaluated_mesh = snapshotAsMesh node
+            if evaluated_mesh == undefined then throw "Could not evaluate postprocess mesh."
+            if getNumVerts evaluated_mesh != post_modifier.GetNumVertices node:node then
+            (
+                throw "Evaluated mesh vertex indices do not match Edit Poly vertex indices."
+            )
+
+
+            local border_vertices = #{}
+            local edge_count = post_modifier.GetNumEdges node:node
+            for edge_index = 1 to edge_count do
+            (
+                local face_a = post_modifier.GetEdgeFace edge_index 1 node:node
+                local face_b = post_modifier.GetEdgeFace edge_index 2 node:node
+                if (face_a == 0) != (face_b == 0) then
+                (
+                    local border_a = post_modifier.GetEdgeVertex edge_index 1 node:node
+                    local border_b = post_modifier.GetEdgeVertex edge_index 2 node:node
+                    if border_a > 0 then border_vertices[border_a] = true
+                    if border_b > 0 then border_vertices[border_b] = true
+                )
+            )
+
+
+            local base_vertex_count = polyop.getNumVerts base_obj
+            local vertex_count = post_modifier.GetNumVertices node:node
+            for vertex_index = (base_vertex_count + 1) to vertex_count do
+            (
+                if ::WallFixer.doesDebugModifierVertexExist node post_modifier vertex_index then
+                (
+                    local is_border_vertex = vertex_index <= border_vertices.count and border_vertices[vertex_index]
+                    local is_straight_two_visible = ::WallFixer.isPostProcessStraightTwoVisibleEdgeVertex \
+                        evaluated_mesh vertex_index angle_threshold:angle_threshold
+
+
+                    if not is_border_vertex and is_straight_two_visible then
+                    (
+                        local vertex_position = post_modifier.GetVertex vertex_index node:node
+                        if vertex_position != undefined then
+                        (
+                            candidate_vertices[vertex_index] = true
+                            append candidate_positions #(vertex_index, vertex_position)
+                        )
+                    )
+                )
+            )
+
+
+            free evaluated_mesh
+            evaluated_mesh = undefined
+
+
+            if not batch_quiet then format "Wall-Fixer Clean Up Sliced Edges Postprocess Candidates: node:% candidates:%\n" node.name candidate_vertices
+
+
+            if candidate_vertices.numberSet == 0 then
+            (
+                deleteModifier node post_modifier
+                post_modifier = undefined
+                update node
+                last_slice_report = node.name + ": Clean Up Sliced Edges postprocess found no non-border vertices with exactly two visible straight edges."
+                if not batch_quiet then format "Wall-Fixer Clean Up Sliced Edges Postprocess: node:% candidates:#{} removed:#{} unresolved:#{}\n" node.name
+                return #(true, 0, 0, unresolved_vertices)
+            )
+
+
+            for candidate_data in candidate_positions do
+            (
+                local original_vertex_index = candidate_data[1]
+                local saved_position = candidate_data[2]
+                local remove_result = ::WallFixer.removePostProcessStraightTwoVisibleEdgeVertex \
+                    node post_modifier original_vertex_index saved_position position_tolerance:position_tolerance angle_threshold:angle_threshold
+
+
+                if remove_result[1] then
+                (
+                    removed_vertices[original_vertex_index] = true
+                )
+                else
+                (
+                    unresolved_vertices[original_vertex_index] = true
+                )
+            )
+
+
+            if unresolved_vertices.numberSet > 0 then
+            (
+                throw ("Could not remove all Clean Up Sliced Edges postprocess vertices. Unresolved: " + (unresolved_vertices as string))
+            )
+
+
+            post_modifier.name = "WMC - CLEAN UP SLICED EDGES POSTPROCESS"
+            last_slice_report = node.name + ": Clean Up Sliced Edges postprocess removed:" + (removed_vertices.numberSet as string) + "."
+            if not batch_quiet then format "Wall-Fixer Clean Up Sliced Edges Postprocess: node:% candidates:% removed:% unresolved:% modifier:%\n" \
+                node.name candidate_vertices removed_vertices unresolved_vertices post_modifier.name
+            completeRedraw()
+        )
+        catch
+        (
+            if evaluated_mesh != undefined then free evaluated_mesh
+            if post_modifier != undefined then
+            (
+                try(deleteModifier node post_modifier)catch()
+                update node
+            )
+            failure = getCurrentException()
+            last_slice_error = failure
+            last_slice_report = node.name + ": " + (failure as string)
+        )
+
+
+        #(failure == undefined, candidate_vertices.numberSet, removed_vertices.numberSet, unresolved_vertices)
+        -- return
+    ),
+
+
+    /*
+    Captures the exact manual Clean Up Slice LMB candidates from the latest sliced-edge selection.
+    The original edge selection is restored so Clean Up Sliced Edges can run unchanged afterward.
+    */
+    function captureMassSliceCleanUpSliceData node =
+    (
+        local empty_vertices = #{}
+        local saved_positions = #()
+        if node == undefined or not(isValidNode node) then return #(false, empty_vertices, saved_positions)
+
+
+        local modifier = getDebugTopologyModifier node
+        if modifier == undefined then return #(false, empty_vertices, saved_positions)
+
+
+        local saved_report = last_slice_report
+        local saved_error = last_slice_error
+        local sliced_edges = modifier.GetSelection #Edge node:node
+        if sliced_edges == undefined or sliced_edges.numberSet == 0 then return #(false, empty_vertices, saved_positions)
+
+
+        local captured_vertices = #{}
+        local capture_ok = false
+        local capture_error = undefined
+
+
+        try
+        (
+            select node
+            max modify mode
+            modPanel.setCurrentObject modifier
+            modifier.SetPrimaryNode node
+            modifier.useStackSelection = false
+
+
+            if not ::WallFixer.debugSelectSlicedEdgeVertices() then throw last_slice_report
+            if not ::WallFixer.debugInspectCleanUpSlice() then throw last_slice_report
+
+
+            captured_vertices = modifier.GetSelection #Vertex node:node
+            for vertex_index in captured_vertices do
+            (
+                local vertex_position = modifier.GetVertex vertex_index node:node
+                if vertex_position != undefined then append saved_positions #(vertex_index, vertex_position)
+            )
+            capture_ok = true
+        )
+        catch
+        (
+            capture_error = getCurrentException()
+            capture_ok = false
+        )
+
+
+        try
+        (
+            modifier.SetEPolySelLevel #Edge
+            subObjectLevel = 2
+            modifier.SetSelection #Edge #{} node:node
+            if sliced_edges.numberSet > 0 then modifier.Select #Edge sliced_edges node:node
+        )
+        catch
+        (
+        )
+
+
+        last_slice_report = saved_report
+        last_slice_error = saved_error
+
+
+        if not batch_quiet then format "Wall-Fixer Clean Up Slice Capture: node:% edges:% candidates:% positions:% success:% error:%\n" node.name sliced_edges captured_vertices saved_positions.count capture_ok capture_error
+        #(capture_ok, captured_vertices, saved_positions)
+        -- return
+    ),
+
+
+    /*
+    Re-resolves captured Clean Up Slice verts after prior batch cleanup and removes them with the proven manual method.
+    Missing captured verts are treated as already removed by an earlier cleanup pass.
+    */
+    function cleanupCapturedMassSliceCleanUpSliceVerts node clean_up_slice_data position_tolerance:0.01 =
+    (
+        if node == undefined or not(isValidNode node) then return #(false, 0, 0)
+        if clean_up_slice_data == undefined or clean_up_slice_data.count < 3 then return #(false, 0, 0)
+
+
+        local modifier = getDebugTopologyModifier node
+        if modifier == undefined then return #(false, 0, clean_up_slice_data[2].numberSet)
+
+
+        local captured_vertices = clean_up_slice_data[2]
+        local saved_positions = clean_up_slice_data[3]
+        local resolved_vertices = #{}
+
+
+        for saved_data in saved_positions do
+        (
+            local saved_position = saved_data[2]
+            local current_vertex = ::WallFixer.findDebugLiveVertexByPosition node modifier saved_position tolerance:position_tolerance
+            if current_vertex > 0 then resolved_vertices[current_vertex] = true
+        )
+
+
+        if not batch_quiet then format "Wall-Fixer Clean Up Slice Resolve: node:% captured:% resolved:%\n" node.name captured_vertices resolved_vertices
+
+
+        if resolved_vertices.numberSet == 0 then
+        (
+            last_slice_report = node.name + ": captured Clean Up Slice verts were already removed by earlier cleanup."
+            return #(true, 0, captured_vertices.numberSet)
+        )
+
+
+        select node
+        max modify mode
+        modPanel.setCurrentObject modifier
+        modifier.SetPrimaryNode node
+        modifier.useStackSelection = false
+        modifier.SetEPolySelLevel #Vertex
+        subObjectLevel = 1
+        modifier.SetSelection #Vertex #{} node:node
+        local selected_ok = modifier.Select #Vertex resolved_vertices node:node
+        local actual_selection = modifier.GetSelection #Vertex node:node
+
+
+        if not selected_ok or actual_selection != resolved_vertices then
+        (
+            last_slice_report = node.name + ": could not restore captured Clean Up Slice vertex selection."
+            return #(false, resolved_vertices.numberSet, captured_vertices.numberSet)
+        )
+
+
+        local cleanup_ok = ::WallFixer.debugCleanUpSlice()
+        if not batch_quiet then format "Wall-Fixer Clean Up Slice Batch: node:% captured:% resolved:% success:% report:%\n" node.name captured_vertices resolved_vertices cleanup_ok last_slice_report
+        #(cleanup_ok, resolved_vertices.numberSet, captured_vertices.numberSet)
+        -- return
+    ),
+
+
+    function sliceSelection weld_vertices:false weld_threshold:1.0 cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 =
+    (
+        local selectedNodes = selection as array
+        local processed = 0
+        last_slice_report = ""
+        if selectedNodes.count == 0 then
+        (
+            last_slice_report = "Select at least one wall before running this action."
+            return false
+        )
+        undo "Wall-Fixer - Slice" on
+        (
+            for node in selectedNodes do
+            (
+                if processNode node cut_mode:cut_mode slice_plane_mode:slice_plane_mode angle_threshold:angle_threshold planar_tolerance:planar_tolerance then
+                (
+                    processed += 1
+                    last_slice_report += node.name + ": completed; " + (last_slice_count as string) + " slice operations.\n"
+                )
+                else last_slice_report += node.name + ": " + (last_slice_error as string) + "\n"
+            )
+        )
+        completeRedraw()
+        processed == selectedNodes.count
+    ),
+    function propagateAutomaticJunctionCuts node cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 =
+    (
+        if processNode node cut_mode:cut_mode slice_plane_mode:slice_plane_mode angle_threshold:angle_threshold planar_tolerance:planar_tolerance then last_slice_count else 0
+    ),
+    function propagateSelectionJunctionCuts weld_vertices:false weld_threshold:1.0 auto_smooth:false cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 =
+    (
+        local selectedNodes = selection as array
+        local processed = 0
+        last_slice_report = ""
+        if selectedNodes.count == 0 then
+        (
+            last_slice_report = "Select at least one wall before running this action."
+            return false
+        )
+        undo "Wall-Fixer - Fix N-gons" on
+        (
+            for node in selectedNodes do
+            (
+                if processNode node cut_mode:cut_mode slice_plane_mode:slice_plane_mode angle_threshold:angle_threshold planar_tolerance:planar_tolerance auto_smooth:auto_smooth then
+                (
+                    processed += 1
+                    last_slice_report += node.name + ": completed; " + (last_slice_count as string) + " slice operations.\n"
+                )
+                else last_slice_report += node.name + ": " + (last_slice_error as string) + "\n"
+            )
+        )
+        completeRedraw()
+        processed == selectedNodes.count
+    ),
+
+
+    /*
+    Returns open border edges from the current Edit Poly modifier or Editable Poly base object.
+    The current modifier is never replaced or collapsed.
+    */
+    function get90AngleOpenBorderEdges node source_kind source_ref =
+    (
+        local border_edges = #{}
+        if node == undefined or not(isValidNode node) then return border_edges
+        if source_ref == undefined then return border_edges
+
+
+        if source_kind == #editPoly then
+        (
+            local edge_count = 0
+            try(edge_count = source_ref.GetNumEdges node:node)catch(edge_count = 0)
+
+
+            for edge_index = 1 to edge_count do
+            (
+                local face_a = undefined
+                local face_b = undefined
+                try
+                (
+                    face_a = source_ref.GetEdgeFace edge_index 1 node:node
+                    face_b = source_ref.GetEdgeFace edge_index 2 node:node
+                )
+                catch
+                (
+                    face_a = undefined
+                    face_b = undefined
+                )
+
+
+                if face_a != undefined and face_b != undefined then
+                (
+                    if (face_a == 0) != (face_b == 0) then border_edges[edge_index] = true
+                )
+            )
+        )
+        else
+        (
+            try(border_edges = polyop.getOpenEdges source_ref)catch(border_edges = #{})
+        )
+
+
+        border_edges
+        -- return
+    ),
+
+
+    /*
+    Returns the two current border-neighbor vertices connected to one border vertex.
+    Both Editable Poly and the active Edit Poly modifier use their own current topology.
+    */
+    function get90AngleBorderNeighborVerts node source_kind source_ref border_edges vert_index =
+    (
+        local neighbor_verts = #()
+        if node == undefined or not(isValidNode node) then return neighbor_verts
+        if source_ref == undefined then return neighbor_verts
+
+
+        if source_kind == #editPoly then
+        (
+            local connected_edge_count = 0
+            try(connected_edge_count = source_ref.GetVertexEdgeCount vert_index node:node)catch(connected_edge_count = 0)
+
+
+            for edge_slot = 1 to connected_edge_count do
+            (
+                local edge_index = undefined
+                try(edge_index = source_ref.GetVertexEdge vert_index edge_slot node:node)catch(edge_index = undefined)
+
+
+                if edge_index != undefined and edge_index > 0 and edge_index <= border_edges.count and border_edges[edge_index] then
+                (
+                    local edge_a = source_ref.GetEdgeVertex edge_index 1 node:node
+                    local edge_b = source_ref.GetEdgeVertex edge_index 2 node:node
+                    local other_vert = if edge_a == vert_index then edge_b else if edge_b == vert_index then edge_a else 0
+                    if other_vert > 0 then appendUniqueInteger neighbor_verts other_vert
+                )
+            )
+        )
+        else
+        (
+            local connected_edges = (polyop.getEdgesUsingVert source_ref vert_index) * border_edges
+            for edge_index in connected_edges do
+            (
+                local edge_verts = polyop.getEdgeVerts source_ref edge_index
+                if edge_verts != undefined and edge_verts.count == 2 then
+                (
+                    local other_vert = if edge_verts[1] == vert_index then edge_verts[2] else if edge_verts[2] == vert_index then edge_verts[1] else 0
+                    if other_vert > 0 then appendUniqueInteger neighbor_verts other_vert
+                )
+            )
+        )
+
+
+        neighbor_verts
+        -- return
+    ),
+
+
+    /*
+    Returns one current vertex position in object space from either supported editing level.
+    */
+    function get90AngleVertexPosition node source_kind source_ref vert_index =
+    (
+        local position_value = undefined
+        try
+        (
+            position_value = if source_kind == #editPoly then source_ref.GetVertex vert_index node:node else polyop.getVert source_ref vert_index
+        )
+        catch
+        (
+            position_value = undefined
+        )
+        position_value
+        -- return
+    ),
+
+
+    /*
+    Returns the current vertex selection from either supported editing level.
+    */
+    function get90AngleVertexSelection node source_kind source_ref =
+    (
+        local selected_verts = #{}
+        try
+        (
+            selected_verts = if source_kind == #editPoly then source_ref.GetSelection #Vertex node:node else polyop.getVertSelection source_ref
+        )
+        catch
+        (
+            selected_verts = #{}
+        )
+        if selected_verts == undefined then selected_verts = #{}
+        copy selected_verts
+        -- return
+    ),
+
+
+    /*
+    Writes the current vertex selection without creating or collapsing modifiers.
+    */
+    function set90AngleVertexSelection node source_kind source_ref selected_verts =
+    (
+        if node == undefined or not(isValidNode node) then return false
+        if source_ref == undefined then return false
+
+
+        local success = true
+        try
+        (
+            if source_kind == #editPoly then
+            (
+                select node
+                max modify mode
+                modPanel.setCurrentObject source_ref
+                source_ref.SetPrimaryNode node
+                source_ref.useStackSelection = false
+                source_ref.SetEPolySelLevel #Vertex
+                subObjectLevel = 1
+                source_ref.SetSelection #Vertex selected_verts node:node
+            )
+            else
+            (
+                select node
+                max modify mode
+                modPanel.setCurrentObject source_ref
+                subObjectLevel = 1
+                polyop.setVertSelection source_ref selected_verts
+            )
+        )
+        catch
+        (
+            success = false
+        )
+
+
+        success
+        -- return
+    ),
+
+
+    /*
+    Measures the unsigned border angle at one vertex in world space.
+    The result is in degrees in the range 0..180.
+    */
+    function get90AngleAtBorderVert node source_kind source_ref border_edges vert_index =
+    (
+        local neighbor_verts = get90AngleBorderNeighborVerts node source_kind source_ref border_edges vert_index
+        if neighbor_verts.count != 2 then return undefined
+
+
+        local center_local = get90AngleVertexPosition node source_kind source_ref vert_index
+        local point_a_local = get90AngleVertexPosition node source_kind source_ref neighbor_verts[1]
+        local point_b_local = get90AngleVertexPosition node source_kind source_ref neighbor_verts[2]
+        if center_local == undefined or point_a_local == undefined or point_b_local == undefined then return undefined
+
+
+        local center_world = center_local * node.objectTransform
+        local point_a_world = point_a_local * node.objectTransform
+        local point_b_world = point_b_local * node.objectTransform
+        local dir_a = safeNormalize (point_a_world - center_world)
+        local dir_b = safeNormalize (point_b_world - center_world)
+        if dir_a == undefined or dir_b == undefined then return undefined
+
+
+        local edge_dot = amax -1.0 (amin 1.0 (dot dir_a dir_b))
+        acos edge_dot
+        -- return
+    ),
+
+
+    /*
+    Returns true for clean 90-degree corners and 180-degree straight border vertices.
+    Zero-degree foldbacks are intentionally rejected as invalid border geometry.
+    */
+    function isValid90BorderAngle angle_value angle_threshold:0.1 =
+    (
+        if angle_value == undefined then return false
+        local tolerance_value = amax 0.0 angle_threshold
+        local deviation_90 = abs(angle_value - 90.0)
+        local deviation_180 = abs(angle_value - 180.0)
+        (amin deviation_90 deviation_180) <= tolerance_value
+        -- return
+    ),
+
+
+    /*
+    Collects invalid open-border vertices from the current editing level.
+    Border junctions without exactly two border neighbors are invalid by definition.
+    */
+    function collectInvalid90BorderVerts node source_kind source_ref angle_threshold:0.1 =
+    (
+        local invalid_verts = #{}
+        local border_edges = get90AngleOpenBorderEdges node source_kind source_ref
+        local border_verts = #{}
+
+
+        if source_kind == #editPoly then
+        (
+            for edge_index in border_edges do
+            (
+                local edge_a = source_ref.GetEdgeVertex edge_index 1 node:node
+                local edge_b = source_ref.GetEdgeVertex edge_index 2 node:node
+                if edge_a != undefined and edge_a > 0 then border_verts[edge_a] = true
+                if edge_b != undefined and edge_b > 0 then border_verts[edge_b] = true
+            )
+        )
+        else
+        (
+            border_verts = polyop.getVertsUsingEdge source_ref border_edges
+        )
+
+
+        for vert_index in border_verts do
+        (
+            local angle_value = get90AngleAtBorderVert node source_kind source_ref border_edges vert_index
+            if not(isValid90BorderAngle angle_value angle_threshold:angle_threshold) then invalid_verts[vert_index] = true
+        )
+
+
+        invalid_verts
+        -- return
+    ),
+
+
+    /*
+    Selects every invalid 90/180-degree border vertex at the active editing level.
+    No topology or vertex positions are changed.
+    */
+    function selectInvalid90BorderVerts angle_threshold:0.1 =
+    (
+        local selected_nodes = selection as array
+        local active_edit_poly = undefined
+        local processed_nodes = 0
+        local total_invalid = 0
+        last_slice_report = ""
+
+
+        try
+        (
+            local current_object = modPanel.getCurrentObject()
+            if current_object != undefined and classOf current_object == Edit_Poly then active_edit_poly = current_object
+        )
+        catch
+        (
+            active_edit_poly = undefined
+        )
+
+
+        for node in selected_nodes do
+        (
+            local source_data = getDoubleFaceSource node active_edit_poly
+            if source_data != undefined then
+            (
+                local source_kind = source_data[1]
+                local source_ref = source_data[2]
+                local invalid_verts = collectInvalid90BorderVerts node source_kind source_ref angle_threshold:angle_threshold
+                if set90AngleVertexSelection node source_kind source_ref invalid_verts then
+                (
+                    processed_nodes += 1
+                    total_invalid += invalid_verts.numberSet
+                )
+                update node
+            )
+        )
+
+
+        if processed_nodes == 0 then
+        (
+            last_slice_report = "CHECK 90° ANGLES requires an Editable Poly base object or the current Edit Poly modifier."
+            return false
+        )
+
+
+        try
+        (
+            max modify mode
+            subObjectLevel = 1
+        )
+        catch()
+
+
+        last_slice_report = "CHECK 90° ANGLES: invalid border verts selected:" + (total_invalid as string) + "."
+        if not batch_quiet then format "%\n" last_slice_report
+        completeRedraw()
+        true
+        -- return
+    ),
+
+
+    /*
+    Calculates the corrected world position for one selected invalid border vertex.
+    90-degree corners snap to horizontal/vertical neighbor alignment; near-straight vertices project onto the neighbor line.
+    */
+    function get90AngleFixTarget node source_kind source_ref border_edges vert_index angle_threshold:0.1 =
+    (
+        local neighbor_verts = get90AngleBorderNeighborVerts node source_kind source_ref border_edges vert_index
+        if neighbor_verts.count != 2 then return undefined
+
+
+        local center_local = get90AngleVertexPosition node source_kind source_ref vert_index
+        local point_a_local = get90AngleVertexPosition node source_kind source_ref neighbor_verts[1]
+        local point_b_local = get90AngleVertexPosition node source_kind source_ref neighbor_verts[2]
+        if center_local == undefined or point_a_local == undefined or point_b_local == undefined then return undefined
+
+
+        local center_world = center_local * node.objectTransform
+        local point_a_world = point_a_local * node.objectTransform
+        local point_b_world = point_b_local * node.objectTransform
+        local dir_a = safeNormalize (point_a_world - center_world)
+        local dir_b = safeNormalize (point_b_world - center_world)
+        if dir_a == undefined or dir_b == undefined then return undefined
+
+
+        local edge_dot = amax -1.0 (amin 1.0 (dot dir_a dir_b))
+        local angle_value = acos edge_dot
+        if isValid90BorderAngle angle_value angle_threshold:angle_threshold then return center_world
+
+
+        local deviation_90 = abs(angle_value - 90.0)
+        local deviation_180 = abs(angle_value - 180.0)
+
+
+        if deviation_180 < deviation_90 then
+        (
+            local line_vector = point_b_world - point_a_world
+            local line_length_sq = dot line_vector line_vector
+            if line_length_sq <= epsilon then return undefined
+            local line_factor = dot (center_world - point_a_world) line_vector / line_length_sq
+            point_a_world + (line_vector * line_factor)
+        )
+        else
+        (
+            local world_up = [0.0,0.0,1.0]
+            local vertical_error_a = acos (amax 0.0 (amin 1.0 (abs(dot dir_a world_up))))
+            local vertical_error_b = acos (amax 0.0 (amin 1.0 (abs(dot dir_b world_up))))
+            local horizontal_error_a = abs(90.0 - vertical_error_a)
+            local horizontal_error_b = abs(90.0 - vertical_error_b)
+            local axis_a = if vertical_error_a <= horizontal_error_a then #vertical else #horizontal
+            local axis_b = if vertical_error_b <= horizontal_error_b then #vertical else #horizontal
+            local best_error_a = amin vertical_error_a horizontal_error_a
+            local best_error_b = amin vertical_error_b horizontal_error_b
+
+
+            if axis_a == axis_b then
+            (
+                if best_error_a <= best_error_b then
+                (
+                    axis_b = if axis_a == #vertical then #horizontal else #vertical
+                )
+                else
+                (
+                    axis_a = if axis_b == #vertical then #horizontal else #vertical
+                )
+            )
+
+
+            local vertical_neighbor = if axis_a == #vertical then point_a_world else point_b_world
+            local horizontal_neighbor = if axis_a == #horizontal then point_a_world else point_b_world
+            [vertical_neighbor.x, vertical_neighbor.y, horizontal_neighbor.z]
+        )
+        -- return
+    ),
+
+
+    /*
+    Moves one current vertex to a world-space target at the active editing level.
+    Edit Poly uses its native MoveSelection transform; Editable Poly writes the base vertex directly.
+    */
+    function move90AngleVertexToWorld node source_kind source_ref vert_index target_world =
+    (
+        if target_world == undefined then return false
+        local inverse_tm = inverse node.objectTransform
+        local target_local = target_world * inverse_tm
+
+
+        if source_kind == #editPoly then
+        (
+            local current_local = get90AngleVertexPosition node source_kind source_ref vert_index
+            if current_local == undefined then return false
+            local current_world = current_local * node.objectTransform
+            local move_delta = target_world - current_world
+            local single_selection = #{}
+            single_selection[vert_index] = true
+
+
+            try
+            (
+                select node
+                max modify mode
+                modPanel.setCurrentObject source_ref
+                source_ref.SetPrimaryNode node
+                source_ref.useStackSelection = false
+                source_ref.SetEPolySelLevel #Vertex
+                subObjectLevel = 1
+                source_ref.SetSelection #Vertex single_selection node:node
+                source_ref.MoveSelection move_delta
+                update node
+                true
+            )
+            catch
+            (
+                false
+            )
+        )
+        else
+        (
+            try
+            (
+                polyop.setVert source_ref #{vert_index} target_local
+                update node
+                true
+            )
+            catch
+            (
+                false
+            )
+        )
+        -- return
+    ),
+
+
+    /*
+    Corrects currently selected invalid border vertices at the active editing level.
+    The selected vertex moves; its two border-neighbor reference vertices never move.
+    */
+    function fixSelected90BorderVerts angle_threshold:0.1 =
+    (
+        local selected_nodes = selection as array
+        local active_edit_poly = undefined
+        local processed_nodes = 0
+        local total_fixed = 0
+        last_slice_report = ""
+
+
+        try
+        (
+            local current_object = modPanel.getCurrentObject()
+            if current_object != undefined and classOf current_object == Edit_Poly then active_edit_poly = current_object
+        )
+        catch
+        (
+            active_edit_poly = undefined
+        )
+
+
+        undo "Wall-Fixer - Fix 90 Angles" on
+        (
+            for node in selected_nodes do
+            (
+                local source_data = getDoubleFaceSource node active_edit_poly
+                if source_data != undefined then
+                (
+                    local source_kind = source_data[1]
+                    local source_ref = source_data[2]
+                    local selected_verts = get90AngleVertexSelection node source_kind source_ref
+                    local original_selection = copy selected_verts
+                    local border_edges = get90AngleOpenBorderEdges node source_kind source_ref
+
+
+                    processed_nodes += 1
+                    for vert_index in selected_verts do
+                    (
+                        local angle_value = get90AngleAtBorderVert node source_kind source_ref border_edges vert_index
+                        if not(isValid90BorderAngle angle_value angle_threshold:angle_threshold) then
+                        (
+                            local target_world = get90AngleFixTarget node source_kind source_ref border_edges vert_index angle_threshold:angle_threshold
+                            if target_world != undefined and move90AngleVertexToWorld node source_kind source_ref vert_index target_world then
+                            (
+                                total_fixed += 1
+                            )
+                        )
+                    )
+
+
+                    set90AngleVertexSelection node source_kind source_ref original_selection
+                    update node
+                )
+            )
+        )
+
+
+        if processed_nodes == 0 then
+        (
+            last_slice_report = "CHECK 90° ANGLES RMB requires an Editable Poly base object or the current Edit Poly modifier."
+            return false
+        )
+
+
+        last_slice_report = "CHECK 90° ANGLES: corrected selected border verts:" + (total_fixed as string) + "."
+        if not batch_quiet then format "%\n" last_slice_report
+        completeRedraw()
+        true
+        -- return
+    ),
+
+
+    /*
+    CHECK 90° ANGLES entry point.
+    LMB detects invalid border vertices; RMB corrects the currently selected invalid vertices.
+    */
+    function check90Angles angle_threshold:0.1 fix_selected:false =
+    (
+        local threshold_value = amax 0.0 (amin 45.0 angle_threshold)
+        if fix_selected then fixSelected90BorderVerts angle_threshold:threshold_value
+        else selectInvalid90BorderVerts angle_threshold:threshold_value
+        -- return
+    ),
+
+
+    /*
+    Returns all open border edges of the Editable Poly surface.
+    Outer wall borders and inner opening borders are both included.
+    */
+    function getOpenBorderEdges node =
+    (
+        if not (isSupportedNode node) then
+        (
+            #{}
+        )
+        else
+        (
+            polyop.getOpenEdges node.baseObject
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns neighboring border vertices connected to one vertex by open border edges.
+    A clean closed border loop should provide exactly two neighbors for each border vertex.
+    */
+    function getOpenBorderNeighborVerts base_obj border_edges vert_index =
+    (
+        connected_edges = (polyop.getEdgesUsingVert base_obj vert_index) * border_edges
+        neighbor_verts = #()
+
+
+        for edge_index in connected_edges do
+        (
+            edge_verts = (polyop.getVertsUsingEdge base_obj edge_index) as array
+
+
+            if edge_verts.count == 2 then
+            (
+                if edge_verts[1] == vert_index then
+                (
+                    appendUniqueInteger neighbor_verts edge_verts[2]
+                )
+                else if edge_verts[2] == vert_index then
+                (
+                    appendUniqueInteger neighbor_verts edge_verts[1]
+                )
+            )
+        )
+
+
+        neighbor_verts
+        -- return
+    ),
+
+
+    /*
+    Tests whether one border vertex is orthogonal or straight within the supplied angle tolerance.
+    Unsigned edge angle treats both 90-degree and 270-degree corners as the same orthogonal 90-degree condition.
+    */
+    function isValidBorderAngle node vert_index border_edges angle_threshold:axis_angle_threshold =
+    (
+        base_obj = node.baseObject
+        neighbor_verts = getOpenBorderNeighborVerts base_obj border_edges vert_index
+        valid_angle = false
+
+
+        if neighbor_verts.count == 2 then
+        (
+            center_world = (polyop.getVert base_obj vert_index) * node.objectTransform
+            point_a_world = (polyop.getVert base_obj neighbor_verts[1]) * node.objectTransform
+            point_b_world = (polyop.getVert base_obj neighbor_verts[2]) * node.objectTransform
+            dir_a = safeNormalize (point_a_world - center_world)
+            dir_b = safeNormalize (point_b_world - center_world)
+
+
+            if (dir_a != undefined) and (dir_b != undefined) then
+            (
+                edge_dot = dot dir_a dir_b
+                orthogonal_limit = sin angle_threshold
+                straight_limit = -(cos angle_threshold)
+
+
+                valid_angle = ((abs edge_dot) <= orthogonal_limit) or (edge_dot <= straight_limit)
+            )
+        )
+
+
+        valid_angle
+        -- return
+    ),
+
+
+    /*
+    Collects border vertices whose two border edges are neither orthogonal nor straight.
+    Invalid border junctions that do not have exactly two border neighbors are included as problematic.
+    */
+    function collectNonOrthoBorderVerts node angle_threshold:axis_angle_threshold =
+    (
+        bad_verts = #{}
+
+
+        if isSupportedNode node then
+        (
+            base_obj = node.baseObject
+            border_edges = getOpenBorderEdges node
+            border_verts = polyop.getVertsUsingEdge base_obj border_edges
+
+
+            for vert_index in border_verts do
+            (
+                if not (isValidBorderAngle node vert_index border_edges angle_threshold:angle_threshold) then
+                (
+                    bad_verts[vert_index] = true
+                )
+            )
+        )
+
+
+        bad_verts
+        -- return
+    ),
+
+
+    /*
+    Selects non-orthogonal and non-straight border vertices on all selected supported wall objects.
+    The dedicated Border Angle Threshold value is used as tolerance around 90/270 and 180 degrees.
+    */
+    function selectNonOrthoBorderVerts angle_threshold:axis_angle_threshold =
+    (
+        selected_nodes = selection as array
+        supported_nodes = #()
+        total_bad_verts = 0
+
+
+        for node in selected_nodes do
+        (
+            if isSupportedNode node then
+            (
+                append supported_nodes node
+                bad_verts = collectNonOrthoBorderVerts node angle_threshold:angle_threshold
+                polyop.setVertSelection node.baseObject bad_verts
+                update node
+                total_bad_verts += bad_verts.numberSet
+
+
+            )
+        )
+
+
+        if supported_nodes.count == 0 then
+        (
+            messageBox "Wall-Fixer: Select at least one supported Editable Poly wall object."
+            false
+        )
+        else
+        (
+            try
+            (
+                max modify mode
+                subObjectLevel = 1
+            )
+            catch
+            (
+            )
+
+
+            if not batch_quiet then format "TEST ANGLES: % selected\n" total_bad_verts
+            completeRedraw()
+            true
+        )
+        -- return
+    ),
+
+
+
+
+    /*
+    Collects vertices that have another vertex on the same object within the requested position threshold.
+    Both vertices of every near-coincident pair are returned; geometry is not modified.
+    */
+    function collectDoubleVerts node position_threshold:1.0 =
+    (
+        double_verts = #{}
+
+
+        if isSupportedNode node then
+        (
+            base_obj = node.baseObject
+            vert_count = polyop.getNumVerts base_obj
+            threshold_value = if position_threshold < 0.0 then 0.0 else position_threshold
+            threshold_sq = threshold_value * threshold_value
+
+
+            if vert_count > 1 then
+            (
+                for vert_a = 1 to (vert_count - 1) do
+                (
+                    pos_a = polyop.getVert base_obj vert_a
+
+
+                    for vert_b = (vert_a + 1) to vert_count do
+                    (
+                        pos_b = polyop.getVert base_obj vert_b
+                        delta_pos = pos_b - pos_a
+
+
+                        if (abs delta_pos.x <= threshold_value) and \
+                           (abs delta_pos.y <= threshold_value) and \
+                           (abs delta_pos.z <= threshold_value) then
+                        (
+                            if (dot delta_pos delta_pos) <= threshold_sq then
+                            (
+                                double_verts[vert_a] = true
+                                double_verts[vert_b] = true
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+
+        double_verts
+        -- return
+    ),
+
+
+    /*
+    Selects all near-coincident vertices on the currently selected supported wall objects.
+    The position threshold is measured in 3ds Max system units and the operation is selection-only.
+    */
+    function selectDoubleVerts position_threshold:1.0 =
+    (
+        selected_nodes = selection as array
+        supported_nodes = #()
+        total_double_verts = 0
+
+
+        for node in selected_nodes do
+        (
+            if isSupportedNode node then
+            (
+                append supported_nodes node
+                double_verts = collectDoubleVerts node position_threshold:position_threshold
+                polyop.setVertSelection node.baseObject double_verts
+                update node
+                total_double_verts += double_verts.numberSet
+
+
+            )
+        )
+
+
+        if supported_nodes.count == 0 then
+        (
+            messageBox "Wall-Fixer: Select at least one supported Editable Poly wall object."
+            false
+        )
+        else
+        (
+            try
+            (
+                max modify mode
+                subObjectLevel = 1
+            )
+            catch
+            (
+            )
+
+
+            if not batch_quiet then format "FIND DOUBLE VERTS: % selected\n" total_double_verts
+            completeRedraw()
+            true
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns the closest point on the line segment between two points.
+    This is used when straightening a border vertex to a 180 degree configuration.
+    */
+    function closestPointOnSegment point_value segment_a segment_b =
+    (
+        segment_vector = segment_b - segment_a
+        segment_length_sq = dot segment_vector segment_vector
+
+
+        if segment_length_sq <= (epsilon * epsilon) then
+        (
+            segment_a
+        )
+        else
+        (
+            segment_t = (dot (point_value - segment_a) segment_vector) / segment_length_sq
+            if segment_t < 0.0 then
+            (
+                segment_t = 0.0
+            )
+            else if segment_t > 1.0 then
+            (
+                segment_t = 1.0
+            )
+            segment_a + (segment_vector * segment_t)
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns the nearest point that makes the angle A-C-B exactly 90 degrees.
+    The solution lies on the circle whose diameter is AB and stays in the original corner plane.
+    */
+    function closestRightAnglePoint point_value point_a point_b =
+    (
+        midpoint_value = (point_a + point_b) * 0.5
+        diameter_vector = point_b - point_a
+        radius_value = (length diameter_vector) * 0.5
+        axis_u = safeNormalize diameter_vector
+
+
+        if (axis_u == undefined) or (radius_value <= epsilon) then
+        (
+            undefined
+        )
+        else
+        (
+            offset_value = point_value - midpoint_value
+            offset_parallel = axis_u * (dot offset_value axis_u)
+            offset_perpendicular = offset_value - offset_parallel
+            axis_v = safeNormalize offset_perpendicular
+
+
+            if axis_v == undefined then
+            (
+                undefined
+            )
+            else
+            (
+                coord_x = dot offset_value axis_u
+                coord_y = dot offset_value axis_v
+                radial_length = sqrt ((coord_x * coord_x) + (coord_y * coord_y))
+
+
+                if radial_length <= epsilon then
+                (
+                    midpoint_value + (axis_v * radius_value)
+                )
+                else
+                (
+                    radial_scale = radius_value / radial_length
+                    midpoint_value + (axis_u * (coord_x * radial_scale)) + (axis_v * (coord_y * radial_scale))
+                )
+            )
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns a stable horizontal world-space axis for a wall edge from its adjacent face normals.
+    The axis lies in the wall plane and is perpendicular to world Z, preserving the face plane while moving horizontally.
+    */
+    function getWallHorizontalAxis node edge_index =
+    (
+        base_obj = node.baseObject
+        edge_faces = polyop.getFacesUsingEdge base_obj edge_index
+        normal_sum = [0.0,0.0,0.0]
+        valid_normal_count = 0
+
+
+        for face_index in edge_faces do
+        (
+            face_verts = polyop.getFaceVerts base_obj face_index
+
+
+            if face_verts.count >= 3 then
+            (
+                point_a = (polyop.getVert base_obj face_verts[1]) * node.objectTransform
+                found_normal = undefined
+
+
+                for second_index = 2 to (face_verts.count - 1) while found_normal == undefined do
+                (
+                    point_b = (polyop.getVert base_obj face_verts[second_index]) * node.objectTransform
+
+
+                    for third_index = (second_index + 1) to face_verts.count while found_normal == undefined do
+                    (
+                        point_c = (polyop.getVert base_obj face_verts[third_index]) * node.objectTransform
+                        candidate_normal = cross (point_b - point_a) (point_c - point_a)
+                        candidate_normal = safeNormalize candidate_normal
+
+
+                        if candidate_normal != undefined then
+                        (
+                            found_normal = candidate_normal
+                        )
+                    )
+                )
+
+
+                if found_normal != undefined then
+                (
+                    if (valid_normal_count > 0) and ((dot normal_sum found_normal) < 0.0) then
+                    (
+                        found_normal = -found_normal
+                    )
+
+
+                    normal_sum += found_normal
+                    valid_normal_count += 1
+                )
+            )
+        )
+
+
+        if valid_normal_count == 0 then
+        (
+            undefined
+        )
+        else
+        (
+            wall_normal = safeNormalize normal_sum
+
+
+            if wall_normal == undefined then
+            (
+                undefined
+            )
+            else
+            (
+                horizontal_axis = safeNormalize (cross [0.0,0.0,1.0] wall_normal)
+
+
+                if horizontal_axis == undefined then
+                (
+                    undefined
+                )
+                else
+                (
+                    /* Keep axis sign deterministic so lower/higher horizontal position does not depend on face winding. */
+                    if (abs horizontal_axis.x) >= (abs horizontal_axis.y) then
+                    (
+                        if horizontal_axis.x < 0.0 then
+                        (
+                            horizontal_axis = -horizontal_axis
+                        )
+                    )
+                    else
+                    (
+                        if horizontal_axis.y < 0.0 then
+                        (
+                            horizontal_axis = -horizontal_axis
+                        )
+                    )
+
+
+                    horizontal_axis
+                )
+            )
+        )
+        -- return
+    ),
+
+
+    /*
+    Aligns all currently selected vertices, regardless of whether they share edges.
+    Default mode fixes vertical position in world Z; CTRL mode fixes horizontal position in the wall plane.
+    LMB uses the lower/left extreme and RMB uses the upper/right extreme in the active mode.
+    */
+    function fixNonOrthoBorderVerts use_high_z:false horizontal_mode:false =
+    (
+        selected_nodes = selection as array
+        supported_nodes = #()
+        total_fixed_verts = 0
+
+
+        undo "Wall-Fixer - Fix Border Angles" on
+        (
+            for node in selected_nodes do
+            (
+                if isSupportedNode node then
+                (
+                    append supported_nodes node
+                    base_obj = node.baseObject
+                    selected_verts = polyop.getVertSelection base_obj
+                    selected_indices = selected_verts as array
+
+
+                    if selected_indices.count > 1 then
+                    (
+                        inverse_tm = inverse node.objectTransform
+                        fixed_verts = 0
+
+
+                        if horizontal_mode then
+                        (
+                            summed_normal = [0.0,0.0,0.0]
+                            used_faces = #{}
+
+
+                            for vert_index in selected_indices do
+                            (
+                                vert_faces = polyop.getFacesUsingVert base_obj #{vert_index}
+                                used_faces += vert_faces
+                            )
+
+
+                            for face_index in used_faces do
+                            (
+                                face_normal_local = polyop.getFaceNormal base_obj face_index
+                                face_normal_world = normalize (face_normal_local * node.objectTransform)
+
+
+                                if (length face_normal_world) > epsilon then
+                                (
+                                    if (length summed_normal) > epsilon then
+                                    (
+                                        if (dot summed_normal face_normal_world) < 0.0 then
+                                        (
+                                            face_normal_world = -face_normal_world
+                                        )
+                                    )
+
+
+                                    summed_normal += face_normal_world
+                                )
+                            )
+
+
+                            if (length summed_normal) > epsilon then
+                            (
+                                wall_normal = normalize summed_normal
+                                horizontal_axis = cross [0.0,0.0,1.0] wall_normal
+
+
+                                if (length horizontal_axis) > epsilon then
+                                (
+                                    horizontal_axis = normalize horizontal_axis
+
+
+                                    if (abs horizontal_axis.x) >= (abs horizontal_axis.y) then
+                                    (
+                                        if horizontal_axis.x < 0.0 then
+                                        (
+                                            horizontal_axis = -horizontal_axis
+                                        )
+                                    )
+                                    else
+                                    (
+                                        if horizontal_axis.y < 0.0 then
+                                        (
+                                            horizontal_axis = -horizontal_axis
+                                        )
+                                    )
+
+
+                                    target_position = undefined
+
+
+                                    for vert_index in selected_indices do
+                                    (
+                                        point_world = (polyop.getVert base_obj vert_index) * node.objectTransform
+                                        current_position = dot point_world horizontal_axis
+
+
+                                        if target_position == undefined then
+                                        (
+                                            target_position = current_position
+                                        )
+                                        else
+                                        (
+                                            if use_high_z then
+                                            (
+                                                if current_position > target_position then
+                                                (
+                                                    target_position = current_position
+                                                )
+                                            )
+                                            else
+                                            (
+                                                if current_position < target_position then
+                                                (
+                                                    target_position = current_position
+                                                )
+                                            )
+                                        )
+                                    )
+
+
+                                    if target_position != undefined then
+                                    (
+                                        for vert_index in selected_indices do
+                                        (
+                                            point_world = (polyop.getVert base_obj vert_index) * node.objectTransform
+                                            current_position = dot point_world horizontal_axis
+                                            position_delta = target_position - current_position
+
+
+                                            if (abs position_delta) > epsilon then
+                                            (
+                                                moving_world = point_world + (horizontal_axis * position_delta)
+                                                moving_local = moving_world * inverse_tm
+                                                polyop.setVert base_obj #{vert_index} moving_local
+                                                fixed_verts += 1
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                        else
+                        (
+                            target_z = undefined
+
+
+                            for vert_index in selected_indices do
+                            (
+                                point_world = (polyop.getVert base_obj vert_index) * node.objectTransform
+
+
+                                if target_z == undefined then
+                                (
+                                    target_z = point_world.z
+                                )
+                                else
+                                (
+                                    if use_high_z then
+                                    (
+                                        if point_world.z > target_z then
+                                        (
+                                            target_z = point_world.z
+                                        )
+                                    )
+                                    else
+                                    (
+                                        if point_world.z < target_z then
+                                        (
+                                            target_z = point_world.z
+                                        )
+                                    )
+                                )
+                            )
+
+
+                            if target_z != undefined then
+                            (
+                                for vert_index in selected_indices do
+                                (
+                                    point_world = (polyop.getVert base_obj vert_index) * node.objectTransform
+
+
+                                    if (abs (point_world.z - target_z)) > epsilon then
+                                    (
+                                        point_world.z = target_z
+                                        moving_local = point_world * inverse_tm
+                                        polyop.setVert base_obj #{vert_index} moving_local
+                                        fixed_verts += 1
+                                    )
+                                )
+                            )
+                        )
+
+
+                        update node
+                        total_fixed_verts += fixed_verts
+                    )
+                )
+            )
+        )
+
+
+        if supported_nodes.count == 0 then
+        (
+            messageBox "Wall-Fixer: Select at least one supported Editable Poly wall object."
+            false
+        )
+        else
+        (
+            if horizontal_mode then
+            (
+                if use_high_z then
+                (
+                    if not batch_quiet then format "FIX ANGLES: Horizontal - Align RIGHT\n"
+                )
+                else
+                (
+                    if not batch_quiet then format "FIX ANGLES: Horizontal - Align LEFT\n"
+                )
+            )
+            else
+            (
+                if use_high_z then
+                (
+                    if not batch_quiet then format "FIX ANGLES: Align TOP\n"
+                )
+                else
+                (
+                    if not batch_quiet then format "FIX ANGLES: Align BOTTOM\n"
+                )
+            )
+
+
+            completeRedraw()
+            true
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns the direct edge shared by two vertices, or undefined when no such edge exists.
+    The search uses only native Editable Poly edge/vertex adjacency.
+    */
+    function getEdgeBetweenVerts base_obj vert_a vert_b =
+    (
+        result_edge = undefined
+        edges_a = polyop.getEdgesUsingVert base_obj #{vert_a}
+        edges_b = polyop.getEdgesUsingVert base_obj #{vert_b}
+        shared_edges = edges_a * edges_b
+
+
+        if shared_edges.numberSet > 0 then
+        (
+            for edge_index in shared_edges while result_edge == undefined do
+            (
+                edge_verts = polyop.getEdgeVerts base_obj edge_index
+                if edge_verts.count == 2 then
+                (
+                    if ((edge_verts[1] == vert_a) and (edge_verts[2] == vert_b)) or \
+                       ((edge_verts[1] == vert_b) and (edge_verts[2] == vert_a)) then
+                    (
+                        result_edge = edge_index
+                    )
+                )
+            )
+        )
+
+
+        result_edge
+        -- return
+    ),
+
+
+    /*
+    Finds the closest pair of distinct vertices within the requested threshold.
+    Re-running this after every collapse avoids using stale vertex indices.
+    */
+    function findClosestDoubleVertPair node position_threshold:1.0 blocked_pairs:undefined =
+    (
+        result_pair = undefined
+
+
+        if isSupportedNode node then
+        (
+            base_obj = node.baseObject
+            vert_count = polyop.getNumVerts base_obj
+            threshold_value = if position_threshold < 0.0 then 0.0 else position_threshold
+            threshold_sq = threshold_value * threshold_value
+            best_distance_sq = undefined
+
+
+            if vert_count > 1 then
+            (
+                for vert_a = 1 to (vert_count - 1) do
+                (
+                    pos_a = polyop.getVert base_obj vert_a
+
+
+                    for vert_b = (vert_a + 1) to vert_count do
+                    (
+                        pos_b = polyop.getVert base_obj vert_b
+                        delta_pos = pos_b - pos_a
+
+
+                        if (abs delta_pos.x <= threshold_value) and \
+                           (abs delta_pos.y <= threshold_value) and \
+                           (abs delta_pos.z <= threshold_value) then
+                        (
+                            distance_sq = dot delta_pos delta_pos
+                            if distance_sq <= threshold_sq then
+                            (
+                                pair_key = (vert_a as string) + ":" + (vert_b as string)
+                                pair_blocked = if blocked_pairs == undefined then false else ((findItem blocked_pairs pair_key) > 0)
+
+
+                                if not pair_blocked then
+                                (
+                                    if (best_distance_sq == undefined) or (distance_sq < best_distance_sq) then
+                                    (
+                                        best_distance_sq = distance_sq
+                                        result_pair = #(vert_a, vert_b)
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+
+        result_pair
+        -- return
+    ),
+
+
+    /*
+    Connects each near-coincident vertex pair with an edge when necessary, then collapses that edge.
+    The closest pair is processed first and topology is re-read after every successful collapse.
+    */
+    function fixDoubleVerts position_threshold:1.0 =
+    (
+        selected_nodes = selection as array
+        supported_nodes = #()
+        total_collapsed_pairs = 0
+        total_failed_pairs = 0
+
+
+        undo "Wall-Fixer - Fix Double Verts" on
+        (
+            for node in selected_nodes do
+            (
+                if isSupportedNode node then
+                (
+                    append supported_nodes node
+                    base_obj = node.baseObject
+                    collapsed_pairs = 0
+                    failed_pairs = 0
+                    blocked_pairs = #()
+                    keep_processing = true
+
+
+                    while keep_processing do
+                    (
+                        pair_value = findClosestDoubleVertPair node position_threshold:position_threshold blocked_pairs:blocked_pairs
+
+
+                        if pair_value == undefined then
+                        (
+                            keep_processing = false
+                        )
+                        else
+                        (
+                            vert_a = pair_value[1]
+                            vert_b = pair_value[2]
+                            pair_key = (vert_a as string) + ":" + (vert_b as string)
+                            collapse_edge = getEdgeBetweenVerts base_obj vert_a vert_b
+
+
+                            if collapse_edge == undefined then
+                            (
+                                try
+                                (
+                                    collapse_edge = polyop.createEdge base_obj vert_a vert_b
+                                )
+                                catch
+                                (
+                                    collapse_edge = undefined
+                                )
+                            )
+
+
+                            if collapse_edge != undefined then
+                            (
+                                collapse_result = false
+                                try
+                                (
+                                    polyop.collapseEdges base_obj #{collapse_edge}
+                                    collapse_result = true
+                                )
+                                catch
+                                (
+                                    collapse_result = false
+                                )
+
+
+                                if collapse_result then
+                                (
+                                    collapsed_pairs += 1
+                                    blocked_pairs = #()
+                                    update node
+                                )
+                                else
+                                (
+                                    append blocked_pairs pair_key
+                                    failed_pairs += 1
+                                )
+                            )
+                            else
+                            (
+                                append blocked_pairs pair_key
+                                failed_pairs += 1
+                            )
+                        )
+                    )
+
+
+                    remaining_double_verts = collectDoubleVerts node position_threshold:position_threshold
+                    polyop.setVertSelection base_obj remaining_double_verts
+                    update node
+
+
+                    total_collapsed_pairs += collapsed_pairs
+                    total_failed_pairs += failed_pairs
+                )
+            )
+        )
+
+
+        if supported_nodes.count == 0 then
+        (
+            messageBox "Wall-Fixer: Select at least one supported Editable Poly wall object."
+            false
+        )
+        else
+        (
+            if total_failed_pairs > 0 then
+            (
+                if not batch_quiet then format "FIX VERTS: % fixed | % unresolved\n" total_collapsed_pairs total_failed_pairs
+            )
+            else
+            (
+                if not batch_quiet then format "FIX VERTS: % fixed\n" total_collapsed_pairs
+            )
+            completeRedraw()
+            true
+        )
+        -- return
+    ),
+
+
+    /*
+    Initializes the Wall-Fixer struct instance.
+    Persistent settings are loaded by the rollout after creation.
+    */
+    on create do
+    (
+    )
+)
+
+
+WallFixer = WallFixer_v()
+
+
+
 
 /*
-Load dependency order:
-1. Wall-Fixer Pipeline
-2. Wall-Fixer Core
-3. Straight Edge Fixer logic
-4. Wall-Fixer UI (includes Inner-Outer Wall Finder)
+Straight Edge Fixer 0.2
+Detects repeated horizontal edge levels and aligns nearby horizontal edges to them.
 */
-fileIn pipeline_file
-fileIn core_file
-fileIn straight_edge_file
+
+
+global WallFixerVersion
+global WallFixerRollout
+global wall_fixer_version_system
+global wall_fixer_version_epoch
+global straight_edge_fixer_file_version = "0.2"
+global straight_edge_fixer_tool_version = 0.2
+
+
+/*
+Registers this file's shared Wall-Fixer tool version.
+Accepts legacy string or numeric global versions; the highest loaded version wins.
+*/
+if wall_fixer_version_system != 1 then
+(
+    wall_fixer_version_system = 1
+)
+
+
+if wall_fixer_version_epoch != 2 then
+(
+    wall_fixer_version_epoch = 2
+    WallFixerVersion = undefined
+)
+
+
+straight_edge_fixer_current_tool_version_number = undefined
+
+
+if WallFixerVersion != undefined then
+(
+    try
+    (
+        straight_edge_fixer_current_tool_version_number = WallFixerVersion as float
+    )
+    catch
+    (
+        straight_edge_fixer_current_tool_version_number = undefined
+    )
+)
+
+
+if straight_edge_fixer_current_tool_version_number == undefined then
+(
+    WallFixerVersion = straight_edge_fixer_tool_version
+)
+else if straight_edge_fixer_tool_version > straight_edge_fixer_current_tool_version_number then
+(
+    WallFixerVersion = straight_edge_fixer_tool_version
+)
+
+
+if WallFixerRollout != undefined then
+(
+    try
+    (
+        WallFixerRollout.title = ("Wall-Fixer " + (WallFixerVersion as string))
+    )
+    catch
+    (
+    )
+)
+
+
+
+
+global straightEdgeFixerCompareData
+global straightEdgeFixerCompareLevelData
+global StraightEdgeFixer_v
+global StraightEdgeFixer
+global straightEdgeFixer_ui
+
+
+/*
+Compares edge records by their center world Z.
+Used by qsort while detecting Z levels.
+*/
+function straightEdgeFixerCompareData item_a item_b =
+(
+    if (item_a[4] < item_b[4]) then
+    (
+        -1
+    )
+    else if (item_a[4] > item_b[4]) then
+    (
+        1
+    )
+    else
+    (
+        0
+    )
+) -- return
+
+
+/*
+Compares detected level records from bottom to top.
+Used by qsort before reporting and alignment.
+*/
+function straightEdgeFixerCompareLevelData level_a level_b =
+(
+    if (level_a[4] < level_b[4]) then
+    (
+        -1
+    )
+    else if (level_a[4] > level_b[4]) then
+    (
+        1
+    )
+    else
+    (
+        0
+    )
+) -- return
+
+
+struct StraightEdgeFixer_v
+(
+    version = "0.2",
+    ini_file = ((getDir #plugcfg) + "\\Straight-Edge-Fixer.ini"),
+    legacy_ini_file = ((getDir #plugcfg) + "\\Aling-Edges-To-Levels.ini"),
+
+
+    /*
+    Counts enabled bits in a BitArray.
+    Used for edge and vertex report counts.
+    */
+    function countBits bit_set =
+    (
+        bit_count = 0
+
+
+        for bit_id in bit_set do
+        (
+            bit_count += 1
+        )
+
+
+        bit_count
+        -- return
+    ),
+
+
+
+
+    /*
+    Migrates settings from the previous Aling-Edges-To-Levels INI file once.
+    Existing Straight Edge Fixer settings are never overwritten.
+    */
+    function migrateLegacyIni =
+    (
+        if ((doesFileExist ini_file) == false) and (doesFileExist legacy_ini_file) then
+        (
+            level_tolerance = getIniSetting legacy_ini_file "Settings" "LevelTolerance"
+            min_level_edges = getIniSetting legacy_ini_file "Settings" "MinLevelEdges"
+            search_in_z = getIniSetting legacy_ini_file "Settings" "SearchInZ"
+            angle_threshold = getIniSetting legacy_ini_file "Settings" "AngleThreshold"
+            quiet_mode = getIniSetting legacy_ini_file "Settings" "QuietMode"
+            dialog_x = getIniSetting legacy_ini_file "Dialog" "X"
+            dialog_y = getIniSetting legacy_ini_file "Dialog" "Y"
+
+
+            if (level_tolerance != "") then setIniSetting ini_file "Settings" "LevelTolerance" level_tolerance
+            if (min_level_edges != "") then setIniSetting ini_file "Settings" "MinLevelEdges" min_level_edges
+            if (search_in_z != "") then setIniSetting ini_file "Settings" "SearchInZ" search_in_z
+            if (angle_threshold != "") then setIniSetting ini_file "Settings" "AngleThreshold" angle_threshold
+            if (quiet_mode != "") then setIniSetting ini_file "Settings" "QuietMode" quiet_mode
+            if (dialog_x != "") then setIniSetting ini_file "Dialog" "X" dialog_x
+            if (dialog_y != "") then setIniSetting ini_file "Dialog" "Y" dialog_y
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Safely converts an INI string to a floating-point value.
+    Returns default_value when the stored value is missing or invalid.
+    */
+    function getIniFloat section_name key_name default_value =
+    (
+        result_value = default_value
+        stored_value = getIniSetting ini_file section_name key_name
+
+
+        if ((stored_value != undefined) and (stored_value != "")) then
+        (
+            try
+            (
+                result_value = stored_value as float
+            )
+            catch
+            (
+                result_value = default_value
+            )
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Safely converts an INI string to an integer value.
+    Returns default_value when the stored value is missing or invalid.
+    */
+    function getIniInteger section_name key_name default_value =
+    (
+        result_value = default_value
+        stored_value = getIniSetting ini_file section_name key_name
+
+
+        if ((stored_value != undefined) and (stored_value != "")) then
+        (
+            try
+            (
+                result_value = stored_value as integer
+            )
+            catch
+            (
+                result_value = default_value
+            )
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Reads a persisted boolean value.
+    Missing values use the supplied default.
+    */
+    function getIniBoolean section_name key_name default_value =
+    (
+        result_value = default_value
+        stored_value = getIniSetting ini_file section_name key_name
+
+
+        if (stored_value == "1") then
+        (
+            result_value = true
+        )
+        else if (stored_value == "0") then
+        (
+            result_value = false
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Loads tool settings from the INI file.
+    Returns #(level_tolerance, min_level_edges, search_in_z, angle_threshold, quiet_mode).
+    */
+    function loadSettings =
+    (
+        level_tolerance = getIniFloat "Settings" "LevelTolerance" 0.01
+        min_level_edges = getIniInteger "Settings" "MinLevelEdges" 3
+        search_in_z = getIniFloat "Settings" "SearchInZ" 10.0
+        angle_threshold = getIniFloat "Settings" "AngleThreshold" 45.0
+        quiet_mode = getIniBoolean "Settings" "QuietMode" false
+
+
+        if (level_tolerance <= 0.0) then
+        (
+            level_tolerance = 0.01
+        )
+
+
+        if (min_level_edges < 1) then
+        (
+            min_level_edges = 3
+        )
+
+
+        if (search_in_z < 0.0) then
+        (
+            search_in_z = 10.0
+        )
+
+
+        if (angle_threshold < 0.0) then
+        (
+            angle_threshold = 0.0
+        )
+        else if (angle_threshold > 45.0) then
+        (
+            angle_threshold = 45.0
+        )
+
+
+        #(level_tolerance, min_level_edges, search_in_z, angle_threshold, quiet_mode)
+        -- return
+    ),
+
+
+    /*
+    Saves current tool settings to the INI file.
+    Called whenever a UI value changes and before an operation starts.
+    */
+    function saveSettings level_tolerance min_level_edges search_in_z angle_threshold quiet_mode =
+    (
+        setIniSetting ini_file "Settings" "LevelTolerance" (level_tolerance as string)
+        setIniSetting ini_file "Settings" "MinLevelEdges" (min_level_edges as string)
+        setIniSetting ini_file "Settings" "SearchInZ" (search_in_z as string)
+        setIniSetting ini_file "Settings" "AngleThreshold" (angle_threshold as string)
+        setIniSetting ini_file "Settings" "QuietMode" (if quiet_mode then "1" else "0")
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Loads the saved dialog screen position.
+    Returns a Point2 used directly by createDialog.
+    */
+    function loadDialogPosition =
+    (
+        position_x = getIniInteger "Dialog" "X" 100
+        position_y = getIniInteger "Dialog" "Y" 100
+
+
+        [position_x, position_y]
+        -- return
+    ),
+
+
+    /*
+    Saves the dialog screen position.
+    The position is stored independently from tool settings.
+    */
+    function saveDialogPosition dialog_position =
+    (
+        if (dialog_position != undefined) then
+        (
+            setIniSetting ini_file "Dialog" "X" (dialog_position.x as string)
+            setIniSetting ini_file "Dialog" "Y" (dialog_position.y as string)
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Finds an existing top Edit Poly modifier.
+    Returns undefined when the current top modifier is not Edit Poly.
+    */
+    function getTopEditPoly node =
+    (
+        edit_poly = undefined
+
+
+        if (node.modifiers.count > 0) then
+        (
+            top_modifier = node.modifiers[1]
+
+
+            if (classOf top_modifier == Edit_Poly) then
+            (
+                edit_poly = top_modifier
+            )
+        )
+
+
+        edit_poly
+        -- return
+    ),
+
+
+    /*
+    Returns true when a modifier instance belongs to the supplied node stack.
+    Uses modPanel.getModifierIndex so instanced modifiers are handled correctly.
+    */
+    function modifierBelongsToNode node modifier_value =
+    (
+        result_value = false
+
+
+        if ((isValidNode node) and (modifier_value != undefined)) then
+        (
+            try
+            (
+                result_value = ((modPanel.getModifierIndex node modifier_value) != undefined)
+            )
+            catch
+            (
+                result_value = false
+            )
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Returns the currently active Edit Poly modifier when it belongs to this node.
+    Undefined is returned when the Modify panel is closed or another stack item is active.
+    */
+    function getActiveEditPoly node =
+    (
+        edit_poly = undefined
+        current_object = undefined
+
+
+        try
+        (
+            current_object = modPanel.getCurrentObject()
+        )
+        catch
+        (
+            current_object = undefined
+        )
+
+
+        if ((current_object != undefined) and
+            (classOf current_object == Edit_Poly) and
+            (modifierBelongsToNode node current_object)) then
+        (
+            edit_poly = current_object
+        )
+
+
+        edit_poly
+        -- return
+    ),
+
+
+    /*
+    Finds the first Edit Poly modifier with an exact case-insensitive name.
+    Search order follows the modifier stack from top to bottom.
+    */
+    function findNamedEditPoly node modifier_name =
+    (
+        edit_poly = undefined
+        requested_name = toUpper modifier_name
+
+
+        for modifier_index = 1 to node.modifiers.count while (edit_poly == undefined) do
+        (
+            modifier_value = node.modifiers[modifier_index]
+
+
+            if ((classOf modifier_value == Edit_Poly) and
+                ((toUpper modifier_value.name) == requested_name)) then
+            (
+                edit_poly = modifier_value
+            )
+        )
+
+
+        edit_poly
+        -- return
+    ),
+
+
+    /*
+    Resolves a writable Editable Poly or Edit Poly source without creating duplicates.
+    Priority:
+    1. Active SLICE HORIZONTAL Edit Poly.
+    2. Top SLICE HORIZONTAL Edit Poly.
+    3. Any current top Edit Poly.
+    4. Existing STRAIGHT EDGE FIXER Edit Poly anywhere in the stack.
+    5. Editable Poly base object when no modifiers exist.
+    6. Add one STRAIGHT EDGE FIXER Edit Poly only when no reusable source exists.
+    */
+    function getGeometryAdapter node =
+    (
+        adapter = undefined
+        active_edit_poly = getActiveEditPoly node
+        top_edit_poly = getTopEditPoly node
+        slice_horizontal = findNamedEditPoly node "SLICE HORIZONTAL"
+        existing_fixer = findNamedEditPoly node "STRAIGHT EDGE FIXER"
+
+
+        if ((active_edit_poly != undefined) and
+            ((toUpper active_edit_poly.name) == "SLICE HORIZONTAL")) then
+        (
+            adapter = #(#edit_poly, active_edit_poly, false)
+        )
+        else if ((top_edit_poly != undefined) and
+                 ((toUpper top_edit_poly.name) == "SLICE HORIZONTAL")) then
+        (
+            adapter = #(#edit_poly, top_edit_poly, false)
+        )
+        else if (top_edit_poly != undefined) then
+        (
+            adapter = #(#edit_poly, top_edit_poly, false)
+        )
+        else if (existing_fixer != undefined) then
+        (
+            adapter = #(#edit_poly, existing_fixer, false)
+        )
+        else if ((node.modifiers.count == 0) and (classOf node.baseObject == Editable_Poly)) then
+        (
+            adapter = #(#editable_poly, node.baseObject, false)
+        )
+        else
+        (
+            new_edit_poly = Edit_Poly()
+            new_edit_poly.name = "STRAIGHT EDGE FIXER"
+            addModifier node new_edit_poly
+            adapter = #(#edit_poly, new_edit_poly, true)
+        )
+
+
+        adapter
+        -- return
+    ),
+
+
+    /*
+    Returns the number of edges exposed by the current geometry adapter.
+    Supports Editable Poly and Edit Poly.
+    */
+    function getEdgeCount node adapter =
+    (
+        edge_count = 0
+
+
+        if (adapter[1] == #editable_poly) then
+        (
+            edge_count = polyop.getNumEdges adapter[2]
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            edge_count = EditPolyMod.GetNumEdges adapter[2] node:node
+        )
+
+
+        edge_count
+        -- return
+    ),
+
+
+    /*
+    Returns the two vertex IDs used by one edge.
+    Supports Editable Poly and Edit Poly.
+    */
+    function getEdgeVertIds node adapter edge_id =
+    (
+        edge_verts = #()
+
+
+        if (adapter[1] == #editable_poly) then
+        (
+            edge_verts = polyop.getEdgeVerts adapter[2] edge_id
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            vert_a = EditPolyMod.GetEdgeVertex adapter[2] edge_id 1 node:node
+            vert_b = EditPolyMod.GetEdgeVertex adapter[2] edge_id 2 node:node
+            edge_verts = #(vert_a, vert_b)
+        )
+
+
+        edge_verts
+        -- return
+    ),
+
+
+
+
+    /*
+    Returns true only when the current poly edge is visible.
+    Invisible triangulation edges are ignored by direction checks and edge-level analysis.
+    */
+    function isEdgeVisible node adapter edge_id =
+    (
+        result_value = false
+
+
+        try
+        (
+            if (adapter[1] == #editable_poly) then
+            (
+                result_value = polyop.getEdgeVis adapter[2] edge_id
+            )
+            else if (adapter[1] == #edit_poly) then
+            (
+                result_value = polyop.getEdgeVis node edge_id
+            )
+        )
+        catch
+        (
+            /*
+            Fallback for a top Edit Poly over an Editable Poly base object.
+            Use this only when the evaluated-node query is unavailable.
+            */
+            try
+            (
+                if ((classOf node.baseObject == Editable_Poly) and (edge_id <= polyop.getNumEdges node.baseObject)) then
+                (
+                    result_value = polyop.getEdgeVis node.baseObject edge_id
+                )
+                else
+                (
+                    result_value = false
+                )
+            )
+            catch
+            (
+                result_value = false
+            )
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Returns one vertex position in object-local coordinates.
+    Supports Editable Poly and Edit Poly.
+    */
+    function getVertexPosition node adapter vert_id =
+    (
+        vertex_position = [0,0,0]
+
+
+        if (adapter[1] == #editable_poly) then
+        (
+            vertex_position = polyop.getVert adapter[2] vert_id
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            vertex_position = EditPolyMod.GetVertex adapter[2] vert_id node:node
+        )
+
+
+        vertex_position
+        -- return
+    ),
+
+
+    /*
+    Returns one vertex position in world coordinates.
+    The node object transform is applied to the current geometry position.
+    */
+    function getVertexWorldPosition node adapter vert_id =
+    (
+        local_position = getVertexPosition node adapter vert_id
+        world_position = local_position * node.objectTransform
+
+
+        world_position
+        -- return
+    ),
+
+
+
+
+    /*
+    Returns true when one visible poly edge is an open border edge.
+    Border topology is read from the current Editable Poly or evaluated Edit Poly result.
+    */
+    function isBorderEdge node adapter edge_id =
+    (
+        result_value = false
+
+
+        if (isEdgeVisible node adapter edge_id) then
+        (
+            try
+            (
+                if (adapter[1] == #editable_poly) then
+                (
+                    edge_faces = polyop.getFacesUsingEdge adapter[2] edge_id
+                )
+                else
+                (
+                    edge_faces = polyop.getFacesUsingEdge node edge_id
+                )
+
+
+                result_value = (edge_faces.numberSet == 1)
+            )
+            catch
+            (
+                result_value = false
+            )
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Collects all visible open border edges.
+    Invisible triangulation edges never participate in Border Check.
+    */
+    function getVisibleBorderEdges node adapter =
+    (
+        border_edges = #{}
+        edge_count = getEdgeCount node adapter
+
+
+        for edge_id = 1 to edge_count do
+        (
+            if (isBorderEdge node adapter edge_id) then
+            (
+                border_edges[edge_id] = true
+            )
+        )
+
+
+        border_edges
+        -- return
+    ),
+
+
+    /*
+    Returns true when two local XY coordinates match inside tolerance.
+    Local Z is intentionally ignored because it represents wall height.
+    */
+    function localXYMatches point_a point_b tolerance =
+    (
+        ((abs (point_a.x - point_b.x)) <= tolerance) and
+        ((abs (point_a.y - point_b.y)) <= tolerance)
+        -- return
+    ),
+
+
+    /*
+    Returns true when one border edge follows one local XY column.
+    Both endpoints must share the same local X and Y inside tolerance.
+    */
+    function isLocalVerticalBorderEdge node adapter edge_id tolerance =
+    (
+        result_value = false
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexPosition node adapter edge_verts[1]
+            point_b = getVertexPosition node adapter edge_verts[2]
+            result_value = localXYMatches point_a point_b tolerance
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Tests whether two one-dimensional Z intervals overlap or touch.
+    Tolerance allows tiny coordinate errors around the shared height.
+    */
+    function zRangesOverlapOrTouch min_a max_a min_b max_b tolerance =
+    (
+        ((max_a + tolerance) >= min_b) and ((max_b + tolerance) >= min_a)
+        -- return
+    ),
+
+
+    /*
+    Returns true when two border edges are separate IDs on the same local XY column
+    and their local Z ranges overlap or touch without sharing a welded vertex.
+    */
+    function borderEdgesFormUnweldedColumn node adapter edge_a edge_b tolerance =
+    (
+        result_value = false
+        edge_a_verts = getEdgeVertIds node adapter edge_a
+        edge_b_verts = getEdgeVertIds node adapter edge_b
+
+
+        if ((edge_a_verts.count == 2) and (edge_b_verts.count == 2)) then
+        (
+            shared_vertex =
+                (edge_a_verts[1] == edge_b_verts[1]) or
+                (edge_a_verts[1] == edge_b_verts[2]) or
+                (edge_a_verts[2] == edge_b_verts[1]) or
+                (edge_a_verts[2] == edge_b_verts[2])
+
+
+            if (not shared_vertex) then
+            (
+                if ((isLocalVerticalBorderEdge node adapter edge_a tolerance) and
+                    (isLocalVerticalBorderEdge node adapter edge_b tolerance)) then
+                (
+                    edge_a_point = getVertexPosition node adapter edge_a_verts[1]
+                    edge_b_point = getVertexPosition node adapter edge_b_verts[1]
+
+
+                    if (localXYMatches edge_a_point edge_b_point tolerance) then
+                    (
+                        edge_a_point_2 = getVertexPosition node adapter edge_a_verts[2]
+                        edge_b_point_2 = getVertexPosition node adapter edge_b_verts[2]
+
+
+                        min_a = amin edge_a_point.z edge_a_point_2.z
+                        max_a = amax edge_a_point.z edge_a_point_2.z
+                        min_b = amin edge_b_point.z edge_b_point_2.z
+                        max_b = amax edge_b_point.z edge_b_point_2.z
+
+
+                        result_value = zRangesOverlapOrTouch min_a max_a min_b max_b tolerance
+                    )
+                )
+            )
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Finds visible border edges that look like an unwelded vertical seam.
+    Both members of every matching edge pair are selected.
+    */
+    function findUnweldedBorderEdges node adapter border_edges tolerance =
+    (
+        invalid_edges = #{}
+        border_edge_array = for edge_id in border_edges collect edge_id
+
+
+        if (border_edge_array.count > 1) then
+        (
+            for edge_index_a = 1 to (border_edge_array.count - 1) do
+            (
+                edge_a = border_edge_array[edge_index_a]
+
+
+                for edge_index_b = (edge_index_a + 1) to border_edge_array.count do
+                (
+                    edge_b = border_edge_array[edge_index_b]
+
+
+                    if (borderEdgesFormUnweldedColumn node adapter edge_a edge_b tolerance) then
+                    (
+                        invalid_edges[edge_a] = true
+                        invalid_edges[edge_b] = true
+                    )
+                )
+            )
+        )
+
+
+        invalid_edges
+        -- return
+    ),
+
+
+    /*
+    Returns all visible border edges using one vertex.
+    Used to walk ordered border loops.
+    */
+    function getBorderEdgesAtVertex node adapter border_edges vert_id =
+    (
+        result_edges = #()
+
+
+        for edge_id in border_edges do
+        (
+            edge_verts = getEdgeVertIds node adapter edge_id
+
+
+            if (edge_verts.count == 2) then
+            (
+                if ((edge_verts[1] == vert_id) or (edge_verts[2] == vert_id)) then
+                (
+                    append result_edges edge_id
+                )
+            )
+        )
+
+
+        result_edges
+        -- return
+    ),
+
+
+    /*
+    Returns the opposite vertex of an edge.
+    Zero is returned when the supplied vertex is not part of that edge.
+    */
+    function getOtherEdgeVertex node adapter edge_id vert_id =
+    (
+        other_vert = 0
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+
+        if (edge_verts.count == 2) then
+        (
+            if (edge_verts[1] == vert_id) then
+            (
+                other_vert = edge_verts[2]
+            )
+            else if (edge_verts[2] == vert_id) then
+            (
+                other_vert = edge_verts[1]
+            )
+        )
+
+
+        other_vert
+        -- return
+    ),
+
+
+    /*
+    Walks one visible border chain from a seed edge.
+    Returns #(ordered_vertices, ordered_edges, is_closed).
+    */
+    function traceBorderLoop node adapter border_edges seed_edge =
+    (
+        ordered_vertices = #()
+        ordered_edges = #()
+        closed_loop = false
+        seed_verts = getEdgeVertIds node adapter seed_edge
+
+
+        if (seed_verts.count == 2) then
+        (
+            start_vert = seed_verts[1]
+            current_vert = seed_verts[2]
+            current_edge = seed_edge
+
+
+            append ordered_vertices start_vert
+            append ordered_vertices current_vert
+            append ordered_edges current_edge
+
+
+            continue_walk = true
+            safety_count = 0
+            max_steps = border_edges.numberSet + 2
+
+
+            while (continue_walk and (safety_count < max_steps)) do
+            (
+                safety_count += 1
+                incident_edges = getBorderEdgesAtVertex node adapter border_edges current_vert
+                next_edge = 0
+
+
+                for candidate_edge in incident_edges while (next_edge == 0) do
+                (
+                    if (candidate_edge != current_edge) then
+                    (
+                        next_edge = candidate_edge
+                    )
+                )
+
+
+                if (next_edge == 0) then
+                (
+                    continue_walk = false
+                )
+                else
+                (
+                    next_vert = getOtherEdgeVertex node adapter next_edge current_vert
+
+
+                    if (next_vert == 0) then
+                    (
+                        continue_walk = false
+                    )
+                    else if (next_vert == start_vert) then
+                    (
+                        append ordered_edges next_edge
+                        closed_loop = true
+                        continue_walk = false
+                    )
+                    else if ((findItem ordered_vertices next_vert) > 0) then
+                    (
+                        continue_walk = false
+                    )
+                    else
+                    (
+                        append ordered_edges next_edge
+                        append ordered_vertices next_vert
+                        current_edge = next_edge
+                        current_vert = next_vert
+                    )
+                )
+            )
+        )
+
+
+        #(ordered_vertices, ordered_edges, closed_loop)
+        -- return
+    ),
+
+
+    /*
+    Calculates a Newell normal from an ordered local-space border loop.
+    The normal is used only to distinguish convex and reflex turns.
+    */
+    function getBorderLoopNormal node adapter ordered_vertices =
+    (
+        normal_value = [0,0,0]
+        vert_count = ordered_vertices.count
+
+
+        if (vert_count >= 3) then
+        (
+            for vert_index = 1 to vert_count do
+            (
+                next_index = if (vert_index == vert_count) then 1 else (vert_index + 1)
+                point_a = getVertexPosition node adapter ordered_vertices[vert_index]
+                point_b = getVertexPosition node adapter ordered_vertices[next_index]
+
+
+                normal_value.x += (point_a.y - point_b.y) * (point_a.z + point_b.z)
+                normal_value.y += (point_a.z - point_b.z) * (point_a.x + point_b.x)
+                normal_value.z += (point_a.x - point_b.x) * (point_a.y + point_b.y)
+            )
+        )
+
+
+        if ((length normal_value) > 0.0000001) then
+        (
+            normal_value = normalize normal_value
+        )
+
+
+        normal_value
+        -- return
+    ),
+
+
+    /*
+    Finds border edges touching reflex border corners with interior angle above 180 degrees.
+    Only closed visible border loops with an unambiguous two-edge border chain are tested.
+    */
+    function findReflexBorderEdges node adapter border_edges =
+    (
+        invalid_edges = #{}
+        remaining_edges = copy border_edges
+
+
+        while (remaining_edges.numberSet > 0) do
+        (
+            seed_edge = 0
+
+
+            for edge_id in remaining_edges while (seed_edge == 0) do
+            (
+                seed_edge = edge_id
+            )
+
+
+            if (seed_edge > 0) then
+            (
+                loop_data = traceBorderLoop node adapter border_edges seed_edge
+                ordered_vertices = loop_data[1]
+                ordered_edges = loop_data[2]
+                closed_loop = loop_data[3]
+
+
+                for walked_edge in ordered_edges do
+                (
+                    remaining_edges[walked_edge] = false
+                )
+
+
+                if (closed_loop and (ordered_vertices.count >= 3) and
+                    (ordered_edges.count == ordered_vertices.count)) then
+                (
+                    loop_normal = getBorderLoopNormal node adapter ordered_vertices
+
+
+                    if ((length loop_normal) > 0.0000001) then
+                    (
+                        vert_count = ordered_vertices.count
+
+
+                        for vert_index = 1 to vert_count do
+                        (
+                            previous_index = if (vert_index == 1) then vert_count else (vert_index - 1)
+                            next_index = if (vert_index == vert_count) then 1 else (vert_index + 1)
+
+
+                            previous_point = getVertexPosition node adapter ordered_vertices[previous_index]
+                            current_point = getVertexPosition node adapter ordered_vertices[vert_index]
+                            next_point = getVertexPosition node adapter ordered_vertices[next_index]
+
+
+                            vector_to_previous = previous_point - current_point
+                            vector_to_next = next_point - current_point
+
+
+                            previous_length = length vector_to_previous
+                            next_length = length vector_to_next
+
+
+                            if ((previous_length > 0.0000001) and
+                                (next_length > 0.0000001)) then
+                            (
+                                previous_direction = vector_to_previous / previous_length
+                                next_direction = vector_to_next / next_length
+                                direction_dot = dot previous_direction next_direction
+                                direction_dot = amax -1.0 (amin 1.0 direction_dot)
+
+
+                                turn_cross = cross vector_to_previous vector_to_next
+                                signed_turn = dot turn_cross loop_normal
+
+
+                                /*
+                                Standard reflex corner:
+                                With Newell normal built from the same loop order,
+                                negative = convex turn and positive = reflex turn.
+                                */
+                                is_reflex_corner = (signed_turn > 0.0000001)
+
+
+                                /*
+                                360-degree backtrack:
+                                Both neighboring vertices lie in almost the same direction
+                                from the current border vertex. The border walks out and back
+                                on itself. The two remote vertices do NOT need to share position.
+                                */
+                                is_backtrack_360 = (direction_dot >= 0.9999)
+
+
+                                if (is_reflex_corner or is_backtrack_360) then
+                                (
+                                    previous_edge_index = if (vert_index == 1) then ordered_edges.count else (vert_index - 1)
+                                    next_edge_index = vert_index
+
+
+                                    invalid_edges[ordered_edges[previous_edge_index]] = true
+                                    invalid_edges[ordered_edges[next_edge_index]] = true
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+
+        invalid_edges
+        -- return
+    ),
+
+
+    /*
+    Checks visible open borders for unwelded local-Z seams and reflex corners.
+    The resulting invalid border edges are selected in Edge sub-object mode.
+    */
+    function checkBorders tolerance =
+    (
+        selected_nodes = selection as array
+        total_invalid_edges = 0
+        total_unwelded_edges = 0
+        total_reflex_edges = 0
+        processed_count = 0
+
+
+        if (selected_nodes.count == 0) then
+        (
+            messageBox "Select at least one geometry object." title:"Straight Edge Fixer"
+        )
+        else
+        (
+            for node in selected_nodes do
+            (
+                if (isValidNode node and (superClassOf node == GeometryClass)) then
+                (
+                    processed_count += 1
+                    adapter = getGeometryAdapter node
+                    border_edges = getVisibleBorderEdges node adapter
+                    unwelded_edges = findUnweldedBorderEdges node adapter border_edges tolerance
+                    reflex_edges = findReflexBorderEdges node adapter border_edges
+                    invalid_edges = copy unwelded_edges
+                    invalid_edges += reflex_edges
+
+
+                    setEdgeSelection node adapter invalid_edges
+
+
+                    total_unwelded_edges += countBits unwelded_edges
+                    total_reflex_edges += countBits reflex_edges
+                    total_invalid_edges += countBits invalid_edges
+                )
+            )
+
+
+            if (processed_count > 0) then
+            (
+                setCommandPanelTaskMode mode:#modify
+                subObjectLevel = 2
+                completeRedraw()
+
+
+                format "Border Check: selected % invalid border edge(s). Unwelded/overlapping: %, reflex >180 deg: %.\n" total_invalid_edges total_unwelded_edges total_reflex_edges
+            )
+        )
+
+
+        total_invalid_edges
+        -- return
+    ),
+
+
+    /*
+    Returns true when an edge is horizontal within tolerance.
+    Horizontal means endpoint world-Z difference does not exceed tolerance.
+    */
+    function isHorizontalEdge node adapter edge_id tolerance =
+    (
+        result_value = false
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexWorldPosition node adapter edge_verts[1]
+            point_b = getVertexWorldPosition node adapter edge_verts[2]
+            result_value = ((abs (point_a.z - point_b.z)) <= tolerance)
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Returns true when an edge is vertical within tolerance.
+    Vertical means endpoint world-X and world-Y differences are within tolerance.
+    */
+    function isVerticalEdge node adapter edge_id tolerance =
+    (
+        result_value = false
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexWorldPosition node adapter edge_verts[1]
+            point_b = getVertexWorldPosition node adapter edge_verts[2]
+
+
+            result_value =
+                ((abs (point_a.x - point_b.x)) <= tolerance) and
+                ((abs (point_a.y - point_b.y)) <= tolerance)
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+
+
+    /*
+    Returns the edge angle from the horizontal world plane in degrees.
+    Zero degrees is horizontal and ninety degrees is vertical.
+    */
+    function getEdgeAngleFromHorizontal node adapter edge_id =
+    (
+        angle_value = undefined
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexWorldPosition node adapter edge_verts[1]
+            point_b = getVertexWorldPosition node adapter edge_verts[2]
+            edge_vector = point_b - point_a
+            horizontal_length = sqrt ((edge_vector.x * edge_vector.x) + (edge_vector.y * edge_vector.y))
+            vertical_length = abs edge_vector.z
+
+
+            if ((horizontal_length > 0.0000001) or (vertical_length > 0.0000001)) then
+            (
+                angle_value = atan2 vertical_length horizontal_length
+            )
+        )
+
+
+        angle_value
+        -- return
+    ),
+
+
+    /*
+    Returns true when a non-horizontal edge is still close enough to horizontal to be checked.
+    Opposite vertical-like edges are ignored.
+    */
+    function isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold =
+    (
+        result_value = false
+
+
+        if (not (isHorizontalEdge node adapter edge_id tolerance)) then
+        (
+            angle_value = getEdgeAngleFromHorizontal node adapter edge_id
+
+
+            if (angle_value != undefined) then
+            (
+                result_value = (angle_value <= angle_threshold)
+            )
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Returns true when a non-vertical edge is still close enough to vertical to be checked.
+    Opposite horizontal-like edges are ignored.
+    */
+    function isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold =
+    (
+        result_value = false
+
+
+        if (not (isVerticalEdge node adapter edge_id tolerance)) then
+        (
+            angle_from_horizontal = getEdgeAngleFromHorizontal node adapter edge_id
+
+
+            if (angle_from_horizontal != undefined) then
+            (
+                angle_from_vertical = 90.0 - angle_from_horizontal
+                result_value = (angle_from_vertical <= angle_threshold)
+            )
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Selects an edge BitArray on the current geometry source.
+    The tool switches the modifier or object to Edge sub-object level.
+    */
+    function setEdgeSelection node adapter edge_selection =
+    (
+        if (adapter[1] == #editable_poly) then
+        (
+            polyop.setEdgeSelection adapter[2] edge_selection
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            EditPolyMod.SetEPolySelLevel adapter[2] #Edge
+            EditPolyMod.SetSelection adapter[2] #Edge edge_selection node:node
+        )
+
+
+        true
+        -- return
+    ),
+
+
+
+
+    /*
+    Returns the current edge selection from Editable Poly or Edit Poly.
+    Used by RMB straightening, which works on selected edges only.
+    */
+    function getEdgeSelection node adapter =
+    (
+        edge_selection = #{}
+
+
+        if (adapter[1] == #editable_poly) then
+        (
+            edge_selection = polyop.getEdgeSelection adapter[2]
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            edge_selection = EditPolyMod.GetSelection adapter[2] #Edge node:node
+        )
+
+
+        edge_selection
+        -- return
+    ),
+
+
+    /*
+    Sets vertex selection on Editable Poly or Edit Poly.
+    Used to expose vertices from edges which cannot be straightened.
+    */
+    function setVertexSelection node adapter vertex_selection =
+    (
+        if (adapter[1] == #editable_poly) then
+        (
+            polyop.setVertSelection adapter[2] vertex_selection
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            EditPolyMod.SetEPolySelLevel adapter[2] #Vertex
+            EditPolyMod.SetSelection adapter[2] #Vertex vertex_selection node:node
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns the world-space center of one edge.
+    Undefined is returned when the edge does not contain two valid vertices.
+    */
+    function getEdgeCenterWorld node adapter edge_id =
+    (
+        center_position = undefined
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexWorldPosition node adapter edge_verts[1]
+            point_b = getVertexWorldPosition node adapter edge_verts[2]
+            center_position = (point_a + point_b) * 0.5
+        )
+
+
+        center_position
+        -- return
+    ),
+
+
+    /*
+    Returns a normalized world-space edge direction.
+    Undefined is returned for a zero-length edge.
+    */
+    function getEdgeDirectionWorld node adapter edge_id =
+    (
+        direction_value = undefined
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexWorldPosition node adapter edge_verts[1]
+            point_b = getVertexWorldPosition node adapter edge_verts[2]
+            edge_vector = point_b - point_a
+
+
+            if ((length edge_vector) > 0.0000001) then
+            (
+                direction_value = normalize edge_vector
+            )
+        )
+
+
+        direction_value
+        -- return
+    ),
+
+
+    /*
+    Returns the unsigned parallel angle between two edges in degrees.
+    Opposite directions are treated as the same baseline direction.
+    */
+    function getParallelAngle node adapter edge_a edge_b =
+    (
+        angle_value = 180.0
+        direction_a = getEdgeDirectionWorld node adapter edge_a
+        direction_b = getEdgeDirectionWorld node adapter edge_b
+
+
+        if ((direction_a != undefined) and (direction_b != undefined)) then
+        (
+            dot_value = abs (dot direction_a direction_b)
+            dot_value = amax 0.0 (amin 1.0 dot_value)
+            angle_value = acos dot_value
+        )
+
+
+        angle_value
+        -- return
+    ),
+
+
+    /*
+    Returns a common vertex ID shared by two edges.
+    Zero means the edges are not direct neighbors.
+    */
+    function getSharedVertexId node adapter edge_a edge_b =
+    (
+        shared_vertex = 0
+        edge_a_verts = getEdgeVertIds node adapter edge_a
+        edge_b_verts = getEdgeVertIds node adapter edge_b
+
+
+        if ((edge_a_verts.count == 2) and (edge_b_verts.count == 2)) then
+        (
+            if ((edge_a_verts[1] == edge_b_verts[1]) or (edge_a_verts[1] == edge_b_verts[2])) then
+            (
+                shared_vertex = edge_a_verts[1]
+            )
+            else if ((edge_a_verts[2] == edge_b_verts[1]) or (edge_a_verts[2] == edge_b_verts[2])) then
+            (
+                shared_vertex = edge_a_verts[2]
+            )
+        )
+
+
+        shared_vertex
+        -- return
+    ),
+
+
+    /*
+    Returns true when an edge is already a valid straight reference for the requested mode.
+    Only visible edges can become references.
+    */
+    function isStraightReferenceEdge node adapter edge_id check_type tolerance =
+    (
+        result_value = false
+
+
+        if (isEdgeVisible node adapter edge_id) then
+        (
+            if (check_type == #horizontal) then
+            (
+                result_value = isHorizontalEdge node adapter edge_id tolerance
+            )
+            else if (check_type == #vertical) then
+            (
+                result_value = isVerticalEdge node adapter edge_id tolerance
+            )
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Finds the best visible straight edge directly neighboring the bad edge.
+    Candidate reference direction must be within Angle of the selected bad edge.
+    Returns #(reference_edge_id, shared_vertex_id, #neighbor) or undefined.
+    */
+    function findNeighborReference node adapter target_edge check_type tolerance angle_threshold =
+    (
+        best_reference = undefined
+        best_angle = 1.0e30
+        edge_count = getEdgeCount node adapter
+
+
+        for reference_edge = 1 to edge_count do
+        (
+            if ((reference_edge != target_edge) and (isStraightReferenceEdge node adapter reference_edge check_type tolerance)) then
+            (
+                shared_vertex = getSharedVertexId node adapter target_edge reference_edge
+
+
+                if (shared_vertex > 0) then
+                (
+                    parallel_angle = getParallelAngle node adapter target_edge reference_edge
+
+
+                    if ((parallel_angle <= angle_threshold) and (parallel_angle < best_angle)) then
+                    (
+                        best_angle = parallel_angle
+                        best_reference = #(reference_edge, shared_vertex, #neighbor)
+                    )
+                )
+            )
+        )
+
+
+        best_reference
+        -- return
+    ),
+
+
+    /*
+    Finds the nearest visible straight reference on the same Z level.
+    Search in Z defines how far the target edge center may be from the reference level.
+    Returns #(reference_edge_id, 0, #level) or undefined.
+    */
+    function findSameLevelReference node adapter target_edge check_type tolerance angle_threshold search_in_z =
+    (
+        best_reference = undefined
+        best_distance = 1.0e30
+        target_center = getEdgeCenterWorld node adapter target_edge
+        edge_count = getEdgeCount node adapter
+
+
+        if (target_center != undefined) then
+        (
+            for reference_edge = 1 to edge_count do
+            (
+                if ((reference_edge != target_edge) and (isStraightReferenceEdge node adapter reference_edge check_type tolerance)) then
+                (
+                    reference_center = getEdgeCenterWorld node adapter reference_edge
+
+
+                    if (reference_center != undefined) then
+                    (
+                        z_distance = abs (target_center.z - reference_center.z)
+
+
+                        if (z_distance <= search_in_z) then
+                        (
+                            parallel_angle = getParallelAngle node adapter target_edge reference_edge
+
+
+                            if (parallel_angle <= angle_threshold) then
+                            (
+                                spatial_distance = distance target_center reference_center
+
+
+                                if (spatial_distance < best_distance) then
+                                (
+                                    best_distance = spatial_distance
+                                    best_reference = #(reference_edge, 0, #level)
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+
+        best_reference
+        -- return
+    ),
+
+
+    /*
+    Moves one vertex to an exact world-space position.
+    Supports Editable Poly and Edit Poly without converting the object.
+    */
+    function setVertexWorldPosition node adapter vert_id target_world_position =
+    (
+        result_value = false
+
+
+        try
+        (
+            if (adapter[1] == #editable_poly) then
+            (
+                inverse_tm = inverse node.objectTransform
+                target_local_position = target_world_position * inverse_tm
+                polyop.setVert adapter[2] vert_id target_local_position
+                update node
+                result_value = true
+            )
+            else if (adapter[1] == #edit_poly) then
+            (
+                current_world_position = getVertexWorldPosition node adapter vert_id
+                move_delta = target_world_position - current_world_position
+
+
+                if ((length move_delta) > 0.0000001) then
+                (
+                    one_vertex = #{}
+                    one_vertex[vert_id] = true
+
+
+                    EditPolyMod.SetEPolySelLevel adapter[2] #Vertex
+                    EditPolyMod.SetSelection adapter[2] #Vertex one_vertex node:node
+                    EditPolyMod.MoveSelection adapter[2] move_delta
+                    EditPolyMod.Commit adapter[2]
+                )
+
+
+                update node
+                result_value = true
+            )
+        )
+        catch
+        (
+            result_value = false
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Straightens one selected edge using a reference edge direction.
+    Neighbor reference keeps the shared vertex fixed.
+    Same-level reference rotates/projects the edge around its own midpoint.
+    */
+    function straightenEdgeUsingReference node adapter target_edge reference_data check_type tolerance =
+    (
+        result_value = false
+        target_verts = getEdgeVertIds node adapter target_edge
+        reference_edge = reference_data[1]
+        shared_vertex = reference_data[2]
+        reference_method = reference_data[3]
+        reference_direction = getEdgeDirectionWorld node adapter reference_edge
+
+
+        if ((target_verts.count == 2) and (reference_direction != undefined)) then
+        (
+            if ((reference_method == #neighbor) and (shared_vertex > 0)) then
+            (
+                moving_vertex = if (target_verts[1] == shared_vertex) then target_verts[2] else target_verts[1]
+                anchor_position = getVertexWorldPosition node adapter shared_vertex
+                moving_position = getVertexWorldPosition node adapter moving_vertex
+                projection_distance = dot (moving_position - anchor_position) reference_direction
+
+
+                if ((abs projection_distance) > 0.0000001) then
+                (
+                    target_position = anchor_position + (reference_direction * projection_distance)
+                    result_value = setVertexWorldPosition node adapter moving_vertex target_position
+                )
+            )
+            else if (reference_method == #level) then
+            (
+                point_a = getVertexWorldPosition node adapter target_verts[1]
+                point_b = getVertexWorldPosition node adapter target_verts[2]
+                target_center = (point_a + point_b) * 0.5
+                reference_center = getEdgeCenterWorld node adapter reference_edge
+
+
+                if ((check_type == #horizontal) and (reference_center != undefined)) then
+                (
+                    target_center.z = reference_center.z
+                )
+
+
+                half_vector = (point_b - point_a) * 0.5
+                projected_half_length = dot half_vector reference_direction
+
+
+                if ((abs projected_half_length) > 0.0000001) then
+                (
+                    target_a = target_center - (reference_direction * projected_half_length)
+                    target_b = target_center + (reference_direction * projected_half_length)
+
+
+                    moved_a = setVertexWorldPosition node adapter target_verts[1] target_a
+                    moved_b = setVertexWorldPosition node adapter target_verts[2] target_b
+                    result_value = moved_a and moved_b
+                )
+            )
+        )
+
+
+        if (result_value) then
+        (
+            if (check_type == #horizontal) then
+            (
+                result_value = isHorizontalEdge node adapter target_edge tolerance
+            )
+            else if (check_type == #vertical) then
+            (
+                result_value = isVerticalEdge node adapter target_edge tolerance
+            )
+        )
+
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Converts a BitArray of IDs to comma-separated text.
+    Used in the failed-vertex diagnostic message.
+    */
+    function bitIdsToString bit_set =
+    (
+        result_text = ""
+        first_item = true
+
+
+        for item_id in bit_set do
+        (
+            if (not first_item) then
+            (
+                result_text += ", "
+            )
+
+
+            result_text += (item_id as string)
+            first_item = false
+        )
+
+
+        result_text
+        -- return
+    ),
+
+
+    /*
+    Straightens only the currently selected visible edges for Horizontal or Vertical mode.
+    Reference priority is neighboring straight edge, then nearest straight edge on the same level.
+    Failed edge vertices are selected automatically for manual correction.
+    */
+    function straightenSelectedEdges check_type tolerance angle_threshold search_in_z =
+    (
+        selected_nodes = selection as array
+        object_results = #()
+        total_selected_candidates = 0
+        total_fixed_edges = 0
+        has_failed_edges = false
+        failure_report = ""
+
+
+        if (selected_nodes.count == 0) then
+        (
+            messageBox "Select at least one geometry object." title:"Straight Edge Fixer"
+        )
+        else
+        (
+            undo "Straighten Selected Edges" on
+            (
+                for node in selected_nodes do
+                (
+                    if (isValidNode node and (superClassOf node == GeometryClass)) then
+                    (
+                        adapter = getGeometryAdapter node
+                        original_edge_selection = getEdgeSelection node adapter
+                        pending_edges = #{}
+                        failed_vertices = #{}
+
+
+                        for edge_id in original_edge_selection do
+                        (
+                            if (isEdgeVisible node adapter edge_id) then
+                            (
+                                if (check_type == #horizontal) then
+                                (
+                                    if (isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold) then
+                                    (
+                                        pending_edges[edge_id] = true
+                                    )
+                                )
+                                else if (check_type == #vertical) then
+                                (
+                                    if (isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold) then
+                                    (
+                                        pending_edges[edge_id] = true
+                                    )
+                                )
+                            )
+                        )
+
+
+                        total_selected_candidates += countBits pending_edges
+                        continue_processing = true
+
+
+                        /*
+                        Multiple passes let a newly fixed edge become the straight neighbor
+                        reference for the next selected edge in a chain.
+                        */
+                        while ((pending_edges.numberSet > 0) and continue_processing) do
+                        (
+                            continue_processing = false
+                            pending_snapshot = copy pending_edges
+
+
+                            for edge_id in pending_snapshot do
+                            (
+                                reference_data = findNeighborReference node adapter edge_id check_type tolerance angle_threshold
+
+
+                                if (reference_data == undefined) then
+                                (
+                                    reference_data = findSameLevelReference node adapter edge_id check_type tolerance angle_threshold search_in_z
+                                )
+
+
+                                if (reference_data != undefined) then
+                                (
+                                    if (straightenEdgeUsingReference node adapter edge_id reference_data check_type tolerance) then
+                                    (
+                                        pending_edges[edge_id] = false
+                                        total_fixed_edges += 1
+                                        continue_processing = true
+                                    )
+                                )
+                            )
+                        )
+
+
+                        for failed_edge in pending_edges do
+                        (
+                            failed_edge_verts = getEdgeVertIds node adapter failed_edge
+
+
+                            if (failed_edge_verts.count == 2) then
+                            (
+                                failed_vertices[failed_edge_verts[1]] = true
+                                failed_vertices[failed_edge_verts[2]] = true
+                            )
+                        )
+
+
+                        if (failed_vertices.numberSet > 0) then
+                        (
+                            has_failed_edges = true
+                            failure_report += node.name + ": " + (bitIdsToString failed_vertices) + "\n"
+                        )
+
+
+                        append object_results #(node, adapter, original_edge_selection, failed_vertices)
+                    )
+                )
+            )
+
+
+            /*
+            If any heuristic failed, expose only failed vertices for manual repair.
+            Otherwise keep the original edge selection visible.
+            */
+            if (has_failed_edges) then
+            (
+                for object_result in object_results do
+                (
+                    setVertexSelection object_result[1] object_result[2] object_result[4]
+                )
+
+
+                setCommandPanelTaskMode mode:#modify
+                subObjectLevel = 1
+                completeRedraw()
+
+
+                messageBox ("Unable to straighten edges with vertices:\n\n" + failure_report) title:"Straight Edge Fixer"
+            )
+            else
+            (
+                for object_result in object_results do
+                (
+                    setEdgeSelection object_result[1] object_result[2] object_result[3]
+                )
+
+
+                setCommandPanelTaskMode mode:#modify
+                subObjectLevel = 2
+                completeRedraw()
+
+
+                format "Straight Edge Fixer: fixed % selected edge(s).\n" total_fixed_edges
+
+
+                if (total_selected_candidates == 0) then
+                (
+                    format "Straight Edge Fixer: no selected visible candidate edges matched the requested direction.\n"
+                )
+            )
+        )
+
+
+        #(total_fixed_edges, has_failed_edges)
+        -- return
+    ),
+
+
+    /*
+    Checks one requested edge direction and selects every failing edge.
+    check_type accepts #horizontal or #vertical.
+    */
+    function checkEdgeDirection check_type tolerance angle_threshold =
+    (
+        selected_nodes = selection as array
+        total_bad_edges = 0
+        processed_count = 0
+
+
+        if (selected_nodes.count == 0) then
+        (
+            messageBox "Select at least one geometry object." title:"Straight Edge Fixer"
+        )
+        else
+        (
+            for node in selected_nodes do
+            (
+                if (isValidNode node and (superClassOf node == GeometryClass)) then
+                (
+                    processed_count += 1
+                    adapter = getGeometryAdapter node
+                    edge_count = getEdgeCount node adapter
+                    bad_edges = #{}
+
+
+                    for edge_id = 1 to edge_count do
+                    (
+                        if (isEdgeVisible node adapter edge_id) then
+                        (
+                            if (check_type == #horizontal) then
+                            (
+                                if (isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold) then
+                                (
+                                    bad_edges[edge_id] = true
+                                )
+                            )
+                            else if (check_type == #vertical) then
+                            (
+                                if (isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold) then
+                                (
+                                    bad_edges[edge_id] = true
+                                )
+                            )
+                        )
+                    )
+
+
+                    setEdgeSelection node adapter bad_edges
+                    total_bad_edges += countBits bad_edges
+                )
+            )
+
+
+            if (processed_count > 0) then
+            (
+                setCommandPanelTaskMode mode:#modify
+                subObjectLevel = 2
+                completeRedraw()
+
+
+                if (check_type == #horizontal) then
+                (
+                    format "Check Horizontal Edges: selected % near-horizontal error edge(s), angle threshold: % deg.\n" total_bad_edges angle_threshold
+                )
+                else
+                (
+                    format "Check Vertical Edges: selected % near-vertical error edge(s), angle threshold: % deg.\n" total_bad_edges angle_threshold
+                )
+            )
+        )
+
+
+        total_bad_edges
+        -- return
+    ),
+
+
+    /*
+    Reads all visible horizontal edge data used by level detection.
+    Each record is #(edge_id, z_min, z_max, z_center, vert_a, vert_b).
+    */
+    function getHorizontalEdgeData node adapter level_tolerance =
+    (
+        edge_data = #()
+        edge_count = getEdgeCount node adapter
+
+
+        for edge_id = 1 to edge_count do
+        (
+            if (isEdgeVisible node adapter edge_id) then
+            (
+                if (isHorizontalEdge node adapter edge_id level_tolerance) then
+                (
+                    edge_verts = getEdgeVertIds node adapter edge_id
+
+
+                    if (edge_verts.count == 2) then
+                    (
+                        point_a = getVertexWorldPosition node adapter edge_verts[1]
+                        point_b = getVertexWorldPosition node adapter edge_verts[2]
+                        z_min = amin point_a.z point_b.z
+                        z_max = amax point_a.z point_b.z
+                        z_center = (point_a.z + point_b.z) * 0.5
+
+
+                        append edge_data #(edge_id, z_min, z_max, z_center, edge_verts[1], edge_verts[2])
+                    )
+                )
+            )
+        )
+
+
+        edge_data
+        -- return
+    ),
+
+
+    /*
+    Builds one detected Z-level record from defining horizontal edges.
+    The level center is the midpoint of the minimum and maximum defining edge centers.
+    */
+    function makeLevel cluster =
+    (
+        definition_edges = #{}
+        level_min = cluster[1][4]
+        level_max = cluster[1][4]
+
+
+        for item in cluster do
+        (
+            definition_edges[item[1]] = true
+
+
+            if (item[4] < level_min) then
+            (
+                level_min = item[4]
+            )
+
+
+            if (item[4] > level_max) then
+            (
+                level_max = item[4]
+            )
+        )
+
+
+        level_center = (level_min + level_max) * 0.5
+
+
+        #(definition_edges, level_min, level_max, level_center, #{}, level_center, #CENTER, 0)
+        -- return
+    ),
+
+
+    /*
+    Detects repeated world-Z levels from horizontal edges.
+    A valid level requires at least Min Level Edges inside Level Tolerance.
+    */
+    function findLevels edge_data level_tolerance min_level_edges =
+    (
+        levels = #()
+
+
+        if (edge_data.count > 0) then
+        (
+            qsort edge_data straightEdgeFixerCompareData
+            cluster = #()
+            cluster_min_z = 0.0
+            max_cluster_span = level_tolerance * 2.0
+
+
+            for item in edge_data do
+            (
+                if (cluster.count == 0) then
+                (
+                    cluster = #(item)
+                    cluster_min_z = item[4]
+                )
+                else if ((item[4] - cluster_min_z) <= max_cluster_span) then
+                (
+                    append cluster item
+                )
+                else
+                (
+                    if (cluster.count >= min_level_edges) then
+                    (
+                        append levels (makeLevel cluster)
+                    )
+
+
+                    cluster = #(item)
+                    cluster_min_z = item[4]
+                )
+            )
+
+
+            if (cluster.count >= min_level_edges) then
+            (
+                append levels (makeLevel cluster)
+            )
+
+
+            if (levels.count > 1) then
+            (
+                qsort levels straightEdgeFixerCompareLevelData
+            )
+        )
+
+
+        levels
+        -- return
+    ),
+
+
+    /*
+    Assigns every horizontal edge to the nearest detected level inside Search in Z.
+    An edge can belong to only one detected level.
+    */
+    function assignEdgesToLevels levels edge_data search_in_z =
+    (
+        if (levels.count > 0) then
+        (
+            for item in edge_data do
+            (
+                edge_id = item[1]
+                edge_z = item[4]
+                nearest_level = 0
+                nearest_distance = 1.0e30
+
+
+                for level_index = 1 to levels.count do
+                (
+                    level_distance = abs (edge_z - levels[level_index][4])
+
+
+                    if (level_distance < nearest_distance) then
+                    (
+                        nearest_distance = level_distance
+                        nearest_level = level_index
+                    )
+                )
+
+
+                if ((nearest_level > 0) and (nearest_distance <= search_in_z)) then
+                (
+                    levels[nearest_level][5][edge_id] = true
+                )
+            )
+        )
+
+
+        levels
+        -- return
+    ),
+
+
+    /*
+    Finds one horizontal edge record by edge ID.
+    Returns undefined when the edge is not present in edge_data.
+    */
+    function getEdgeDataById edge_data edge_id =
+    (
+        result_data = undefined
+
+
+        for item in edge_data while (result_data == undefined) do
+        (
+            if (item[1] == edge_id) then
+            (
+                result_data = item
+            )
+        )
+
+
+        result_data
+        -- return
+    ),
+
+
+    /*
+    Chooses TOP, BOTTOM, or CENTER target Z for every detected edge level.
+    The decision uses assigned edge centers outside the defining edge cluster.
+    */
+    function calculateTargets levels edge_data =
+    (
+        for level_index = 1 to levels.count do
+        (
+            level_data = levels[level_index]
+            definition_edges = level_data[1]
+            assigned_edges = level_data[5]
+            level_min = level_data[2]
+            level_max = level_data[3]
+            level_center = level_data[4]
+            outside_count = 0
+            below_count = 0
+            above_count = 0
+
+
+            for edge_id in assigned_edges do
+            (
+                if (not definition_edges[edge_id]) then
+                (
+                    item = getEdgeDataById edge_data edge_id
+
+
+                    if (item != undefined) then
+                    (
+                        outside_count += 1
+                        edge_z = item[4]
+
+
+                        if (edge_z < level_min) then
+                        (
+                            below_count += 1
+                        )
+                        else if (edge_z > level_max) then
+                        (
+                            above_count += 1
+                        )
+                    )
+                )
+            )
+
+
+            if (outside_count == 0) then
+            (
+                level_data[6] = level_center
+                level_data[7] = #CENTER
+            )
+            else if (below_count == outside_count) then
+            (
+                level_data[6] = level_max
+                level_data[7] = #TOP
+            )
+            else if (above_count == outside_count) then
+            (
+                level_data[6] = level_min
+                level_data[7] = #BOTTOM
+            )
+            else
+            (
+                level_data[6] = level_center
+                level_data[7] = #CENTER
+            )
+
+
+            level_data[8] = outside_count
+        )
+
+
+        levels
+        -- return
+    ),
+
+
+    /*
+    Collects unique vertex IDs used by the assigned edges of one level.
+    Shared vertices are moved only once.
+    */
+    function getLevelVertexIds node adapter assigned_edges =
+    (
+        vertex_ids = #{}
+
+
+        for edge_id in assigned_edges do
+        (
+            edge_verts = getEdgeVertIds node adapter edge_id
+
+
+            if (edge_verts.count == 2) then
+            (
+                vertex_ids[edge_verts[1]] = true
+                vertex_ids[edge_verts[2]] = true
+            )
+        )
+
+
+        vertex_ids
+        -- return
+    ),
+
+
+    /*
+    Aligns one vertex to target world Z on an Editable Poly base object.
+    World X and Y remain unchanged.
+    */
+    function setEditablePolyVertexWorldZ node editable_poly vert_id target_z =
+    (
+        object_tm = node.objectTransform
+        inverse_tm = inverse object_tm
+        local_position = polyop.getVert editable_poly vert_id
+        world_position = local_position * object_tm
+        target_world_position = [world_position.x, world_position.y, target_z]
+        target_local_position = target_world_position * inverse_tm
+
+
+        polyop.setVert editable_poly vert_id target_local_position
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Aligns assigned edge vertices directly on an Editable Poly base object.
+    Shared vertices are moved once per detected level.
+    */
+    function applyToEditablePoly node editable_poly adapter levels =
+    (
+        for level_data in levels do
+        (
+            vertex_ids = getLevelVertexIds node adapter level_data[5]
+            target_z = level_data[6]
+
+
+            for vert_id in vertex_ids do
+            (
+                setEditablePolyVertexWorldZ node editable_poly vert_id target_z
+            )
+        )
+
+
+        update node
+        true
+        -- return
+    ),
+
+
+    /*
+    Aligns assigned edge vertices through an Edit Poly modifier.
+    Existing vertex selection and Edit Poly sub-object level are restored afterwards.
+    */
+    function applyToEditPoly node edit_poly adapter levels =
+    (
+        previous_selection = EditPolyMod.GetSelection edit_poly #Vertex node:node
+        previous_level = EditPolyMod.GetEPolySelLevel edit_poly
+        object_tm = node.objectTransform
+
+
+        EditPolyMod.SetEPolySelLevel edit_poly #Vertex
+
+
+        for level_data in levels do
+        (
+            vertex_ids = getLevelVertexIds node adapter level_data[5]
+            target_z = level_data[6]
+
+
+            for vert_id in vertex_ids do
+            (
+                current_local_position = EditPolyMod.GetVertex edit_poly vert_id node:node
+                current_world_position = current_local_position * object_tm
+                world_move_delta = [0,0,(target_z - current_world_position.z)]
+
+
+                if ((length world_move_delta) > 0.0000001) then
+                (
+                    one_vert = #{}
+                    one_vert[vert_id] = true
+                    EditPolyMod.SetSelection edit_poly #Vertex one_vert node:node
+                    EditPolyMod.MoveSelection edit_poly world_move_delta
+                    EditPolyMod.Commit edit_poly
+                )
+            )
+        )
+
+
+        EditPolyMod.SetSelection edit_poly #Vertex previous_selection node:node
+        EditPolyMod.SetEPolySelLevel edit_poly previous_level
+        update node
+
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Formats one object's detected edge levels from bottom to top.
+    Reports defining edges, outside aligned edges, mode, and final target Z.
+    */
+    function buildObjectReport node levels =
+    (
+        report_text = "OBJECT: " + node.name + "\n"
+
+
+        if (levels.count == 0) then
+        (
+            report_text += "  No edge levels found.\n"
+        )
+        else
+        (
+            for level_index = 1 to levels.count do
+            (
+                level_data = levels[level_index]
+                definition_count = countBits level_data[1]
+                assigned_count = countBits level_data[5]
+                outside_count = level_data[8]
+
+
+                report_text +=
+                    "  Level " + (level_index as string) +
+                    " | detected Z: " + (level_data[4] as string) +
+                    " | mode: " + (level_data[7] as string) +
+                    " | target Z: " + (level_data[6] as string) +
+                    " | level edges: " + (definition_count as string) +
+                    " | outside aligned: " + (outside_count as string) +
+                    " | total aligned: " + (assigned_count as string) + "\n"
+            )
+        )
+
+
+        report_text
+        -- return
+    ),
+
+
+    /*
+    Processes one selected object using horizontal edges instead of loose vertices.
+    Returns a diagnostic text block for that object.
+    */
+    function processObject node level_tolerance min_level_edges search_in_z =
+    (
+        report_text = ""
+        adapter = undefined
+        created_new_modifier = false
+
+
+        try
+        (
+            adapter = getGeometryAdapter node
+            created_new_modifier = adapter[3]
+            edge_data = getHorizontalEdgeData node adapter level_tolerance
+            levels = findLevels edge_data level_tolerance min_level_edges
+            levels = assignEdgesToLevels levels edge_data search_in_z
+            levels = calculateTargets levels edge_data
+
+
+            if (levels.count > 0) then
+            (
+                if (adapter[1] == #editable_poly) then
+                (
+                    applyToEditablePoly node adapter[2] adapter levels
+                )
+                else
+                (
+                    applyToEditPoly node adapter[2] adapter levels
+                )
+            )
+            else if (created_new_modifier) then
+            (
+                deleteModifier node adapter[2]
+            )
+
+
+            report_text = buildObjectReport node levels
+        )
+        catch
+        (
+            if (created_new_modifier and (adapter != undefined)) then
+            (
+                try
+                (
+                    deleteModifier node adapter[2]
+                )
+                catch
+                (
+                )
+            )
+
+
+            report_text = "OBJECT: " + node.name + "\n  ERROR: " + (getCurrentException() as string) + "\n"
+        )
+
+
+        report_text
+        -- return
+    ),
+
+
+    /*
+    Detects and aligns horizontal edge levels on all selected geometry objects.
+    Quiet Mode suppresses the final diagnostic message box.
+    */
+    function alignSelection level_tolerance:0.01 min_level_edges:3 search_in_z:10.0 quiet_mode:false =
+    (
+        selected_nodes = selection as array
+        report_text = "STRAIGHT EDGE FIXER " + version + "\n\n"
+        processed_count = 0
+
+
+        if (selected_nodes.count == 0) then
+        (
+            messageBox "Select at least one geometry object." title:"Straight Edge Fixer"
+        )
+        else
+        (
+            undo "Straight Edge Fixer" on
+            (
+                for node in selected_nodes do
+                (
+                    if (isValidNode node and (superClassOf node == GeometryClass)) then
+                    (
+                        processed_count += 1
+                        report_text += processObject node level_tolerance min_level_edges search_in_z
+                        report_text += "\n"
+                    )
+                )
+            )
+
+
+            completeRedraw()
+
+
+            if (processed_count == 0) then
+            (
+                messageBox "The selection contains no supported geometry objects." title:"Straight Edge Fixer"
+            )
+            else if (not quiet_mode) then
+            (
+                messageBox report_text title:"Straight Edge Fixer - Report"
+            )
+        )
+
+
+        true
+        -- return
+    ),
+
+
+    on create do
+    (
+        migrateLegacyIni()
+    )
+)
+
+
+StraightEdgeFixer = StraightEdgeFixer_v()
+
 
 try
 (
@@ -140,4 +15715,9188 @@ catch
 (
 )
 
-fileIn ui_file
+
+rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
+(
+    groupBox grp_settings "LEVEL SETTINGS" pos:[8,8] width:284 height:132
+
+
+    label lbl_level_tolerance "Level Tolerance:" pos:[20,32] width:120 height:18
+    spinner spn_level_tolerance "" pos:[150,30] width:125 height:18 range:[0.000001,1000000.0,0.01] type:#worldunits scale:0.001 tooltip:"Maximum world-axis deviation. For level detection it defines horizontal edges and groups their center Z values. The same tolerance is used by the direction checks."
+
+
+    label lbl_min_level_edges "Min Level Edges:" pos:[20,60] width:120 height:18
+    spinner spn_min_level_edges "" pos:[150,58] width:125 height:18 range:[1,100000,3] type:#integer scale:1 tooltip:"Minimum number of horizontal edges required inside Level Tolerance to define a valid Z level."
+
+
+    label lbl_search_in_z "Search in Z:" pos:[20,88] width:120 height:18
+    spinner spn_search_in_z "" pos:[150,86] width:125 height:18 range:[0.0,1000000.0,10.0] type:#worldunits scale:0.1 tooltip:"Maximum world-Z distance from a detected level. Horizontal edges inside this range are assigned to the nearest level and aligned."
+
+
+    checkbox chk_quiet_mode "Quiet Mode" pos:[20,116] width:240 height:18 checked:false tooltip:"Run edge-level alignment without showing the final report."
+
+
+    groupBox grp_checks "EDGE CHECKS" pos:[8,148] width:284 height:144
+
+
+    label lbl_angle_threshold "Angle:" pos:[20,172] width:46 height:18 tooltip:"Maximum angle away from the requested axis that is still considered a candidate error edge. Range is limited to 0-45 degrees so the opposite axis is ignored."
+    spinner spn_angle_threshold "" pos:[64,170] width:58 height:18 range:[0.0,45.0,45.0] type:#float scale:1.0 tooltip:"Candidate angle threshold in degrees. Horizontal Check ignores edges farther than this from horizontal. Vertical Check ignores edges farther than this from vertical."
+
+
+    button btn_check_horizontal "CHECK HORIZONTAL" pos:[18,198] width:127 height:42 tooltip:"LMB: select visible near-horizontal error edges.\n\nRMB: straighten currently selected visible near-horizontal edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
+    button btn_check_vertical "CHECK VERTICAL" pos:[155,198] width:127 height:42 tooltip:"LMB: select visible near-vertical error edges.\n\nRMB: straighten currently selected visible near-vertical edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
+
+
+    button btn_border_check "BORDER CHECK" pos:[18,248] width:264 height:28 tooltip:"Select visible border edges with an unwelded/overlapping local-Z seam, a reflex corner above 180 degrees, or a 360-degree backtracking border. Backtracking does not require the remote vertices to share position."
+
+
+    button btn_align "STRAIGHT EDGE FIXER" pos:[8,302] width:284 height:38 tooltip:"Detect repeated horizontal edge levels and align nearby horizontal edges to TOP, BOTTOM, or CENTER target Z."
+
+
+    on straightEdgeFixer_ui open do
+    (
+        settings_data = StraightEdgeFixer.loadSettings()
+        spn_level_tolerance.value = settings_data[1]
+        spn_min_level_edges.value = settings_data[2]
+        spn_search_in_z.value = settings_data[3]
+        spn_angle_threshold.value = settings_data[4]
+        chk_quiet_mode.checked = settings_data[5]
+    )
+
+
+    on straightEdgeFixer_ui moved dialog_position do
+    (
+        StraightEdgeFixer.saveDialogPosition dialog_position
+    )
+
+
+    on spn_level_tolerance changed control_value do
+    (
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+    )
+
+
+    on spn_min_level_edges changed control_value do
+    (
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+    )
+
+
+    on spn_search_in_z changed control_value do
+    (
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+    )
+
+
+    on spn_angle_threshold changed control_value do
+    (
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+    )
+
+
+    on chk_quiet_mode changed control_state do
+    (
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+    )
+
+
+    on btn_check_horizontal pressed do
+    (
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.checkEdgeDirection #horizontal spn_level_tolerance.value spn_angle_threshold.value
+    )
+
+
+
+
+    on btn_check_horizontal rightclick do
+    (
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.straightenSelectedEdges #horizontal spn_level_tolerance.value spn_angle_threshold.value spn_search_in_z.value
+    )
+
+
+    on btn_check_vertical pressed do
+    (
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.checkEdgeDirection #vertical spn_level_tolerance.value spn_angle_threshold.value
+    )
+
+
+
+
+    on btn_check_vertical rightclick do
+    (
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.straightenSelectedEdges #vertical spn_level_tolerance.value spn_angle_threshold.value spn_search_in_z.value
+    )
+
+
+
+
+    on btn_border_check pressed do
+    (
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.checkBorders spn_level_tolerance.value
+    )
+
+
+    on btn_align pressed do
+    (
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+
+
+        StraightEdgeFixer.alignSelection \
+            level_tolerance:spn_level_tolerance.value \
+            min_level_edges:spn_min_level_edges.value \
+            search_in_z:spn_search_in_z.value \
+            quiet_mode:chk_quiet_mode.checked
+    )
+)
+
+
+dialog_position = StraightEdgeFixer.loadDialogPosition()
+createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #style_sysmenu, #style_toolwindow)
+
+
+
+
+try
+(
+    destroyDialog straightEdgeFixer_ui
+)
+catch
+(
+)
+
+
+/*
+Bundled Wall-Fixer UI.
+*/
+/*
+Wall-Fixer UI 0.27
+First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
+*/
+
+
+global WallFixerVersion
+global WallFixerRollout
+global wall_fixer_version_system
+global wall_fixer_version_epoch
+global wall_fixer_ui_file_version = "0.27"
+global wall_fixer_ui_tool_version = 0.31
+
+
+/*
+Registers this file's shared Wall-Fixer tool version.
+Accepts legacy string or numeric global versions; the highest loaded version wins.
+*/
+if wall_fixer_version_system != 1 then
+(
+    wall_fixer_version_system = 1
+)
+
+
+if wall_fixer_version_epoch != 3 then
+(
+    wall_fixer_version_epoch = 3
+    WallFixerVersion = undefined
+)
+
+
+wall_fixer_ui_current_tool_version_number = undefined
+
+
+if WallFixerVersion != undefined then
+(
+    try
+    (
+        wall_fixer_ui_current_tool_version_number = WallFixerVersion as float
+    )
+    catch
+    (
+        wall_fixer_ui_current_tool_version_number = undefined
+    )
+)
+
+
+if wall_fixer_ui_current_tool_version_number == undefined then
+(
+    WallFixerVersion = wall_fixer_ui_tool_version
+)
+else if wall_fixer_ui_tool_version > wall_fixer_ui_current_tool_version_number then
+(
+    WallFixerVersion = wall_fixer_ui_tool_version
+)
+
+
+if WallFixerRollout != undefined then
+(
+    try
+    (
+        WallFixerRollout.title = ("Wall-Fixer " + (WallFixerVersion as string))
+    )
+    catch
+    (
+    )
+)
+
+
+
+
+global WallFixerRollout
+global WallFixerOptionsRollout
+global WallFixerPreProcessRollout
+global WallFixerEdgeFixerRollout
+global WallFixerSliceWallsRollout
+global WallFixerPostProcessRollout
+global wallFaceClassifierRollout
+global wall_face_classifier_cache = #()
+global wall_face_classifier_last_nodes = #()
+global wall_fixer_weld_threshold_syncing = false
+global wall_fixer_explode_wire_color_counter = 0
+
+
+wall_fixer_ui_source_path = getSourceFileName()
+wall_fixer_ui_ini_path = ((getDir #plugcfg) + "\\Wall-Fixer.ini")
+wall_fixer_default_dialog_size = [344,748]
+wall_fixer_min_dialog_height = 320
+
+
+/*
+Reads an integer from the Wall-Fixer UI INI file.
+Invalid or missing values use the supplied fallback value.
+*/
+function wallFixerReadIniInt section_name key_name default_value =
+(
+    value_text = getIniSetting wall_fixer_ui_ini_path section_name key_name
+
+
+    if value_text == "" then
+    (
+        default_value
+    )
+    else
+    (
+        parsed_value = undefined
+
+
+        try
+        (
+            parsed_value = value_text as integer
+        )
+        catch
+        (
+            parsed_value = undefined
+        )
+
+
+        if parsed_value == undefined then default_value else parsed_value
+    )
+    -- return
+)
+
+
+/*
+Reads a floating-point value from the Wall-Fixer UI INI file.
+Invalid or missing values use the supplied fallback value.
+*/
+function wallFixerReadIniFloat section_name key_name default_value =
+(
+    value_text = getIniSetting wall_fixer_ui_ini_path section_name key_name
+
+
+    if value_text == "" then
+    (
+        default_value
+    )
+    else
+    (
+        parsed_value = undefined
+
+
+        try
+        (
+            parsed_value = value_text as float
+        )
+        catch
+        (
+            parsed_value = undefined
+        )
+
+
+        if parsed_value == undefined then default_value else parsed_value
+    )
+    -- return
+)
+
+
+/*
+Reads a Boolean value from the Wall-Fixer UI INI file.
+Only stored 0/1 values override the supplied fallback value.
+*/
+function wallFixerReadIniBool section_name key_name default_value =
+(
+    value_text = getIniSetting wall_fixer_ui_ini_path section_name key_name
+
+
+    if value_text == "1" then
+    (
+        true
+    )
+    else if value_text == "0" then
+    (
+        false
+    )
+    else
+    (
+        default_value
+    )
+    -- return
+)
+
+
+/*
+Loads the saved Wall-Fixer dialog screen position.
+Falls back to the legacy saved position when no Wall-Fixer position exists yet.
+*/
+function wallFixerLoadDialogPosition fallback_position =
+(
+    x_text = getIniSetting wall_fixer_ui_ini_path "Window" "X"
+    y_text = getIniSetting wall_fixer_ui_ini_path "Window" "Y"
+
+
+    if (x_text == "") or (y_text == "") then
+    (
+        fallback_position
+    )
+    else
+    (
+        [wallFixerReadIniInt "Window" "X" 100, wallFixerReadIniInt "Window" "Y" 100]
+    )
+    -- return
+)
+
+
+/*
+Loads the saved Wall-Fixer dialog size.
+Width is restored but remains locked; height remains vertically resizable.
+*/
+function wallFixerLoadDialogSize default_size =
+(
+    saved_width = wallFixerReadIniInt "Window" "Width" default_size.x
+    saved_height = wallFixerReadIniInt "Window" "Height" default_size.y
+
+
+    if saved_width < 300 then saved_width = default_size.x
+    if saved_height < wall_fixer_min_dialog_height then saved_height = wall_fixer_min_dialog_height
+
+
+    [saved_width, saved_height]
+    -- return
+)
+
+
+/*
+Converts a CUI dock-state symbol to the compact value stored in Wall-Fixer.ini.
+Only the supported Wall-Fixer states are persisted.
+*/
+function wallFixerDockStateToIniValue dock_state =
+(
+    case dock_state of
+    (
+        #cui_dock_left: "Left"
+        #cui_dock_right: "Right"
+        default: "Float"
+    )
+    -- return
+)
+
+
+/*
+Loads the saved Wall-Fixer CUI dock state from the INI file.
+Unknown or missing values fall back to floating mode.
+*/
+function wallFixerLoadDockState =
+(
+    dock_state_text = toLower (getIniSetting wall_fixer_ui_ini_path "Window" "DockState")
+
+
+    case dock_state_text of
+    (
+        "left": #cui_dock_left
+        "right": #cui_dock_right
+        default: #cui_floatable
+    )
+    -- return
+)
+
+
+/*
+Saves the current registered CUI dock state when it is Left, Right or floating.
+The INI is written only when the stored value actually changes.
+*/
+function wallFixerSaveDockState =
+(
+    if WallFixerRollout != undefined then
+    (
+        try
+        (
+            if WallFixerRollout.dialogBar then
+            (
+                current_dock_state = cui.getDockState WallFixerRollout
+                dock_state_text = wallFixerDockStateToIniValue current_dock_state
+                stored_dock_state_text = getIniSetting wall_fixer_ui_ini_path "Window" "DockState"
+
+
+                if stored_dock_state_text != dock_state_text then
+                (
+                    setIniSetting wall_fixer_ui_ini_path "Window" "DockState" dock_state_text
+                )
+            )
+        )
+        catch
+        (
+        )
+    )
+    -- return
+)
+
+
+/*
+Returns the compact label for the display units currently shown by 3ds Max.
+Metric, US, Generic and Custom display modes are supported.
+*/
+function wallFixerGetDisplayUnitLabel =
+(
+    display_type = units.DisplayType
+    unit_label = "unit"
+
+
+    case display_type of
+    (
+        #Metric:
+        (
+            case units.MetricType of
+            (
+                #Millimeters: unit_label = "mm"
+                #Centimeters: unit_label = "cm"
+                #Meters: unit_label = "m"
+                #Kilometers: unit_label = "km"
+                default: unit_label = "unit"
+            )
+        )
+        #US:
+        (
+            case units.USType of
+            (
+                #Frac_In: unit_label = "in"
+                #Dec_In: unit_label = "in"
+                #Frac_Ft: unit_label = "ft"
+                #Dec_Ft: unit_label = "ft"
+                #Ft_Frac_In: unit_label = "ft/in"
+                #Ft_Dec_In: unit_label = "ft/in"
+                default: unit_label = "unit"
+            )
+        )
+        #Custom:
+        (
+            unit_label = units.CustomName
+            if unit_label == "" then unit_label = "custom"
+        )
+        default:
+        (
+            unit_label = "unit"
+        )
+    )
+
+
+    unit_label
+    -- return
+)
+
+
+/*
+Returns one current display unit converted to 3ds Max internal world units.
+This makes the fresh weld/search threshold display as exactly 1 in the active display-unit system.
+*/
+function wallFixerGetDefaultWeldThreshold =
+(
+    threshold_value = 1.0
+
+
+    try
+    (
+        threshold_value = units.decodeValue "1"
+    )
+    catch
+    (
+        threshold_value = 1.0
+    )
+
+
+    threshold_value
+    -- return
+)
+
+
+
+
+/*
+Welds selected Editable Poly or Edit Poly vertices using the supplied threshold.
+The function reads the actual vertex selection and does not depend on Edit Poly UI threshold state.
+*/
+function weldSelectedEPolyVerts node threshold editPolyModifier:undefined =
+(
+    if node == undefined or not isValidNode node then return false
+    if not isKindOf threshold Number or threshold <= 0 then return false
+
+
+    local selectedModifier = editPolyModifier
+
+
+    /*
+    Returns true when the supplied modifier belongs to the supplied node.
+    This prevents a modifier from another object being used accidentally.
+    */
+    function modifierBelongsToNode owner candidate =
+    (
+        for item in owner.modifiers where item == candidate do return true
+        false
+        -- return
+    )
+
+
+    if selectedModifier != undefined then
+    (
+        if classOf selectedModifier != Edit_Poly then return false
+        if not modifierBelongsToNode node selectedModifier then return false
+    )
+    else
+    (
+        for index = node.modifiers.count to 1 by -1 while selectedModifier == undefined do
+        (
+            if classOf node.modifiers[index] == Edit_Poly then
+            (
+                selectedModifier = node.modifiers[index]
+            )
+        )
+    )
+
+
+    local useEditPolyModifier = selectedModifier != undefined
+    local editablePoly = undefined
+
+
+    if not useEditPolyModifier then
+    (
+        if classOf node.baseObject != Editable_Poly then return false
+        editablePoly = node.baseObject
+    )
+
+
+    /*
+    Returns the active vertex selection from Edit Poly or Editable Poly.
+    The returned BitArray is the set processed by the weld routine.
+    */
+    function getSelectedVertices owner modifier useModifier polyObject =
+    (
+        if useModifier then
+        (
+            EditPolyMod.GetSelection modifier #Vertex node:owner
+        )
+        else
+        (
+            polyOp.getVertSelection polyObject
+        )
+        -- return
+    )
+
+
+    /*
+    Returns current vertex positions in world space.
+    Edit Poly is evaluated from a snapshot so modifier topology is respected.
+    */
+    function getWorldPositions owner useModifier polyObject =
+    (
+        local positions = #()
+
+
+        if useModifier then
+        (
+            local evaluatedMesh = snapshotAsMesh owner
+
+
+            for index = 1 to evaluatedMesh.numVerts do
+            (
+                append positions ((getVert evaluatedMesh index) * owner.objectTransform)
+            )
+
+
+            delete evaluatedMesh
+        )
+        else
+        (
+            local vertexCount = polyOp.getNumVerts polyObject
+
+
+            for index = 1 to vertexCount do
+            (
+                append positions ((polyOp.getVert polyObject index) * owner.objectTransform)
+            )
+        )
+
+
+        positions
+        -- return
+    )
+
+
+    /*
+    Returns the current evaluated vertex count.
+    This is used to verify that each weld really removed topology.
+    */
+    function getVertexCount owner useModifier polyObject =
+    (
+        if useModifier then
+        (
+            local evaluatedMesh = snapshotAsMesh owner
+            local vertexCount = evaluatedMesh.numVerts
+            delete evaluatedMesh
+            vertexCount
+        )
+        else
+        (
+            polyOp.getNumVerts polyObject
+        )
+        -- return
+    )
+
+
+    /*
+    Builds an order-independent key for a candidate vertex pair.
+    Failed pairs are blocked until a successful topology change occurs.
+    */
+    function pairKey firstIndex secondIndex =
+    (
+        if firstIndex < secondIndex then
+        (
+            ((firstIndex as string) + ":" + (secondIndex as string))
+        )
+        else
+        (
+            ((secondIndex as string) + ":" + (firstIndex as string))
+        )
+        -- return
+    )
+
+
+    /*
+    Finds the closest unblocked selected vertex pair inside the threshold.
+    Returning undefined ends the iterative weld pass.
+    */
+    function findClosestPair selectedVertices positions blockedPairs thresholdValue keyFunction =
+    (
+        local vertexIndices = selectedVertices as array
+        local closestPair = undefined
+        local closestDistance = thresholdValue
+
+
+        if vertexIndices.count < 2 then return undefined
+
+
+        for first = 1 to vertexIndices.count - 1 do
+        (
+            for second = first + 1 to vertexIndices.count do
+            (
+                local firstIndex = vertexIndices[first]
+                local secondIndex = vertexIndices[second]
+
+
+                if firstIndex <= positions.count and secondIndex <= positions.count then
+                (
+                    local key = keyFunction firstIndex secondIndex
+
+
+                    if findItem blockedPairs key == 0 then
+                    (
+                        local pairDistance = distance positions[firstIndex] positions[secondIndex]
+
+
+                        if pairDistance <= thresholdValue and (closestPair == undefined or pairDistance < closestDistance) then
+                        (
+                            closestDistance = pairDistance
+                            closestPair = #(firstIndex, secondIndex)
+                        )
+                    )
+                )
+            )
+        )
+
+
+        closestPair
+        -- return
+    )
+
+
+    local removedCount = 0
+    local blockedPairs = #()
+    local keepSearching = true
+
+
+    undo "Weld Selected EPoly Vertices" on
+    (
+        with redraw off
+        (
+            while keepSearching do
+            (
+                local selectedVertices = getSelectedVertices node selectedModifier useEditPolyModifier editablePoly
+
+
+                if selectedVertices.numberSet < 2 then
+                (
+                    keepSearching = false
+                )
+                else
+                (
+                    local positions = getWorldPositions node useEditPolyModifier editablePoly
+                    local closestPair = findClosestPair selectedVertices positions blockedPairs threshold pairKey
+
+
+                    if closestPair == undefined then
+                    (
+                        keepSearching = false
+                    )
+                    else
+                    (
+                        local beforeCount = getVertexCount node useEditPolyModifier editablePoly
+
+
+                        if useEditPolyModifier then
+                        (
+                            EditPolyMod.WeldVertices selectedModifier closestPair[1] closestPair[2] node:node
+                            EditPolyMod.Commit selectedModifier
+                        )
+                        else
+                        (
+                            local firstPosition = polyOp.getVert editablePoly closestPair[1]
+                            local secondPosition = polyOp.getVert editablePoly closestPair[2]
+                            local weldPosition = (firstPosition + secondPosition) / 2.0
+                            local welded = polyOp.weldVerts editablePoly closestPair[1] closestPair[2] weldPosition
+
+
+                            if welded == true then polyOp.collapseDeadStructs editablePoly
+                        )
+
+
+                        update node
+
+
+                        local afterCount = getVertexCount node useEditPolyModifier editablePoly
+
+
+                        if afterCount < beforeCount then
+                        (
+                            removedCount += beforeCount - afterCount
+                            blockedPairs = #()
+                        )
+                        else
+                        (
+                            append blockedPairs (pairKey closestPair[1] closestPair[2])
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+
+    removedCount
+    -- return
+)
+
+
+saved_weld_enabled = wallFixerReadIniBool "Controls" "WeldVertices" (WallFixer.readIniBool "WeldVertices" true)
+saved_weld_threshold = wallFixerReadIniFloat "Controls" "WeldThreshold" (wallFixerGetDefaultWeldThreshold())
+saved_display_hidden_edges = wallFixerReadIniBool "Controls" "DisplayHiddenEdges" (WallFixer.readIniBool "DisplayHiddenEdges" false)
+saved_double_side = wallFixerReadIniBool "Controls" "DoubleSide" (WallFixer.readIniBool "DoubleSide" true)
+saved_auto_smooth = wallFixerReadIniBool "Controls" "AutoSmooth" (WallFixer.readIniBool "AutoSmooth" false)
+saved_cut_mode_index = WallFixer.readIniInt "CutMode" 1
+saved_angle_threshold = WallFixer.readIniFloat "AngleThreshold" 5.0
+saved_planar_tolerance = WallFixer.readIniFloat "PlanarTolerance" 1.0
+saved_slice_plane_mode_index = WallFixer.readIniInt "SlicePlaneMode" 2
+saved_border_angle_threshold = WallFixer.readIniFloat "BorderAngleThreshold" 5.0
+saved_right_angle_threshold = WallFixer.readIniFloat "RightAngleThreshold" 0.1
+saved_double_vert_threshold = saved_weld_threshold
+saved_double_face_threshold = WallFixer.readIniFloat "DoubleFaceThreshold" 100.0
+saved_slice_precision = wallFixerReadIniFloat "Controls" "SlicePrecision" (WallFixer.readIniFloat "SlicePrecision" 0.01)
+saved_quiet_batch = WallFixer.readIniBool "QuietBatch" false
+saved_dialog_position = WallFixer.loadDialogPosition()
+saved_slice_direction_index = if saved_cut_mode_index == 2 then 2 else 1
+
+
+saved_slice_direction_index = wallFixerReadIniInt "Controls" "SliceDirection" saved_slice_direction_index
+if saved_slice_direction_index < 1 or saved_slice_direction_index > 2 then saved_slice_direction_index = 1
+saved_quiet_batch = wallFixerReadIniBool "Controls" "SliceQuiet" saved_quiet_batch
+saved_dialog_position = wallFixerLoadDialogPosition saved_dialog_position
+saved_dialog_size = wallFixerLoadDialogSize wall_fixer_default_dialog_size
+
+
+/*
+Unregisters the Wall-Fixer CUI dialog bar when it is currently registered.
+This is required before destroying/restarting a registered MAXScript dialog.
+*/
+function wallFixerUnregisterDialogBar =
+(
+    if WallFixerRollout != undefined then
+    (
+        try
+        (
+            if WallFixerRollout.dialogBar then
+            (
+                wallFixerSaveDockState()
+                cui.UnRegisterDialogBar WallFixerRollout
+            )
+        )
+        catch
+        (
+        )
+    )
+    -- return
+)
+
+
+/*
+Registers Wall-Fixer as a CUI dialog bar that can dock only left or right.
+The dialog remains floatable and keeps CUI docking handles.
+*/
+function wallFixerRegisterDialogBar =
+(
+    if WallFixerRollout != undefined then
+    (
+        try
+        (
+            if not WallFixerRollout.dialogBar then
+            (
+                cui.RegisterDialogBar WallFixerRollout \
+                    minSize:[300,wall_fixer_min_dialog_height] \
+                    style:#(#cui_dock_left, #cui_dock_right, #cui_floatable, #cui_handles)
+            )
+        )
+        catch
+        (
+        )
+    )
+    -- return
+)
+
+
+/*
+Restores the saved Left, Right or floating CUI state after dialog-bar registration.
+Unsupported values are treated as floating mode.
+*/
+function wallFixerRestoreDockState dock_state =
+(
+    if WallFixerRollout != undefined then
+    (
+        try
+        (
+            if WallFixerRollout.dialogBar then
+            (
+                case dock_state of
+                (
+                    #cui_dock_left: cui.DockDialogBar WallFixerRollout #cui_dock_left
+                    #cui_dock_right: cui.DockDialogBar WallFixerRollout #cui_dock_right
+                    default: cui.FloatDialogBar WallFixerRollout
+                )
+
+
+                wallFixerSaveDockState()
+            )
+        )
+        catch
+        (
+        )
+    )
+    -- return
+)
+
+
+wallFixerUnregisterDialogBar()
+saved_dock_state = wallFixerLoadDockState()
+
+
+try
+(
+    destroyDialog WallFixerRollout
+)
+catch
+(
+)
+
+
+
+
+/*
+Opens a workflow help image through the Windows default application.
+Image paths are resolved relative to the Wall-Fixer tool folder.
+*/
+function wallFixerOpenWorkflowImage image_filename image_label =
+(
+    tool_root_path = getFilenamePath wall_fixer_ui_source_path
+    workflow_image_path = tool_root_path + "Doc\\Workflow\\" + image_filename
+
+
+    if doesFileExist workflow_image_path then
+    (
+        try
+        (
+            shellLaunch workflow_image_path ""
+        )
+        catch
+        (
+            messageBox ("Unable to open " + image_label + ":\n" + workflow_image_path) title:"Wall-Fixer"
+        )
+    )
+    else
+    (
+        messageBox (image_label + " was not found:\n" + workflow_image_path) title:"Wall-Fixer"
+    )
+    -- return
+)
+
+
+/*
+Main dialog menu provides restart, left/right docking and workflow-image help commands.
+Help images open in the Windows default image viewer.
+*/
+rcmenu wall_fixer_main_menu
+(
+    subMenu "Restart"
+    (
+        menuItem restart_tools_menu_item "Restart Tools"
+    )
+
+
+    subMenu "DOCK"
+    (
+        menuItem dock_left_menu_item "Left"
+        menuItem dock_right_menu_item "Right"
+    )
+
+
+    subMenu "Help"
+    (
+        menuItem workflow_commands_menu_item "Workflow Commands"
+        menuItem workflow_commands_details_menu_item "Workflow Commands Details"
+    )
+
+
+    on restart_tools_menu_item picked do
+    (
+        restart_script_path = WallFixer.getRestartScriptPath wall_fixer_ui_source_path
+
+
+        if restart_script_path != undefined then
+        (
+            wallFixerUnregisterDialogBar()
+            fileIn restart_script_path
+        )
+        else
+        (
+            messageBox "Wall-Fixer.ms was not found beside the Wall-Fixer component files." title:"Wall-Fixer"
+        )
+    )
+
+
+    on dock_left_menu_item picked do
+    (
+        wallFixerRegisterDialogBar()
+
+
+        try
+        (
+            cui.DockDialogBar WallFixerRollout #cui_dock_left
+            wallFixerSaveDockState()
+        )
+        catch
+        (
+            messageBox "Unable to dock Wall-Fixer to the left side." title:"Wall-Fixer"
+        )
+    )
+
+
+    on dock_right_menu_item picked do
+    (
+        wallFixerRegisterDialogBar()
+
+
+        try
+        (
+            cui.DockDialogBar WallFixerRollout #cui_dock_right
+            wallFixerSaveDockState()
+        )
+        catch
+        (
+            messageBox "Unable to dock Wall-Fixer to the right side." title:"Wall-Fixer"
+        )
+    )
+
+
+    on workflow_commands_menu_item picked do
+    (
+        wallFixerOpenWorkflowImage "Wall-Fixer-Doc-Workflow-Commands.jpg" "Workflow Commands"
+    )
+
+
+    on workflow_commands_details_menu_item picked do
+    (
+        wallFixerOpenWorkflowImage "Wall-Fixer-Doc-Workflow-Commands-Details.jpg" "Workflow Commands Details"
+    )
+)
+
+
+/*
+OPTIONS is carried over from the authoritative Wall-Fixer UI.
+Its controls keep the existing Core behavior while using the Wall-Fixer settings persistence.
+*/
+rollout WallFixerOptionsRollout "Options" width:310 height:142
+(
+    checkbox weld_checkbox "Weld Vertices" pos:[8,13] width:110 height:20 checked:saved_weld_enabled tooltip:"Legacy weld setting.\nSlice and Fix N-gons preserve boundaries without welding."
+    label weld_threshold_label "Threshold:" pos:[140,15] width:62 height:18
+    spinner weld_threshold_spinner "" pos:[200,12] width:102 height:20 \
+        range:[0.0,1000000.0,saved_weld_threshold] type:#worldUnits scale:0.1 \
+        tooltip:"Maximum weld distance. Shared with PRE-PROCESS Vertex Check / Weld.\n\nFresh default: 1 current display unit."
+
+
+    checkbox auto_smooth_checkbox "Auto Smooth" \
+        pos:[8,42] width:126 height:20 checked:saved_auto_smooth \
+        tooltip:"Enable automatic smoothing.\n\nApplied around supported cleanup operations."
+
+
+    button smooth_button "Smooth" \
+        pos:[166,38] width:136 height:26 \
+        tooltip:"Apply Auto Smooth.\n\nUses the current smoothing threshold."
+
+
+    checkbutton hidden_edges_checkbutton "Display Hidden Edges" \
+        pos:[8,75] width:142 height:26 checked:saved_display_hidden_edges \
+        tooltip:"Toggle hidden edge display.\n\nAffects selected wall objects."
+
+
+    checkbutton double_side_checkbutton "Double Side" \
+        pos:[160,75] width:142 height:26 checked:saved_double_side \
+        tooltip:"Toggle double-sided display.\n\nDisables backface culling when enabled."
+
+
+    label slice_precision_label "Advanced - Slice Precision:" pos:[8,114] width:152 height:18
+    spinner slice_precision_spinner "" pos:[164,110] width:138 height:20 \
+        range:[0.0,1000000.0,saved_slice_precision] type:#worldUnits scale:0.001 \
+        tooltip:"Advanced post-slice precision threshold.\n\nSlice Selected Walls checks only vertices created by the latest Make 1 Slice. New vertices within this world-space distance of the defining anchor vertices are welded back to the anchor before redundant-loop cleanup.\n\nDefault: 0.01 world units."
+
+
+    on weld_checkbox changed control_state do
+    (
+        ::WallFixerRollout.saveUiSettings()
+    )
+
+
+    on WallFixerOptionsRollout open do
+    (
+        wall_fixer_weld_threshold_syncing = true
+        weld_threshold_spinner.value = saved_weld_threshold
+        wall_fixer_weld_threshold_syncing = false
+    )
+
+
+    on weld_threshold_spinner changed control_value do
+    (
+        if not wall_fixer_weld_threshold_syncing then
+        (
+            wall_fixer_weld_threshold_syncing = true
+            saved_weld_threshold = control_value
+            saved_double_vert_threshold = control_value
+
+
+            try
+            (
+                WallFixerPreProcessRollout.weld_threshold_spinner.value = control_value
+                WallFixerPreProcessRollout.weld_unit_label.text = wallFixerGetDisplayUnitLabel()
+            )
+            catch
+            (
+            )
+
+
+            wall_fixer_weld_threshold_syncing = false
+            ::WallFixerRollout.saveUiSettings()
+        )
+    )
+
+
+    on auto_smooth_checkbox changed control_state do
+    (
+        ::WallFixerRollout.saveUiSettings()
+    )
+
+
+    on hidden_edges_checkbutton changed control_state do
+    (
+        WallFixer.setSelectionDisplayHiddenEdges control_state
+        ::WallFixerRollout.saveUiSettings()
+    )
+
+
+    on double_side_checkbutton changed control_state do
+    (
+        WallFixer.setSelectionDoubleSide control_state
+        ::WallFixerRollout.saveUiSettings()
+    )
+
+
+    on slice_precision_spinner changed control_value do
+    (
+        ::WallFixerRollout.saveUiSettings()
+    )
+
+
+    on smooth_button pressed do
+    (
+        ::WallFixerRollout.runSmooth()
+    )
+)
+
+
+/*
+PRE-PROCESS & FIX GEOMETRY contains preparation steps 1 through 3.
+Step 4 is exposed as its own top-level Get Outter Walls rollout.
+*/
+rollout WallFixerPreProcessRollout "PRE-PROCESS & FIX GEOMETRY" width:310 height:126
+(
+    button planar_button "1. CHECK AND MAKE WALLS PLANAR" pos:[8,8] width:294 height:34 \
+        tooltip:"LMB: check selected walls and select vertices outside the dominant wall plane. An existing top Edit Poly is reused; a NON PLANAR VERTS marker is added only when required.\n\nRMB: move only detected outlier vertices onto the dominant wall plane. Script selection markers are removed first, and the object is collapsed to Editable Poly only when the real stack requires repair."
+
+
+    button duplicate_verts_button "2. VERTEX CHECK / WELD" pos:[8,48] width:154 height:34 \
+        tooltip:"LMB: find unwelded/near-coincident vertices using the Weld threshold as the search distance. Open border edges are also selected when candidates are found.\n\nRMB: weld/fix duplicated vertices using the same Weld threshold."
+    label weld_threshold_label "Weld:" pos:[166,57] width:34 height:18 align:#right
+    spinner weld_threshold_spinner "" pos:[201,53] width:67 height:20 \
+        range:[0.000001,1000000.0,saved_weld_threshold] type:#worldUnits scale:0.1 \
+        tooltip:"Weld threshold and LMB search distance. Fresh default: 1 current display unit."
+    label weld_unit_label "" pos:[270,57] width:32 height:18 align:#left
+
+
+    button explode_walls_button "3. EXPLODE OBJECTS TO WALLS" pos:[8,88] width:294 height:30 \
+        tooltip:"1. NORMALS: Explode walls by normals\n\n2. FACE DIRECTION: Explode walls by face direction — detects front/backside normals\n\n3. XY POSITION: Explode walls by position\n\n4. ELEMENTS: Explode to elements"
+
+
+
+
+    on WallFixerPreProcessRollout open do
+    (
+        wall_fixer_weld_threshold_syncing = true
+        weld_threshold_spinner.value = saved_weld_threshold
+        weld_unit_label.text = wallFixerGetDisplayUnitLabel()
+        wall_fixer_weld_threshold_syncing = false
+
+
+    )
+
+
+    on weld_threshold_spinner changed control_value do
+    (
+        if not wall_fixer_weld_threshold_syncing then
+        (
+            wall_fixer_weld_threshold_syncing = true
+            saved_weld_threshold = control_value
+            saved_double_vert_threshold = control_value
+            weld_unit_label.text = wallFixerGetDisplayUnitLabel()
+
+
+            try
+            (
+                WallFixerOptionsRollout.weld_threshold_spinner.value = control_value
+            )
+            catch
+            (
+            )
+
+
+            wall_fixer_weld_threshold_syncing = false
+            setIniSetting wall_fixer_ui_ini_path "Controls" "WeldThreshold" (control_value as string)
+        )
+    )
+
+
+    on duplicate_verts_button pressed do
+    (
+        ::WallFixerRollout.runDuplicateVerts fix_vertices:false
+    )
+
+
+    on duplicate_verts_button rightclick do
+    (
+        ::WallFixerRollout.runDuplicateVerts fix_vertices:true
+    )
+
+
+    on explode_walls_button pressed do
+    (
+        ::WallFixerRollout.runExplodeObjectsToWalls()
+    )
+
+
+    on planar_button pressed do
+    (
+        ::WallFixerRollout.runPlanarWalls fix_vertices:false
+    )
+
+
+    on planar_button rightclick do
+    (
+        ::WallFixerRollout.runPlanarWalls fix_vertices:true
+    )
+)
+
+
+/*
+EDGE FIXER contains geometry-fix workflow steps 5 through 8.
+The Straight Edge Fixer controls and callbacks are inherited without changing their geometry logic.
+*/
+rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:392
+(
+    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[8,8] width:294 height:34 \
+        tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
+
+
+    groupBox edge_z_group "6. EDGE Z-LEVEL FIXING AND BORDER EDGES CHECK" pos:[8,48] width:294 height:248
+
+
+    label level_settings_label "LEVEL SETTINGS" pos:[18,68] width:104 height:18
+    label level_tolerance_label "Level Tol:" pos:[18,92] width:58 height:18
+    spinner level_tolerance_spinner "" pos:[76,89] width:72 height:20 \
+        range:[0.000001,1000000.0,0.01] type:#worldUnits scale:0.001 \
+        tooltip:"Maximum world-axis deviation used for level detection and direction checks."
+
+
+    label min_edges_label "Min Edges:" pos:[158,92] width:60 height:18
+    spinner min_level_edges_spinner "" pos:[220,89] width:62 height:20 \
+        range:[1,100000,3] type:#integer scale:1 \
+        tooltip:"Minimum horizontal edge count needed to define a valid Z level."
+
+
+    label search_z_label "Search Z:" pos:[18,118] width:58 height:18
+    spinner search_in_z_spinner "" pos:[76,115] width:72 height:20 \
+        range:[0.0,1000000.0,10.0] type:#worldUnits scale:0.1 \
+        tooltip:"Maximum world-Z distance from a detected level."
+
+
+    checkbox straight_quiet_checkbox "Quiet" pos:[158,117] width:58 height:18 checked:false \
+        tooltip:"Suppress the Straight Edge Fixer final report dialog."
+
+
+    label edge_checks_label "EDGE CHECKS" pos:[18,146] width:82 height:18
+    label edge_angle_label "Angle:" pos:[158,146] width:42 height:18
+    spinner edge_angle_spinner "" pos:[202,143] width:80 height:20 \
+        range:[0.0,45.0,45.0] type:#float scale:1.0 \
+        tooltip:"Candidate direction angle threshold in degrees."
+
+
+    button check_horizontal_button "CHECK HORIZONTAL" pos:[18,170] width:127 height:34 \
+        tooltip:"LMB: select visible near-horizontal error edges.\n\nRMB: straighten currently selected near-horizontal edges."
+    button check_vertical_button "CHECK VERTICAL" pos:[155,170] width:127 height:34 \
+        tooltip:"LMB: select visible near-vertical error edges.\n\nRMB: straighten currently selected near-vertical edges."
+
+
+    button border_check_button "BORDER CHECK" pos:[18,210] width:264 height:30 \
+        tooltip:"Select visible border edges with unwelded/overlapping local-Z seams, reflex corners above 180 degrees or 360-degree backtracking borders."
+
+
+    button straight_edge_fixer_button "STRAIGHT EDGE FIXER" pos:[18,246] width:264 height:36 \
+        tooltip:"Detect repeated horizontal edge levels and align nearby horizontal edges to TOP, BOTTOM or CENTER target Z."
+
+
+    button fix_ngons_button "7. FIX N-GONS" pos:[8,306] width:294 height:34 \
+        tooltip:"Run the current Wall-Fixer Fix N-gons function before slicing."
+
+
+    groupBox check_result_group "8. CHECK RESULT" pos:[8,346] width:294 height:38
+    label check_result_label "Manual viewport check of geometry fixes." pos:[18,362] width:274 height:18
+
+
+    on WallFixerEdgeFixerRollout open do
+    (
+        settings_data = StraightEdgeFixer.loadSettings()
+        level_tolerance_spinner.value = wallFixerReadIniFloat "Controls" "LevelTolerance" settings_data[1]
+        min_level_edges_spinner.value = wallFixerReadIniInt "Controls" "MinLevelEdges" settings_data[2]
+        search_in_z_spinner.value = wallFixerReadIniFloat "Controls" "SearchInZ" settings_data[3]
+        edge_angle_spinner.value = wallFixerReadIniFloat "Controls" "EdgeAngle" settings_data[4]
+        straight_quiet_checkbox.checked = wallFixerReadIniBool "Controls" "StraightQuiet" settings_data[5]
+    )
+
+
+    on level_tolerance_spinner changed control_value do
+    (
+        ::WallFixerRollout.saveStraightEdgeSettings()
+    )
+
+
+    on min_level_edges_spinner changed control_value do
+    (
+        ::WallFixerRollout.saveStraightEdgeSettings()
+    )
+
+
+    on search_in_z_spinner changed control_value do
+    (
+        ::WallFixerRollout.saveStraightEdgeSettings()
+    )
+
+
+    on edge_angle_spinner changed control_value do
+    (
+        ::WallFixerRollout.saveStraightEdgeSettings()
+    )
+
+
+    on straight_quiet_checkbox changed control_state do
+(
+        ::WallFixerRollout.saveStraightEdgeSettings()
+    )
+
+
+    on check_horizontal_button pressed do
+    (
+        ::WallFixerRollout.runStraightEdgeDirection #horizontal fix_selected:false
+    )
+
+
+    on check_horizontal_button rightclick do
+    (
+        ::WallFixerRollout.runStraightEdgeDirection #horizontal fix_selected:true
+    )
+
+
+    on check_vertical_button pressed do
+    (
+        ::WallFixerRollout.runStraightEdgeDirection #vertical fix_selected:false
+    )
+
+
+    on check_vertical_button rightclick do
+    (
+        ::WallFixerRollout.runStraightEdgeDirection #vertical fix_selected:true
+    )
+
+
+    on border_check_button pressed do
+    (
+        ::WallFixerRollout.runStraightBorderCheck()
+    )
+
+
+    on straight_edge_fixer_button pressed do
+    (
+        ::WallFixerRollout.runStraightEdgeLevelFix()
+    )
+
+
+    on two_edge_verts_button pressed do
+    (
+        ::WallFixerRollout.runFindTwoEdgeVerts()
+    )
+
+
+    on two_edge_verts_button rightclick do
+    (
+        macros.run "Ribbon - Modeling" "VertexRemove"
+        ::WallFixerRollout.setStatus #success "Vertex Remove command executed on the current selection."
+    )
+
+
+    on fix_ngons_button pressed do
+    (
+        ::WallFixerRollout.runFixNgons #preprocess
+    )
+)
+
+
+/*
+SLICE WALLS exposes only the requested Vertical/Horizontal choice and the inherited batch slicer.
+Advanced slicer values continue to come from the existing Wall-Fixer INI settings.
+*/
+rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
+(
+    radiobuttons slice_direction_radio "" pos:[8,8] width:178 height:20 \
+        labels:#("Vertical", "Horizontal") default:saved_slice_direction_index columns:2 align:#left \
+        tooltip:"Choose which directional pass runs first. Existing directional modifier separation is preserved."
+
+
+    checkbox quiet_checkbox "Quiet" pos:[236,10] width:62 height:18 checked:saved_quiet_batch \
+        tooltip:"Suppress verbose Listener output during the inherited batch slicing operation."
+
+
+    button slice_selected_walls_button "9. SLICE SELECTED WALLS" pos:[8,42] width:294 height:38 \
+        tooltip:"Reuse the current directional slicing system. Vertical and Horizontal remain separate Edit Poly modifiers and duplicate slice modifiers are prevented."
+
+
+    groupBox slice_check_result_group "CHECK RESULT" pos:[8,84] width:294 height:40
+    label slice_check_result_label "Manual viewport check after slicing." pos:[18,101] width:274 height:18
+
+
+    on slice_direction_radio changed state do
+    (
+        ::WallFixerRollout.saveUiSettings()
+    )
+
+
+    on quiet_checkbox changed control_state do
+    (
+        ::WallFixerRollout.saveUiSettings()
+    )
+
+
+    on slice_selected_walls_button pressed do
+    (
+        ::WallFixerRollout.runSliceSelectedWalls()
+    )
+)
+
+
+/*
+POST-PROCESS exposes current cleanup tools and reserves the new missing-loop/corner-completion actions.
+The two wall-completion buttons remain disabled until their detailed behavior is implemented.
+*/
+rollout WallFixerPostProcessRollout "POST-PROCESS" width:310 height:268
+(
+    button duplicated_vertices_button "10. DUPLICATED VERTICES" pos:[8,8] width:294 height:34 \
+        tooltip:"LMB: select duplicate-position vertices at 0.01 tolerance.\n\nRMB: run the current duplicate-vertex fix at 0.01 tolerance."
+
+
+    button redundant_loops_button "11. REMOVE REDUNDANT LOOPS AND EDGES" pos:[8,48] width:294 height:34 \
+        tooltip:"Reuse the current Redundant Loop Cleanup operation."
+
+
+    button repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" pos:[8,88] width:294 height:34 enabled:false \
+        tooltip:"Reserved for the new missing-loop completion tool."
+
+
+    button post_fix_ngons_button "13. FIX N-GONS" pos:[8,128] width:294 height:34 \
+        tooltip:"Run the current Wall-Fixer Fix N-gons function again after slicing cleanup."
+
+
+    groupBox walls_completion_group "WALLS COMPLETION" pos:[8,170] width:294 height:90
+
+
+    button attach_walls_button "14. ATTACH WALLS TO OBJECTS" pos:[18,190] width:264 height:28 enabled:false \
+        tooltip:"Reserved for the new Attach walls to objects function. Existing ATTACH AND WELD is intentionally not substituted because this step will have separate requirements."
+
+
+    button weld_corners_button "15. WELD AND CONNECT WALL CORNERS" pos:[18,224] width:264 height:28 enabled:false \
+        tooltip:"Reserved for welding wall corners and repairing continuous edge loops through the corners."
+
+
+    on duplicated_vertices_button pressed do
+    (
+        ::WallFixerRollout.runDuplicateVerts fix_vertices:false
+    )
+
+
+    on duplicated_vertices_button rightclick do
+    (
+        ::WallFixerRollout.runDuplicateVerts fix_vertices:true
+    )
+
+
+    on redundant_loops_button pressed do
+    (
+        ::WallFixerRollout.runRedundantLoopCleanup()
+    )
+
+
+    on post_fix_ngons_button pressed do
+    (
+        ::WallFixerRollout.runFixNgons #postprocess
+    )
+)
+
+
+/*
+Main Wall-Fixer dialog owns shared progress, two-line message history and function wrappers.
+Child rollouts contain controls only and call these centralized handlers.
+*/
+/*
+Embedded Inner-Outer Wall Finder 0.28
+Runtime classifier implementation is embedded here so Wall-Fixer does not depend on a separately synced classifier file.
+Material ID 1 = OUTER, ID 2 = INNER, ID 3 = UP, ID 4 = DOWN.
+*/
+
+
+/* Returns the top Edit Poly modifier when it is the evaluated top modifier.
+*/
+function getTopEditPoly object_node =
+(
+    local edit_poly_mod = undefined
+
+
+    if object_node.modifiers.count > 0 then
+    (
+        if classof object_node.modifiers[1] == Edit_Poly then
+        (
+            edit_poly_mod = object_node.modifiers[1]
+        )
+    )
+
+
+    edit_poly_mod -- return
+)
+
+
+/* Returns a supported geometry source for Editable Poly or top Edit Poly.
+*/
+function getFaceGeometrySource object_node =
+(
+    local source_data = undefined
+    local edit_poly_mod = getTopEditPoly object_node
+
+
+    if edit_poly_mod != undefined then
+    (
+        source_data = #(#editPoly, edit_poly_mod)
+    )
+    else if object_node.modifiers.count == 0 and classof object_node.baseObject == Editable_Poly then
+    (
+        source_data = #(#editablePoly, object_node.baseObject)
+    )
+
+
+    source_data -- return
+)
+
+
+/* Returns the vertex count from the current supported polygon source.
+*/
+function getSourceNumVertices object_node source_data =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local vertex_count = 0
+
+
+    if source_type == #editPoly then
+    (
+        vertex_count = source_value.GetNumVertices node:object_node
+    )
+    else if source_type == #editablePoly then
+    (
+        vertex_count = source_value.GetNumVertices()
+    )
+
+
+    vertex_count -- return
+)
+
+
+/* Returns the face count from the current supported polygon source.
+*/
+function getSourceNumFaces object_node source_data =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local face_count = 0
+
+
+    if source_type == #editPoly then
+    (
+        face_count = source_value.GetNumFaces node:object_node
+    )
+    else if source_type == #editablePoly then
+    (
+        face_count = source_value.GetNumFaces()
+    )
+
+
+    face_count -- return
+)
+
+
+/* Returns one evaluated vertex position in world space.
+*/
+function getSourceVertexWorld object_node source_data vertex_index =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local vertex_local = [0.0, 0.0, 0.0]
+
+
+    if source_type == #editPoly then
+    (
+        vertex_local = source_value.GetVertex vertex_index node:object_node
+    )
+    else if source_type == #editablePoly then
+    (
+        vertex_local = source_value.GetVertex vertex_index
+    )
+
+
+    (vertex_local * object_node.objectTransform) -- return
+)
+
+
+/* Returns the number of polygon corners for one evaluated face.
+*/
+function getSourceFaceDegree object_node source_data face_index =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local face_degree = 0
+
+
+    if source_type == #editPoly then
+    (
+        face_degree = source_value.GetFaceDegree face_index node:object_node
+    )
+    else if source_type == #editablePoly then
+    (
+        face_degree = source_value.GetFaceDegree face_index
+    )
+
+
+    face_degree -- return
+)
+
+
+/* Returns the vertex index at one polygon corner.
+*/
+function getSourceFaceVertex object_node source_data face_index corner_index =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local vertex_index = 0
+
+
+    if source_type == #editPoly then
+    (
+        vertex_index = source_value.GetFaceVertex face_index corner_index node:object_node
+    )
+    else if source_type == #editablePoly then
+    (
+        vertex_index = source_value.GetFaceVertex face_index corner_index
+    )
+
+
+    vertex_index -- return
+)
+
+
+/* Returns the edge index at one polygon side.
+*/
+function getSourceFaceEdge object_node source_data face_index side_index =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local edge_index = 0
+
+
+    if source_type == #editPoly then
+    (
+        edge_index = source_value.GetFaceEdge face_index side_index node:object_node
+    )
+    else if source_type == #editablePoly then
+    (
+        edge_index = source_value.GetFaceEdge face_index side_index
+    )
+
+
+    edge_index -- return
+)
+
+
+/* Returns the face index attached to one side of an edge.
+*/
+function getSourceEdgeFace object_node source_data edge_index side_index =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local face_index = 0
+
+
+    if source_type == #editPoly then
+    (
+        face_index = source_value.GetEdgeFace edge_index side_index node:object_node
+    )
+    else if source_type == #editablePoly then
+    (
+        face_index = source_value.GetEdgeFace edge_index side_index
+    )
+
+
+    face_index -- return
+)
+
+
+/* Calculates the center of an arbitrary polygon from cached world-space vertices.
+*/
+function calculatePolygonCenter face_vertices =
+(
+    local center_value = [0.0, 0.0, 0.0]
+
+
+    if face_vertices.count > 0 then
+    (
+        for vertex_value in face_vertices do
+        (
+            center_value += vertex_value
+        )
+
+
+        center_value /= face_vertices.count
+    )
+
+
+    center_value -- return
+)
+
+
+/* Calculates a stable polygon normal with Newell's method in world space.
+*/
+function calculatePolygonNormal face_vertices epsilon:0.0000001 =
+(
+    local normal_value = [0.0, 0.0, 0.0]
+    local current_vertex = [0.0, 0.0, 0.0]
+    local next_vertex = [0.0, 0.0, 0.0]
+    local next_index = 1
+
+
+    if face_vertices.count >= 3 then
+    (
+        for vertex_index = 1 to face_vertices.count do
+        (
+            next_index = vertex_index + 1
+            if next_index > face_vertices.count then
+            (
+                next_index = 1
+            )
+
+
+            current_vertex = face_vertices[vertex_index]
+            next_vertex = face_vertices[next_index]
+
+
+            normal_value.x += (current_vertex.y - next_vertex.y) * (current_vertex.z + next_vertex.z)
+            normal_value.y += (current_vertex.z - next_vertex.z) * (current_vertex.x + next_vertex.x)
+            normal_value.z += (current_vertex.x - next_vertex.x) * (current_vertex.y + next_vertex.y)
+        )
+    )
+
+
+    if (length normal_value) > epsilon then
+    (
+        normal_value = normalize normal_value
+    )
+    else
+    (
+        normal_value = [0.0, 0.0, 0.0]
+    )
+
+
+    normal_value -- return
+)
+
+
+/* Returns the positive ray distance to an axis-aligned bounding-box exit.
+*/
+function getBBoxExitDistance point_value direction_value bbox_min bbox_max epsilon:0.0000001 =
+(
+    local distance_value = 1.0e30
+    local candidate_distance = 0.0
+
+
+    if direction_value.x > epsilon then
+    (
+        candidate_distance = (bbox_max.x - point_value.x) / direction_value.x
+        if candidate_distance >= 0.0 and candidate_distance < distance_value then
+        (
+            distance_value = candidate_distance
+        )
+    )
+    else if direction_value.x < -epsilon then
+    (
+        candidate_distance = (bbox_min.x - point_value.x) / direction_value.x
+        if candidate_distance >= 0.0 and candidate_distance < distance_value then
+        (
+            distance_value = candidate_distance
+        )
+    )
+
+
+    if direction_value.y > epsilon then
+    (
+        candidate_distance = (bbox_max.y - point_value.y) / direction_value.y
+        if candidate_distance >= 0.0 and candidate_distance < distance_value then
+        (
+            distance_value = candidate_distance
+        )
+    )
+    else if direction_value.y < -epsilon then
+    (
+        candidate_distance = (bbox_min.y - point_value.y) / direction_value.y
+        if candidate_distance >= 0.0 and candidate_distance < distance_value then
+        (
+            distance_value = candidate_distance
+        )
+    )
+
+
+    if direction_value.z > epsilon then
+    (
+        candidate_distance = (bbox_max.z - point_value.z) / direction_value.z
+        if candidate_distance >= 0.0 and candidate_distance < distance_value then
+        (
+            distance_value = candidate_distance
+        )
+    )
+    else if direction_value.z < -epsilon then
+    (
+        candidate_distance = (bbox_min.z - point_value.z) / direction_value.z
+        if candidate_distance >= 0.0 and candidate_distance < distance_value then
+        (
+            distance_value = candidate_distance
+        )
+    )
+
+
+    if distance_value == 1.0e30 then
+    (
+        distance_value = 0.0
+    )
+
+
+    distance_value -- return
+)
+
+
+/* Calculates a double-sided ray/triangle hit distance with Moller-Trumbore intersection.
+*/
+function getRayTriangleDistance ray_origin ray_direction point_a point_b point_c epsilon:0.0000001 =
+(
+    local edge_a = point_b - point_a
+    local edge_b = point_c - point_a
+    local p_vector = cross ray_direction edge_b
+    local determinant = dot edge_a p_vector
+    local hit_distance = undefined
+    local inverse_determinant = 0.0
+    local t_vector = [0.0, 0.0, 0.0]
+    local u_value = 0.0
+    local q_vector = [0.0, 0.0, 0.0]
+    local v_value = 0.0
+    local t_value = 0.0
+
+
+    if (abs determinant) > epsilon then
+    (
+        inverse_determinant = 1.0 / determinant
+        t_vector = ray_origin - point_a
+        u_value = (dot t_vector p_vector) * inverse_determinant
+
+
+        if u_value >= -epsilon and u_value <= (1.0 + epsilon) then
+        (
+            q_vector = cross t_vector edge_a
+            v_value = (dot ray_direction q_vector) * inverse_determinant
+
+
+            if v_value >= -epsilon and (u_value + v_value) <= (1.0 + epsilon) then
+            (
+                t_value = (dot edge_b q_vector) * inverse_determinant
+                if t_value > epsilon then
+                (
+                    hit_distance = t_value
+                )
+            )
+        )
+    )
+
+
+    hit_distance -- return
+)
+
+
+/* Finds the nearest selected-face hit for a double-sided ray, excluding its source face.
+*/
+function getNearestRayHitDistance ray_origin ray_direction object_data_array ignore_node ignore_face epsilon:0.0000001 =
+(
+    local nearest_distance = undefined
+    local face_vertices = undefined
+    local hit_distance = undefined
+
+
+    for object_data in object_data_array do
+    (
+        local object_node = object_data[1]
+        local cached_faces = object_data[3]
+
+
+        for face_index = 1 to cached_faces.count do
+        (
+            if not (object_node == ignore_node and face_index == ignore_face) then
+            (
+                face_vertices = cached_faces[face_index]
+
+
+                if face_vertices.count >= 3 then
+                (
+                    for triangle_index = 2 to (face_vertices.count - 1) do
+                    (
+                        hit_distance = getRayTriangleDistance ray_origin ray_direction face_vertices[1] face_vertices[triangle_index] face_vertices[triangle_index + 1] epsilon:epsilon
+
+
+                        if hit_distance != undefined then
+                        (
+                            if nearest_distance == undefined or hit_distance < nearest_distance then
+                            (
+                                nearest_distance = hit_distance
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+
+    nearest_distance -- return
+)
+
+
+/* Finds the nearest nearly-parallel face hit within the wall-thickness search distance.
+   Only faces on the currently selected objects are searched.
+*/
+function getNearestOppositeWallHit ray_origin ray_direction source_normal object_data_array ignore_node ignore_face max_distance parallel_threshold:0.90 epsilon:0.0000001 =
+(
+    local nearest_data = undefined
+    local candidate_normal = [0.0, 0.0, 0.0]
+    local face_vertices = undefined
+    local hit_distance = undefined
+    local parallel_value = 0.0
+
+
+    for object_data in object_data_array do
+    (
+        local object_node = object_data[1]
+        local cached_faces = object_data[3]
+        local face_normals = object_data[5]
+
+
+        for face_index = 1 to cached_faces.count do
+        (
+            if not (object_node == ignore_node and face_index == ignore_face) then
+            (
+                candidate_normal = face_normals[face_index]
+
+
+                if (length candidate_normal) > epsilon then
+                (
+                    parallel_value = abs (dot source_normal candidate_normal)
+
+
+                    if parallel_value >= parallel_threshold then
+                    (
+                        face_vertices = cached_faces[face_index]
+
+
+                        if face_vertices.count >= 3 then
+                        (
+                            for triangle_index = 2 to (face_vertices.count - 1) do
+                            (
+                                hit_distance = getRayTriangleDistance ray_origin ray_direction face_vertices[1] face_vertices[triangle_index] face_vertices[triangle_index + 1] epsilon:epsilon
+
+
+                                if hit_distance != undefined then
+                                (
+                                    if hit_distance <= max_distance then
+                                    (
+                                        if nearest_data == undefined or hit_distance < nearest_data[1] then
+                                        (
+                                            nearest_data = #(hit_distance, object_node, face_index, parallel_value)
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+
+    nearest_data -- return
+)
+
+
+/* Returns the current classification of one cached face.
+   ID 1 = OUTER, ID 2 = INNER, ID 3 = UP, ID 4 = DOWN, 0 = unresolved wall.
+*/
+function getCachedFaceClass object_data_array object_node face_index =
+(
+    local class_id = 0
+
+
+    for object_data in object_data_array do
+    (
+        if object_data[1] == object_node then
+        (
+            if face_index >= 1 and face_index <= object_data[6].count then
+            (
+                class_id = object_data[6][face_index]
+            )
+        )
+    )
+
+
+    class_id -- return
+)
+
+
+/* Returns the cached first-pass spatial score for one face.
+   Positive scores lean OUTER, negative scores lean INNER.
+*/
+function getCachedFaceScore object_data_array object_node face_index =
+(
+    local score_value = 0.0
+
+
+    for object_data in object_data_array do
+    (
+        if object_data[1] == object_node then
+        (
+            if object_data.count >= 7 and face_index >= 1 and face_index <= object_data[7].count then
+            (
+                score_value = object_data[7][face_index]
+            )
+        )
+    )
+
+
+    score_value -- return
+)
+
+
+/* Returns the cached center and normal for one face.
+   Result is #(center, normal), or undefined when the face cannot be found.
+*/
+function getCachedFaceCenterNormal object_data_array object_node face_index =
+(
+    local result_data = undefined
+
+
+    for object_data in object_data_array do
+    (
+        if object_data[1] == object_node then
+        (
+            if face_index >= 1 and face_index <= object_data[4].count then
+            (
+                result_data = #(object_data[4][face_index], object_data[5][face_index])
+            )
+        )
+    )
+
+
+    result_data -- return
+)
+
+
+/* Resolves unresolved or weak wall faces by finding the opposite wall behind the face.
+   Horizontal UP/DOWN faces are ignored; only wall classes 0, 1, and 2 are considered.
+*/
+function resolveUnresolvedWallsByThickness object_data_array wall_thickness confidence_threshold:0.12 parallel_threshold:0.90 ray_offset:0.001 epsilon:0.0000001 =
+(
+    local resolved_count = 0
+    local weak_limit = confidence_threshold * 2.0
+
+
+    if weak_limit < confidence_threshold then
+    (
+        weak_limit = confidence_threshold
+    )
+
+
+    if wall_thickness > epsilon then
+    (
+        for object_data in object_data_array do
+        (
+            local object_node = object_data[1]
+            local face_centers = object_data[4]
+            local face_normals = object_data[5]
+            local face_classes = object_data[6]
+            local face_scores = object_data[7]
+
+
+            for face_index = 1 to face_classes.count do
+            (
+                local current_class = face_classes[face_index]
+                local face_score = face_scores[face_index]
+
+
+                if current_class == 0 or ((current_class == 1 or current_class == 2) and (abs face_score) < weak_limit) then
+                (
+                    local face_center = face_centers[face_index]
+                    local face_normal = face_normals[face_index]
+
+
+                    if (length face_normal) > epsilon then
+                    (
+                        local opposite_origin = face_center - (face_normal * ray_offset)
+                        local opposite_hit = getNearestOppositeWallHit opposite_origin (-face_normal) face_normal object_data_array object_node face_index wall_thickness parallel_threshold:parallel_threshold epsilon:epsilon
+
+
+                        if opposite_hit != undefined then
+                        (
+                            local opposite_data = getCachedFaceCenterNormal object_data_array opposite_hit[2] opposite_hit[3]
+
+
+                            if opposite_data != undefined then
+                            (
+                                local opposite_center = opposite_data[1]
+                                local opposite_normal = opposite_data[2]
+
+
+                                if (length opposite_normal) > epsilon and (abs opposite_normal.z) < 0.85 then
+                                (
+                                    local source_outward_origin = face_center + (face_normal * ray_offset)
+                                    local opposite_outward_origin = opposite_center + (opposite_normal * ray_offset)
+                                    local source_outward_hit = getNearestRayHitDistance source_outward_origin face_normal object_data_array object_node face_index epsilon:epsilon
+                                    local opposite_outward_hit = getNearestRayHitDistance opposite_outward_origin opposite_normal object_data_array opposite_hit[2] opposite_hit[3] epsilon:epsilon
+                                    local new_class = 0
+
+
+                                    if source_outward_hit == undefined and opposite_outward_hit != undefined then
+                                    (
+                                        new_class = 1
+                                    )
+                                    else if source_outward_hit != undefined and opposite_outward_hit == undefined then
+                                    (
+                                        new_class = 2
+                                    )
+                                    else
+                                    (
+                                        local opposite_class = getCachedFaceClass object_data_array opposite_hit[2] opposite_hit[3]
+                                        local opposite_score = getCachedFaceScore object_data_array opposite_hit[2] opposite_hit[3]
+
+
+                                        if (abs opposite_score) >= weak_limit then
+                                        (
+                                            if opposite_class == 1 then
+                                            (
+                                                new_class = 2
+                                            )
+                                            else if opposite_class == 2 then
+                                            (
+                                                new_class = 1
+                                            )
+                                        )
+                                    )
+
+
+                                    if (new_class == 1 or new_class == 2) and new_class != current_class then
+                                    (
+                                        face_classes[face_index] = new_class
+                                        resolved_count += 1
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+
+    resolved_count -- return
+)
+
+
+/* Builds a bitarray containing every face assigned to one classification ID.
+*/
+function buildFaceClassBits face_classes class_id =
+(
+    local face_bits = #{}
+
+
+    for face_index = 1 to face_classes.count do
+    (
+        if face_classes[face_index] == class_id then
+        (
+            face_bits[face_index] = true
+        )
+    )
+
+
+    face_bits -- return
+)
+
+
+/* Resolves remaining unresolved wall faces from already classified edge neighbors.
+   UP and DOWN faces do not vote in wall classification.
+*/
+function resolveUnresolvedWallFaces object_data_array neighbor_passes:3 =
+(
+    local total_change_count = 0
+
+
+    for pass_index = 1 to neighbor_passes do
+    (
+        local change_count = 0
+
+
+        for object_data in object_data_array do
+        (
+            local object_node = object_data[1]
+            local source_data = object_data[2]
+            local face_normals = object_data[5]
+            local face_classes = object_data[6]
+
+
+            for face_index = 1 to face_classes.count do
+            (
+                if face_classes[face_index] == 0 then
+                (
+                    local face_degree = getSourceFaceDegree object_node source_data face_index
+                    local vote_value = 0.0
+                    local evidence_value = 0.0
+                    local edge_index = 0
+                    local edge_face_a = 0
+                    local edge_face_b = 0
+                    local neighbor_face = 0
+                    local neighbor_class = 0
+                    local similarity = 0.0
+                    local vote_weight = 0.0
+
+
+                    for side_index = 1 to face_degree do
+                    (
+                        edge_index = getSourceFaceEdge object_node source_data face_index side_index
+
+
+                        if edge_index > 0 then
+                        (
+                            edge_face_a = getSourceEdgeFace object_node source_data edge_index 1
+                            edge_face_b = getSourceEdgeFace object_node source_data edge_index 2
+                            neighbor_face = 0
+
+
+                            if edge_face_a > 0 and edge_face_a != face_index then
+                            (
+                                neighbor_face = edge_face_a
+                            )
+                            else if edge_face_b > 0 and edge_face_b != face_index then
+                            (
+                                neighbor_face = edge_face_b
+                            )
+
+
+                            if neighbor_face > 0 and neighbor_face <= face_classes.count then
+                            (
+                                neighbor_class = face_classes[neighbor_face]
+
+
+                                if neighbor_class == 1 or neighbor_class == 2 then
+                                (
+                                    similarity = abs (dot face_normals[face_index] face_normals[neighbor_face])
+                                    vote_weight = 0.25 + (0.75 * similarity)
+                                    evidence_value += vote_weight
+
+
+                                    if neighbor_class == 1 then
+                                    (
+                                        vote_value += vote_weight
+                                    )
+                                    else
+                                    (
+                                        vote_value -= vote_weight
+                                    )
+                                )
+                            )
+                        )
+                    )
+
+
+                    if evidence_value >= 0.5 then
+                    (
+                        local normalized_vote = vote_value / evidence_value
+
+
+                        if normalized_vote >= 0.34 then
+                        (
+                            face_classes[face_index] = 1
+                            change_count += 1
+                        )
+                        else if normalized_vote <= -0.34 then
+                        (
+                            face_classes[face_index] = 2
+                            change_count += 1
+                        )
+                    )
+                )
+            )
+        )
+
+
+        total_change_count += change_count
+    )
+
+
+    total_change_count -- return
+)
+
+
+/* Forces every remaining unresolved wall face to OUTER or INNER from its spatial score.
+   This is the final fallback so every non-horizontal face receives a wall class.
+*/
+function finalizeUnresolvedWallFaces object_data_array =
+(
+    local finalized_count = 0
+
+
+    for object_data in object_data_array do
+    (
+        local face_classes = object_data[6]
+        local face_scores = object_data[7]
+
+
+        for face_index = 1 to face_classes.count do
+        (
+            if face_classes[face_index] == 0 then
+            (
+                if face_scores[face_index] >= 0.0 then
+                (
+                    face_classes[face_index] = 1
+                )
+                else
+                (
+                    face_classes[face_index] = 2
+                )
+
+
+                finalized_count += 1
+            )
+        )
+    )
+
+
+    finalized_count -- return
+)
+
+
+/* Creates the classifier Multi/Sub-Object material with legacy Standard sub-materials.
+   ID 1 = OUTER green, ID 2 = INNER orange, ID 3 = UP pastel blue, ID 4 = DOWN pastel brown.
+*/
+function createWallClassifierMaterial =
+(
+    local classifier_material = multimaterial numsubs:4 name:"WALL FACE CLASSIFIER"
+    local outer_material = standardMaterial name:"OUTER" diffuse:(color 60 200 80)
+    local inner_material = standardMaterial name:"INNER" diffuse:(color 255 140 0)
+    local up_material = standardMaterial name:"UP" diffuse:(color 155 205 235)
+    local down_material = standardMaterial name:"DOWN" diffuse:(color 190 155 120)
+
+
+    classifier_material.materialList[1] = outer_material
+    classifier_material.materialList[2] = inner_material
+    classifier_material.materialList[3] = up_material
+    classifier_material.materialList[4] = down_material
+    classifier_material.materialIDList = #(1, 2, 3, 4)
+    classifier_material.names = #("OUTER", "INNER", "UP", "DOWN")
+
+
+    classifier_material -- return
+)
+
+
+/* Assigns one shared classifier Multi/Sub-Object material to supported nodes.
+   Existing node materials are replaced only on the objects being classified.
+*/
+function assignWallClassifierMaterial object_nodes =
+(
+    local classifier_material = createWallClassifierMaterial()
+
+
+    for object_node in object_nodes do
+    (
+        object_node.material = classifier_material
+    )
+
+
+    classifier_material -- return
+)
+
+
+/* Assigns one Material ID to a face set on Editable Poly or top Edit Poly.
+*/
+function setSourceFaceMaterialId object_node source_data face_bits material_id =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local working_bits = copy face_bits
+
+
+    if working_bits.numberSet > 0 then
+    (
+        if source_type == #editPoly then
+        (
+            select object_node
+            max modify mode
+            modPanel.setCurrentObject source_value
+            source_value.SetEPolySelLevel #Face
+            source_value.SetSelection #Face working_bits node:object_node
+            source_value.materialIDToSet = material_id
+            source_value.ButtonOp #SetMaterial
+        )
+        else if source_type == #editablePoly then
+        (
+            polyOp.setFaceMatID source_value working_bits material_id
+        )
+    )
+
+
+    true -- return
+)
+
+
+/* Sets the face selection without changing the current object selection.
+   This lets one LMB action update face selections across multiple supported objects.
+*/
+function setSourceFaceSelection object_node source_data face_bits =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local working_bits = #{}
+
+
+    if face_bits != undefined then
+    (
+        working_bits = copy face_bits
+    )
+
+
+    if source_type == #editPoly then
+    (
+        source_value.SetEPolySelLevel #Face
+        source_value.SetSelection #Face working_bits node:object_node
+    )
+    else if source_type == #editablePoly then
+    (
+        source_value.SetSelection #Face working_bits
+    )
+
+
+    true -- return
+)
+
+
+/* Returns the Material ID assigned to one face on Editable Poly or top Edit Poly.
+*/
+function getSourceFaceMaterialId object_node source_data face_index =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local material_id = 0
+
+
+    if source_type == #editPoly then
+    (
+        material_id = source_value.GetFaceMaterial face_index node:object_node
+    )
+    else if source_type == #editablePoly then
+    (
+        material_id = polyOp.getFaceMatID source_value face_index
+    )
+
+
+    material_id -- return
+)
+
+
+/* Finds cached classifier data for one node and removes invalid cache entries.
+   Returns zero when the node does not currently have cached class bitarrays.
+*/
+function findWallFaceCacheIndex object_node =
+(
+    local found_index = 0
+
+
+    if wall_face_classifier_cache.count > 0 then
+    (
+        for cache_index = wall_face_classifier_cache.count to 1 by -1 do
+        (
+            local cache_entry = wall_face_classifier_cache[cache_index]
+
+
+            if cache_entry.count < 6 then
+            (
+                deleteItem wall_face_classifier_cache cache_index
+            )
+            else if not isValidNode cache_entry[1] then
+            (
+                deleteItem wall_face_classifier_cache cache_index
+            )
+            else if found_index == 0 and cache_entry[1] == object_node then
+            (
+                found_index = cache_index
+            )
+        )
+    )
+
+
+    found_index -- return
+)
+
+
+/* Stores OUTER, INNER, UP, and DOWN face bitarrays for fast button selection.
+   Cache entries are rebuilt after classification or manual RMB marking.
+*/
+function cacheWallFaceClasses object_node face_count outer_bits inner_bits up_bits down_bits =
+(
+    local cache_entry = #(object_node, face_count, copy outer_bits, copy inner_bits, copy up_bits, copy down_bits)
+    local cache_index = findWallFaceCacheIndex object_node
+
+
+    if cache_index > 0 then
+    (
+        wall_face_classifier_cache[cache_index] = cache_entry
+    )
+    else
+    (
+        append wall_face_classifier_cache cache_entry
+    )
+
+
+    cache_entry -- return
+)
+
+
+/* Reads classifier Material IDs once and stores all four face classes in cache.
+   Faces using other Material IDs are intentionally not included in the classifier cache.
+*/
+function cacheWallFaceClassesFromMaterialIds object_node source_data =
+(
+    local face_count = getSourceNumFaces object_node source_data
+    local outer_bits = #{}
+    local inner_bits = #{}
+    local up_bits = #{}
+    local down_bits = #{}
+
+
+    for face_index = 1 to face_count do
+    (
+        local material_id = getSourceFaceMaterialId object_node source_data face_index
+
+
+        if material_id == 1 then
+        (
+            outer_bits[face_index] = true
+        )
+        else if material_id == 2 then
+        (
+            inner_bits[face_index] = true
+        )
+        else if material_id == 3 then
+        (
+            up_bits[face_index] = true
+        )
+        else if material_id == 4 then
+        (
+            down_bits[face_index] = true
+        )
+    )
+
+
+    cacheWallFaceClasses object_node face_count outer_bits inner_bits up_bits down_bits -- return
+)
+
+
+/* Returns cached face bits when they still match the current object topology.
+   Undefined means the cache should be rebuilt from Material IDs.
+*/
+function getCachedWallFaceBits object_node source_data material_id =
+(
+    local result_bits = undefined
+    local cache_index = findWallFaceCacheIndex object_node
+
+
+    if cache_index > 0 then
+    (
+        local cache_entry = wall_face_classifier_cache[cache_index]
+        local face_count = getSourceNumFaces object_node source_data
+        local material_valid = false
+
+
+        if object_node.material != undefined then
+        (
+            if object_node.material.name == "WALL FACE CLASSIFIER" then
+            (
+                material_valid = true
+            )
+        )
+
+
+        if cache_entry[2] == face_count and material_valid then
+        (
+            if material_id == 1 then
+            (
+                result_bits = copy cache_entry[3]
+            )
+            else if material_id == 2 then
+            (
+                result_bits = copy cache_entry[4]
+            )
+            else if material_id == 3 then
+            (
+                result_bits = copy cache_entry[5]
+            )
+            else if material_id == 4 then
+            (
+                result_bits = copy cache_entry[6]
+            )
+        )
+        else
+        (
+            deleteItem wall_face_classifier_cache cache_index
+        )
+    )
+
+
+    result_bits -- return
+)
+
+
+/* Returns the current face selection for Editable Poly or top Edit Poly.
+   The returned bitarray is copied so callers can safely modify it.
+*/
+function getSourceFaceSelection object_node source_data =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local face_bits = #{}
+
+
+    if source_type == #editPoly then
+    (
+        face_bits = source_value.GetSelection #Face node:object_node
+    )
+    else if source_type == #editablePoly then
+    (
+        face_bits = source_value.GetSelection #Face
+    )
+
+
+    if face_bits == undefined then
+    (
+        face_bits = #{}
+    )
+
+
+    copy face_bits -- return
+)
+
+
+/* Builds a bitarray containing every face of one supported polygon source.
+   Used when RMB marking is performed at object level.
+*/
+function getAllSourceFaceBits object_node source_data =
+(
+    local face_count = getSourceNumFaces object_node source_data
+    local face_bits = #{}
+
+
+    for face_index = 1 to face_count do
+    (
+        face_bits[face_index] = true
+    )
+
+
+    face_bits -- return
+)
+
+
+
+
+/* Converts a face bitarray to a compact persistent user-property string.
+   The stored indices are used only as manual FORCED OUTER/INNER classification hints.
+*/
+function wallFaceBitsToUserPropString face_bits =
+(
+    local value_string = ""
+    local first_value = true
+
+
+    for face_index in face_bits do
+    (
+        if not first_value then
+        (
+            value_string += ","
+        )
+
+
+        value_string += face_index as string
+        first_value = false
+    )
+
+
+    value_string -- return
+)
+
+
+/* Restores a persistent FORCED face list and clamps it to the current face count.
+   Empty or missing user properties produce an empty bitarray.
+*/
+function wallFaceBitsFromUserPropString value_string face_count =
+(
+    local face_bits = #{}
+
+
+    if value_string != undefined and value_string != "" then
+    (
+        local safe_value_string = value_string as string
+        local token_array = filterString safe_value_string ","
+
+
+        for token_value in token_array do
+        (
+            local face_index = token_value as integer
+
+
+            if face_index >= 1 and face_index <= face_count then
+            (
+                face_bits[face_index] = true
+            )
+        )
+    )
+
+
+    face_bits -- return
+)
+
+
+/* Returns the user-property name for one manual FORCED wall class.
+   Only OUTER and INNER can be forced by RMB.
+*/
+function getForcedWallFacePropertyName material_id =
+(
+    local property_name = ""
+
+
+    if material_id == 1 then
+    (
+        property_name = "WallFaceClassifierForcedOuter"
+    )
+    else if material_id == 2 then
+    (
+        property_name = "WallFaceClassifierForcedInner"
+    )
+
+
+    property_name -- return
+)
+
+
+/* Reads persistent FORCED OUTER or INNER face indices from one object.
+   Face indices outside the current topology are ignored.
+*/
+function getForcedWallFaceBits object_node source_data material_id =
+(
+    local face_bits = #{}
+    local property_name = getForcedWallFacePropertyName material_id
+
+
+    if property_name != "" then
+    (
+        local face_count = getSourceNumFaces object_node source_data
+        local value_string = getUserProp object_node property_name
+        face_bits = wallFaceBitsFromUserPropString value_string face_count
+    )
+
+
+    face_bits -- return
+)
+
+
+
+
+/* Returns true when one processed object already carries a manual FORCED wall type.
+   Non-seed forced objects are hard blockers for RMB auto-grow and are never overwritten or traversed.
+*/
+function hasForcedWallFaceType object_node source_data =
+(
+    local forced_outer_bits = getForcedWallFaceBits object_node source_data 1
+    local forced_inner_bits = getForcedWallFaceBits object_node source_data 2
+
+
+    ((forced_outer_bits.numberSet > 0) or (forced_inner_bits.numberSet > 0)) -- return
+)
+
+
+/* Writes persistent FORCED OUTER or INNER face indices to one object.
+   Empty face sets remove the user-property key completely instead of storing an empty value.
+*/
+function setForcedWallFaceBits object_node material_id face_bits =
+(
+    local property_name = getForcedWallFacePropertyName material_id
+
+
+    if property_name != "" then
+    (
+        if face_bits != undefined then
+        (
+            if face_bits.numberSet > 0 then
+            (
+                setUserProp object_node property_name (wallFaceBitsToUserPropString face_bits)
+            )
+            else
+            (
+                if doesUserPropExist object_node property_name then
+                (
+                    deleteUserProp object_node property_name
+                )
+            )
+        )
+        else
+        (
+            if doesUserPropExist object_node property_name then
+            (
+                deleteUserProp object_node property_name
+            )
+        )
+    )
+
+
+    true -- return
+)
+
+
+/* Adds a manual FORCED class and removes the same faces from the opposite forced class.
+   This allows RMB OUTER/INNER to replace a previous manual hint cleanly.
+*/
+function forceWallFaceClass object_node source_data material_id mark_bits =
+(
+    local forced_outer_bits = getForcedWallFaceBits object_node source_data 1
+    local forced_inner_bits = getForcedWallFaceBits object_node source_data 2
+
+
+    if material_id == 1 then
+    (
+        forced_outer_bits = forced_outer_bits + mark_bits
+        forced_inner_bits = forced_inner_bits - mark_bits
+    )
+    else if material_id == 2 then
+    (
+        forced_inner_bits = forced_inner_bits + mark_bits
+        forced_outer_bits = forced_outer_bits - mark_bits
+    )
+
+
+    setForcedWallFaceBits object_node 1 forced_outer_bits
+    setForcedWallFaceBits object_node 2 forced_inner_bits
+
+
+    #(forced_outer_bits, forced_inner_bits) -- return
+)
+
+
+/* Returns supported geometry nodes from the current selection or restores the last classification set.
+   When remember_selection is true, the resolved nodes become the set restored by later empty-selection actions.
+*/
+function getWallFaceWorkingNodes remember_selection:false =
+(
+    local working_nodes = for object_node in selection where superclassof object_node == GeometryClass collect object_node
+    local restored_nodes = #()
+
+
+    if working_nodes.count == 0 then
+    (
+        for object_node in wall_face_classifier_last_nodes do
+        (
+            if isValidNode object_node then
+            (
+                if superclassof object_node == GeometryClass then
+                (
+                    append restored_nodes object_node
+                )
+            )
+        )
+
+
+        working_nodes = restored_nodes
+
+
+        if working_nodes.count > 0 then
+        (
+            select working_nodes
+        )
+    )
+
+
+    if remember_selection and working_nodes.count > 0 then
+    (
+        wall_face_classifier_last_nodes = for object_node in working_nodes collect object_node
+    )
+
+
+    working_nodes -- return
+)
+
+
+/* Returns the default connection distance derived from wall thickness.
+   Neighbor connection starts at ten percent of the current wall-thickness value.
+*/
+function getDefaultWallConnectionThreshold wall_thickness =
+(
+    wall_thickness * 0.1 -- return
+)
+
+
+/* Resets classifier face Material IDs, removes the classifier material, and clears persistent FORCED hints.
+   Existing face selections are restored and cached classifier data is discarded.
+*/
+function resetSelectedWallFaceClassification =
+(
+    local selected_nodes = getWallFaceWorkingNodes()
+    local reset_data_array = #()
+    local valid_nodes = #()
+    local reset_face_count = 0
+    local selection_level_before = subObjectLevel
+
+
+    for object_node in selected_nodes do
+    (
+        local source_data = getFaceGeometrySource object_node
+
+
+        if source_data != undefined then
+        (
+            local all_face_bits = getAllSourceFaceBits object_node source_data
+            local original_bits = getSourceFaceSelection object_node source_data
+
+
+            append reset_data_array #(object_node, source_data, all_face_bits, original_bits)
+            append valid_nodes object_node
+            reset_face_count += all_face_bits.numberSet
+        )
+    )
+
+
+    if valid_nodes.count > 0 then
+    (
+        for reset_data in reset_data_array do
+        (
+            local object_node = reset_data[1]
+            local source_data = reset_data[2]
+            local all_face_bits = reset_data[3]
+            local original_bits = reset_data[4]
+            local cache_index = findWallFaceCacheIndex object_node
+
+
+            setSourceFaceMaterialId object_node source_data all_face_bits 1
+            setForcedWallFaceBits object_node 1 #{}
+            setForcedWallFaceBits object_node 2 #{}
+            setSourceFaceSelection object_node source_data original_bits
+
+
+            if object_node.material != undefined then
+            (
+                if object_node.material.name == "WALL FACE CLASSIFIER" then
+                (
+                    object_node.material = undefined
+                )
+            )
+
+
+            if cache_index > 0 then
+            (
+                deleteItem wall_face_classifier_cache cache_index
+            )
+        )
+
+
+        select valid_nodes
+        max modify mode
+
+
+        if selection_level_before != undefined then
+        (
+            subObjectLevel = selection_level_before
+        )
+
+
+        redrawViews()
+    )
+
+
+    #(valid_nodes.count, reset_face_count) -- return
+)
+
+
+/* Reuses an existing classifier material when possible and assigns it to nodes.
+   A new legacy Standard Multi/Sub material is created only when none is available.
+*/
+function ensureWallClassifierMaterial object_nodes =
+(
+    local classifier_material = undefined
+
+
+    for object_node in object_nodes do
+    (
+        if classifier_material == undefined then
+        (
+            if object_node.material != undefined then
+            (
+                if object_node.material.name == "WALL FACE CLASSIFIER" then
+                (
+                    classifier_material = object_node.material
+                )
+            )
+        )
+    )
+
+
+    if classifier_material == undefined then
+    (
+        classifier_material = createWallClassifierMaterial()
+    )
+
+
+    for object_node in object_nodes do
+    (
+        object_node.material = classifier_material
+    )
+
+
+    classifier_material -- return
+)
+
+
+
+
+/* Returns true when a node already uses the classifier Multi/Sub material.
+   Used to preserve existing manual/classified face IDs during RMB marking.
+*/
+function hasWallClassifierMaterial object_node =
+(
+    local has_classifier_material = false
+
+
+    if object_node.material != undefined then
+    (
+        if object_node.material.name == "WALL FACE CLASSIFIER" then
+        (
+            has_classifier_material = true
+        )
+    )
+
+
+    has_classifier_material -- return
+)
+
+
+/* Returns live processed nodes from the classifier cache by node reference.
+   Selection is intentionally ignored so cached walls remain available for on-the-fly neighbor editing.
+*/
+function getWallFaceProcessedCacheNodes =
+(
+    local processed_nodes = #()
+
+
+    if wall_face_classifier_cache.count > 0 then
+    (
+        for cache_index = wall_face_classifier_cache.count to 1 by -1 do
+        (
+            local cache_entry = wall_face_classifier_cache[cache_index]
+            local keep_entry = true
+
+
+            if cache_entry.count < 6 then
+            (
+                keep_entry = false
+            )
+            else if not isValidNode cache_entry[1] then
+            (
+                keep_entry = false
+            )
+            else if getFaceGeometrySource cache_entry[1] == undefined then
+            (
+                keep_entry = false
+            )
+            else if not hasWallClassifierMaterial cache_entry[1] then
+            (
+                keep_entry = false
+            )
+
+
+            if keep_entry then
+            (
+                append processed_nodes cache_entry[1]
+            )
+            else
+            (
+                deleteItem wall_face_classifier_cache cache_index
+            )
+        )
+    )
+
+
+    processed_nodes -- return
+)
+
+
+/* Builds edge-connected face islands from one supplied face bitarray.
+   Only faces in the bitarray can connect, so UP/DOWN faces naturally act as barriers.
+*/
+function buildWallFaceElementsFromBits object_node source_data face_bits =
+(
+    local face_count = getSourceNumFaces object_node source_data
+    local visited_faces = #{}
+    local element_array = #()
+
+
+    for start_face in face_bits do
+    (
+        if start_face >= 1 and start_face <= face_count and not visited_faces[start_face] then
+        (
+            local pending_faces = #(start_face)
+            local element_faces = #{}
+            local element_vertices = #{}
+            local world_vertices = #()
+            local bbox_min = undefined
+            local bbox_max = undefined
+
+
+            visited_faces[start_face] = true
+
+
+            while pending_faces.count > 0 do
+            (
+                local current_face = pending_faces[pending_faces.count]
+                deleteItem pending_faces pending_faces.count
+                element_faces[current_face] = true
+
+
+                local face_degree = getSourceFaceDegree object_node source_data current_face
+
+
+                for corner_index = 1 to face_degree do
+                (
+                    local vertex_index = getSourceFaceVertex object_node source_data current_face corner_index
+                    element_vertices[vertex_index] = true
+                )
+
+
+                for side_index = 1 to face_degree do
+                (
+                    local edge_index = getSourceFaceEdge object_node source_data current_face side_index
+
+
+                    if edge_index > 0 then
+                    (
+                        for edge_side = 1 to 2 do
+                        (
+                            local neighbor_face = getSourceEdgeFace object_node source_data edge_index edge_side
+
+
+                            if neighbor_face >= 1 and neighbor_face <= face_count then
+                            (
+                                if face_bits[neighbor_face] and not visited_faces[neighbor_face] then
+                                (
+                                    visited_faces[neighbor_face] = true
+                                    append pending_faces neighbor_face
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+
+
+            for vertex_index in element_vertices do
+            (
+                local vertex_world = getSourceVertexWorld object_node source_data vertex_index
+                append world_vertices vertex_world
+
+
+                if bbox_min == undefined then
+                (
+                    bbox_min = copy vertex_world
+                    bbox_max = copy vertex_world
+                )
+                else
+                (
+                    if vertex_world.x < bbox_min.x then bbox_min.x = vertex_world.x
+                    if vertex_world.y < bbox_min.y then bbox_min.y = vertex_world.y
+                    if vertex_world.z < bbox_min.z then bbox_min.z = vertex_world.z
+                    if vertex_world.x > bbox_max.x then bbox_max.x = vertex_world.x
+                    if vertex_world.y > bbox_max.y then bbox_max.y = vertex_world.y
+                    if vertex_world.z > bbox_max.z then bbox_max.z = vertex_world.z
+                )
+            )
+
+
+            append element_array #(object_node, source_data, element_faces, element_vertices, world_vertices, bbox_min, bbox_max)
+        )
+    )
+
+
+    element_array -- return
+)
+
+
+/* Returns true when two cached face-island bounds can touch inside the threshold.
+*/
+function wallFaceGrowthBoundsOverlap element_a element_b connection_threshold =
+(
+    local min_a = element_a[6]
+    local max_a = element_a[7]
+    local min_b = element_b[6]
+    local max_b = element_b[7]
+    local overlap_result = true
+
+
+    if min_a == undefined or min_b == undefined then
+    (
+        overlap_result = false
+    )
+    else
+    (
+        if (max_a.x + connection_threshold) < min_b.x or (max_b.x + connection_threshold) < min_a.x then
+        (
+            overlap_result = false
+        )
+        else if (max_a.y + connection_threshold) < min_b.y or (max_b.y + connection_threshold) < min_a.y then
+        (
+            overlap_result = false
+        )
+        else if (max_a.z + connection_threshold) < min_b.z or (max_b.z + connection_threshold) < min_a.z then
+        (
+            overlap_result = false
+        )
+    )
+
+
+    overlap_result -- return
+)
+
+
+/* Tests two processed wall-side face islands for a wall-style neighbor seam.
+   At least two vertices must match, and their seam must have a vertical span so TOP/DOWN contacts cannot grow the chain.
+*/
+function wallFaceGrowthElementsConnect element_a element_b connection_threshold minimum_matching_vertices:2 minimum_vertical_ratio:0.45 =
+(
+    local connection_result = false
+    local threshold_squared = connection_threshold * connection_threshold
+    local vertices_a = element_a[5]
+    local vertices_b = element_b[5]
+    local matched_b = #{}
+    local matched_points_a = #()
+    local match_count = 0
+
+
+    if wallFaceGrowthBoundsOverlap element_a element_b connection_threshold then
+    (
+        for vertex_index_a = 1 to vertices_a.count do
+        (
+            local point_a = vertices_a[vertex_index_a]
+            local found_match = false
+
+
+            for vertex_index_b = 1 to vertices_b.count while not found_match do
+            (
+                if not matched_b[vertex_index_b] then
+                (
+                    local delta = point_a - vertices_b[vertex_index_b]
+
+
+                    if (dot delta delta) <= threshold_squared then
+                    (
+                        matched_b[vertex_index_b] = true
+                        append matched_points_a point_a
+                        match_count += 1
+                        found_match = true
+                    )
+                )
+            )
+        )
+
+
+        if match_count >= minimum_matching_vertices and matched_points_a.count >= 2 then
+        (
+            for point_index_a = 1 to (matched_points_a.count - 1) while not connection_result do
+            (
+                for point_index_b = (point_index_a + 1) to matched_points_a.count while not connection_result do
+                (
+                    local seam_vector = matched_points_a[point_index_b] - matched_points_a[point_index_a]
+                    local seam_length = length seam_vector
+
+
+                    if seam_length > 0.0000001 then
+                    (
+                        local vertical_ratio = (abs seam_vector.z) / seam_length
+
+
+                        if vertical_ratio >= minimum_vertical_ratio then
+                        (
+                            connection_result = true
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+
+    connection_result -- return
+)
+
+
+/* Captures RMB growth seeds before any manual class overwrite occurs.
+   Face mode uses selected non-cap faces; object mode uses every existing wall-side face so the forced object can grow from any side.
+*/
+function getWallFaceGrowthSeedData material_id =
+(
+    local had_node_selection = (selection.count > 0)
+    local selection_level_before = subObjectLevel
+    local selected_nodes = getWallFaceWorkingNodes()
+    local use_face_selection = (had_node_selection and selection_level_before == 4)
+    local seed_data_array = #()
+
+
+    for object_node in selected_nodes do
+    (
+        local source_data = getFaceGeometrySource object_node
+
+
+        if source_data != undefined then
+        (
+            local seed_bits = #{}
+
+
+            if use_face_selection then
+            (
+                local selected_bits = getSourceFaceSelection object_node source_data
+
+
+                for face_index in selected_bits do
+                (
+                    local current_material_id = getSourceFaceMaterialId object_node source_data face_index
+
+
+                    if current_material_id == 1 or current_material_id == 2 then
+                    (
+                        seed_bits[face_index] = true
+                    )
+                )
+            )
+            else
+            (
+                local face_count = getSourceNumFaces object_node source_data
+
+
+                for face_index = 1 to face_count do
+                (
+                    local current_material_id = getSourceFaceMaterialId object_node source_data face_index
+
+
+                    if current_material_id == 1 or current_material_id == 2 then
+                    (
+                        seed_bits[face_index] = true
+                    )
+                )
+            )
+
+
+            if seed_bits.numberSet > 0 then
+            (
+                append seed_data_array #(object_node, source_data, seed_bits)
+            )
+        )
+    )
+
+
+    seed_data_array -- return
+)
+
+
+/* Recursively propagates one forced wall class through cached processed neighbor walls.
+   Candidate wall-side islands may currently be OUTER or INNER; a connected island is overwritten to the forced ID.
+   Objects that already carry manual FORCED OUTER/INNER data are hard blockers and are never entered or traversed.
+   Auto-grown neighbors only change Material ID and do not become persistent FORCED hints. TOP/DOWN faces remain barriers.
+*/
+function growCachedWallFaceClass seed_data_array material_id connection_threshold =
+(
+    local processed_nodes = getWallFaceProcessedCacheNodes()
+    local seed_nodes = #()
+    local candidate_set_array = #()
+    local frontier_elements = #()
+    local growth_data_array = #()
+    local grown_face_count = 0
+
+
+    for seed_data in seed_data_array do
+    (
+        local seed_node = seed_data[1]
+        local seed_source = seed_data[2]
+        local seed_bits = seed_data[3]
+
+
+        if (findItem seed_nodes seed_node) == 0 then
+        (
+            append seed_nodes seed_node
+        )
+
+
+        local seed_elements = buildWallFaceElementsFromBits seed_node seed_source seed_bits
+
+
+        for seed_element in seed_elements do
+        (
+            append frontier_elements seed_element
+        )
+    )
+
+
+    for candidate_node in processed_nodes do
+    (
+        if (findItem seed_nodes candidate_node) == 0 then
+        (
+            local source_data = getFaceGeometrySource candidate_node
+
+
+            if source_data != undefined then
+            (
+                if not hasForcedWallFaceType candidate_node source_data then
+                (
+                    local cache_entry = cacheWallFaceClassesFromMaterialIds candidate_node source_data
+                    local outer_bits = copy cache_entry[3]
+                    local inner_bits = copy cache_entry[4]
+                    local element_array = #()
+                    local outer_elements = buildWallFaceElementsFromBits candidate_node source_data outer_bits
+                    local inner_elements = buildWallFaceElementsFromBits candidate_node source_data inner_bits
+
+
+                    for candidate_element in outer_elements do
+                    (
+                        append element_array candidate_element
+                    )
+
+
+                    for candidate_element in inner_elements do
+                    (
+                        append element_array candidate_element
+                    )
+
+
+                    if element_array.count > 0 then
+                    (
+                        append candidate_set_array #(candidate_node, source_data, element_array, #{})
+                    )
+                )
+            )
+        )
+    )
+
+
+    local frontier_index = 1
+
+
+    while frontier_index <= frontier_elements.count do
+    (
+        local frontier_element = frontier_elements[frontier_index]
+
+
+        for candidate_set in candidate_set_array do
+        (
+            local candidate_node = candidate_set[1]
+            local candidate_source = candidate_set[2]
+            local element_array = candidate_set[3]
+            local visited_elements = candidate_set[4]
+
+
+            for element_index = 1 to element_array.count do
+            (
+                if not visited_elements[element_index] then
+                (
+                    local candidate_element = element_array[element_index]
+
+
+                    if wallFaceGrowthElementsConnect frontier_element candidate_element connection_threshold then
+                    (
+                        visited_elements[element_index] = true
+                        append frontier_elements candidate_element
+
+
+                        local growth_index = 0
+
+
+                        for data_index = 1 to growth_data_array.count do
+                        (
+                            if growth_index == 0 and growth_data_array[data_index][1] == candidate_node then
+                            (
+                                growth_index = data_index
+                            )
+                        )
+
+
+                        if growth_index == 0 then
+                        (
+                            append growth_data_array #(candidate_node, candidate_source, copy candidate_element[3])
+                        )
+                        else
+                        (
+                            growth_data_array[growth_index][3] = growth_data_array[growth_index][3] + candidate_element[3]
+                        )
+                    )
+                )
+            )
+        )
+
+
+        frontier_index += 1
+    )
+
+
+    for growth_data in growth_data_array do
+    (
+        local object_node = growth_data[1]
+        local source_data = growth_data[2]
+        local face_bits = growth_data[3]
+
+
+        setSourceFaceMaterialId object_node source_data face_bits material_id
+        cacheWallFaceClassesFromMaterialIds object_node source_data
+        grown_face_count += face_bits.numberSet
+    )
+
+
+    if growth_data_array.count > 0 then
+    (
+        redrawViews()
+    )
+
+
+    #(growth_data_array.count, grown_face_count, processed_nodes.count) -- return
+)
+
+
+/* Tests the RMB neighbor seam filter without changing scene geometry.
+   A vertical shared seam must connect; a horizontal cap seam must not.
+*/
+function testWallFaceGrowthSeamFilter connection_threshold:1.0 =
+(
+    local vertical_a = #(undefined, undefined, #{1}, #{1,2}, #([0,0,0], [0,0,100]), [0,0,0], [0,0,100])
+    local vertical_b = #(undefined, undefined, #{1}, #{1,2}, #([0.5,0,0], [0.5,0,100]), [0.5,0,0], [0.5,0,100])
+    local horizontal_a = #(undefined, undefined, #{1}, #{1,2}, #([0,0,0], [100,0,0]), [0,0,0], [100,0,0])
+    local horizontal_b = #(undefined, undefined, #{1}, #{1,2}, #([0,0,0.5], [100,0,0.5]), [0,0,0.5], [100,0,0.5])
+    local vertical_connects = wallFaceGrowthElementsConnect vertical_a vertical_b connection_threshold
+    local horizontal_connects = wallFaceGrowthElementsConnect horizontal_a horizontal_b connection_threshold
+
+
+    format "RMB growth seam test | vertical: % | horizontal cap: % | passed: %\n" vertical_connects horizontal_connects (vertical_connects and not horizontal_connects)
+
+
+    #(vertical_connects, horizontal_connects, (vertical_connects and not horizontal_connects)) -- return
+)
+
+
+
+
+/* Reports whether selected processed objects are manual FORCE blockers for RMB auto-grow.
+   Use after forcing OUTER/INNER to verify that the object will stop neighbor propagation.
+*/
+function testWallFaceGrowthForcedBlockers =
+(
+    local blocker_count = 0
+    local tested_count = 0
+
+
+    for object_node in selection where superclassof object_node == GeometryClass do
+    (
+        local source_data = getFaceGeometrySource object_node
+
+
+        if source_data != undefined then
+        (
+            tested_count += 1
+
+
+            if hasForcedWallFaceType object_node source_data then
+            (
+                blocker_count += 1
+            )
+        )
+    )
+
+
+    format "RMB forced blockers | tested: % | blockers: %\n" tested_count blocker_count
+
+
+    #(tested_count, blocker_count) -- return
+)
+
+
+/* Selects one classifier class from the current or restored working set.
+   Object level selects matching objects; Face level selects matching faces across matching objects.
+*/
+function selectWallFacesByMaterialId material_id =
+(
+    local had_node_selection = (selection.count > 0)
+    local selection_level_before = subObjectLevel
+    local selected_nodes = getWallFaceWorkingNodes()
+    local use_face_selection = (had_node_selection and selection_level_before == 4)
+    local selection_data_array = #()
+    local matching_nodes = #()
+    local selected_face_count = 0
+    local selection_mode = #objects
+
+
+    if use_face_selection then
+    (
+        selection_mode = #faces
+    )
+
+
+    for object_node in selected_nodes do
+    (
+        local source_data = getFaceGeometrySource object_node
+
+
+        if source_data != undefined then
+        (
+            local face_bits = getCachedWallFaceBits object_node source_data material_id
+
+
+            if face_bits == undefined then
+            (
+                local cache_entry = cacheWallFaceClassesFromMaterialIds object_node source_data
+
+
+                if material_id == 1 then
+                (
+                    face_bits = copy cache_entry[3]
+                )
+                else if material_id == 2 then
+                (
+                    face_bits = copy cache_entry[4]
+                )
+                else if material_id == 3 then
+                (
+                    face_bits = copy cache_entry[5]
+                )
+                else if material_id == 4 then
+                (
+                    face_bits = copy cache_entry[6]
+                )
+                else
+                (
+                    face_bits = #{}
+                )
+            )
+
+
+            if face_bits.numberSet > 0 then
+            (
+                append matching_nodes object_node
+                append selection_data_array #(object_node, source_data, face_bits)
+                selected_face_count += face_bits.numberSet
+            )
+        )
+    )
+
+
+    if matching_nodes.count > 0 then
+    (
+        select matching_nodes
+        max modify mode
+
+
+        if use_face_selection then
+        (
+            subObjectLevel = 4
+
+
+            for selection_data in selection_data_array do
+            (
+                setSourceFaceSelection selection_data[1] selection_data[2] selection_data[3]
+            )
+        )
+
+
+        redrawViews()
+    )
+    else
+    (
+        clearSelection()
+        redrawViews()
+    )
+
+
+    #(matching_nodes.count, selected_face_count, selection_mode) -- return
+)
+
+
+/* FORCES selected faces or selected-object wall-side faces as OUTER or INNER.
+   Object mode excludes UP/DOWN caps so horizontal barriers remain intact for later RMB growth.
+*/
+function markSelectedWallFaces material_id =
+(
+    local had_node_selection = (selection.count > 0)
+    local selection_level_before = subObjectLevel
+    local selected_nodes = getWallFaceWorkingNodes()
+    local mark_data_array = #()
+    local valid_nodes = #()
+    local marked_face_count = 0
+    local use_face_selection = (had_node_selection and selection_level_before == 4)
+    local source_label = "selected objects"
+
+
+    if use_face_selection then
+    (
+        source_label = "face selection"
+    )
+
+
+    for object_node in selected_nodes do
+    (
+        local source_data = getFaceGeometrySource object_node
+
+
+        if source_data != undefined then
+        (
+            local original_bits = getSourceFaceSelection object_node source_data
+            local mark_bits = #{}
+            local had_classifier_material = hasWallClassifierMaterial object_node
+
+
+            if use_face_selection then
+            (
+                mark_bits = copy original_bits
+            )
+            else
+            (
+                local face_count = getSourceNumFaces object_node source_data
+
+
+                for face_index = 1 to face_count do
+                (
+                    local current_material_id = getSourceFaceMaterialId object_node source_data face_index
+
+
+                    if current_material_id == 1 or current_material_id == 2 then
+                    (
+                        mark_bits[face_index] = true
+                    )
+                )
+            )
+
+
+            if mark_bits.numberSet > 0 then
+            (
+                append mark_data_array #(object_node, source_data, mark_bits, original_bits, had_classifier_material)
+                append valid_nodes object_node
+                marked_face_count += mark_bits.numberSet
+            )
+        )
+    )
+
+
+    if valid_nodes.count > 0 then
+    (
+        ensureWallClassifierMaterial valid_nodes
+
+
+        for mark_data in mark_data_array do
+        (
+            local object_node = mark_data[1]
+            local source_data = mark_data[2]
+            local mark_bits = mark_data[3]
+            local original_bits = mark_data[4]
+            local had_classifier_material = mark_data[5]
+
+
+            forceWallFaceClass object_node source_data material_id mark_bits
+            setSourceFaceMaterialId object_node source_data mark_bits material_id
+            setSourceFaceSelection object_node source_data original_bits
+            cacheWallFaceClassesFromMaterialIds object_node source_data
+        )
+
+
+        select valid_nodes
+        max modify mode
+
+
+        if selection_level_before != undefined then
+        (
+            subObjectLevel = selection_level_before
+        )
+
+
+        redrawViews()
+    )
+
+
+    #(valid_nodes.count, marked_face_count, source_label) -- return
+)
+
+
+/* Returns true when two faces share at least the requested number of vertex indices.
+   Forced hierarchy propagation uses two shared vertices so a single corner touch cannot inherit a class.
+*/
+function facesShareMinimumVertices face_indices_a face_indices_b minimum_shared_vertices:2 =
+(
+    local shared_count = 0
+
+
+    for vertex_index in face_indices_a while shared_count < minimum_shared_vertices do
+    (
+        if (findItem face_indices_b vertex_index) > 0 then
+        (
+            shared_count += 1
+        )
+    )
+
+
+    (shared_count >= minimum_shared_vertices) -- return
+)
+
+
+/* Builds edge-connected face elements for one selected object.
+   Faces must share at least two vertices; a one-vertex corner touch starts a separate element.
+*/
+function buildWallHierarchyElements object_data object_data_index definite_threshold horizontal_normal_threshold:0.85 prefer_outer_seed:false =
+(
+    local vertex_world_cache = object_data[8]
+    local face_vertex_indices = object_data[9]
+    local face_normals = object_data[5]
+    local face_scores = object_data[7]
+    local vertex_faces = #()
+    local visited_faces = #{}
+    local element_data_array = #()
+
+
+    for vertex_index = 1 to vertex_world_cache.count do
+    (
+        append vertex_faces #{}
+    )
+
+
+    for face_index = 1 to face_vertex_indices.count do
+    (
+        for vertex_index in face_vertex_indices[face_index] do
+        (
+            vertex_faces[vertex_index][face_index] = true
+        )
+    )
+
+
+    for start_face = 1 to face_vertex_indices.count do
+    (
+        if not visited_faces[start_face] then
+        (
+            local pending_faces = #(start_face)
+            local element_faces = #{}
+            local element_vertices = #{}
+            local has_horizontal_face = false
+            local has_outer_seed = false
+            local has_inner_seed = false
+            local seed_class = 0
+            local bbox_min = undefined
+            local bbox_max = undefined
+
+
+            visited_faces[start_face] = true
+
+
+            while pending_faces.count > 0 do
+            (
+                local current_face = pending_faces[pending_faces.count]
+                deleteItem pending_faces pending_faces.count
+                element_faces[current_face] = true
+
+
+                for vertex_index in face_vertex_indices[current_face] do
+                (
+                    element_vertices[vertex_index] = true
+
+
+                    for neighbor_face in vertex_faces[vertex_index] do
+                    (
+                        if not visited_faces[neighbor_face] then
+                        (
+                            if facesShareMinimumVertices face_vertex_indices[current_face] face_vertex_indices[neighbor_face] minimum_shared_vertices:2 then
+                            (
+                                visited_faces[neighbor_face] = true
+                                append pending_faces neighbor_face
+                            )
+                        )
+                    )
+                )
+            )
+
+
+            for face_index in element_faces do
+            (
+                local face_normal = face_normals[face_index]
+                local face_score = face_scores[face_index]
+
+
+                if (abs face_normal.z) >= horizontal_normal_threshold then
+                (
+                    has_horizontal_face = true
+                )
+
+
+                if face_score >= definite_threshold then
+                (
+                    has_outer_seed = true
+                )
+                else if face_score <= -definite_threshold then
+                (
+                    has_inner_seed = true
+                )
+            )
+
+
+            if not has_horizontal_face then
+            (
+                if prefer_outer_seed and has_outer_seed then
+                (
+                    /* FORCED OUTER is the point of interest and wins a seed conflict. */
+                    seed_class = 1
+                )
+                else if has_outer_seed and not has_inner_seed then
+                (
+                    seed_class = 1
+                )
+                else if has_inner_seed and not has_outer_seed then
+                (
+                    seed_class = 2
+                )
+            )
+
+
+            for vertex_index in element_vertices do
+            (
+                local vertex_world = vertex_world_cache[vertex_index]
+
+
+                if bbox_min == undefined then
+                (
+                    bbox_min = copy vertex_world
+                    bbox_max = copy vertex_world
+                )
+                else
+                (
+                    if vertex_world.x < bbox_min.x then
+                    (
+                        bbox_min.x = vertex_world.x
+                    )
+                    if vertex_world.y < bbox_min.y then
+                    (
+                        bbox_min.y = vertex_world.y
+                    )
+                    if vertex_world.z < bbox_min.z then
+                    (
+                        bbox_min.z = vertex_world.z
+                    )
+
+
+                    if vertex_world.x > bbox_max.x then
+                    (
+                        bbox_max.x = vertex_world.x
+                    )
+                    if vertex_world.y > bbox_max.y then
+                    (
+                        bbox_max.y = vertex_world.y
+                    )
+                    if vertex_world.z > bbox_max.z then
+                    (
+                        bbox_max.z = vertex_world.z
+                    )
+                )
+            )
+
+
+            append element_data_array #(object_data_index, element_faces, element_vertices, has_horizontal_face, seed_class, bbox_min, bbox_max)
+        )
+    )
+
+
+    element_data_array -- return
+)
+
+
+/* Returns true when two element bounds can touch within the connection threshold.
+   This avoids expensive vertex comparisons for distant elements.
+*/
+function wallHierarchyBoundsOverlap element_a element_b connection_threshold =
+(
+    local min_a = element_a[6]
+    local max_a = element_a[7]
+    local min_b = element_b[6]
+    local max_b = element_b[7]
+    local overlap_result = true
+
+
+    if min_a == undefined or min_b == undefined then
+    (
+        overlap_result = false
+    )
+    else
+    (
+        if (max_a.x + connection_threshold) < min_b.x or (max_b.x + connection_threshold) < min_a.x then
+        (
+            overlap_result = false
+        )
+        else if (max_a.y + connection_threshold) < min_b.y or (max_b.y + connection_threshold) < min_a.y then
+        (
+            overlap_result = false
+        )
+        else if (max_a.z + connection_threshold) < min_b.z or (max_b.z + connection_threshold) < min_a.z then
+        (
+            overlap_result = false
+        )
+    )
+
+
+    overlap_result -- return
+)
+
+
+/* Counts unique matching world-space vertices between two separate wall elements.
+   Two matches are treated as an edge-like wall connection instead of a corner touch.
+*/
+function countWallHierarchyVertexMatches element_a element_b object_data_array connection_threshold maximum_matches:2 =
+(
+    local match_count = 0
+    local threshold_squared = connection_threshold * connection_threshold
+    local object_data_a = object_data_array[element_a[1]]
+    local object_data_b = object_data_array[element_b[1]]
+    local vertex_world_a = object_data_a[8]
+    local vertex_world_b = object_data_b[8]
+    local vertices_a = element_a[3]
+    local vertices_b = element_b[3]
+    local matched_b = #{}
+
+
+    if wallHierarchyBoundsOverlap element_a element_b connection_threshold then
+    (
+        for vertex_index_a in vertices_a do
+        (
+            if match_count < maximum_matches then
+            (
+                local point_a = vertex_world_a[vertex_index_a]
+                local found_match = false
+
+
+                for vertex_index_b in vertices_b do
+                (
+                    if not found_match and not matched_b[vertex_index_b] then
+                    (
+                        local delta = point_a - vertex_world_b[vertex_index_b]
+
+
+                        if (dot delta delta) <= threshold_squared then
+                        (
+                            matched_b[vertex_index_b] = true
+                            match_count += 1
+                            found_match = true
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+
+    match_count -- return
+)
+
+
+/* Propagates reliable OUTER/INNER seeds through edge-connected wall elements and neighboring meshes.
+   A face/element must connect through at least two shared vertices; floors and ceilings stop the chain.
+*/
+function resolveWallHierarchyByElements object_data_array connection_threshold confidence_threshold:0.12 horizontal_normal_threshold:0.85 minimum_matching_vertices:2 prefer_outer_seed:false =
+(
+    local definite_threshold = confidence_threshold * 2.0
+    local all_elements = #()
+    local resolved_count = 0
+    local connection_count = 0
+
+
+    if definite_threshold < 0.35 then
+    (
+        definite_threshold = 0.35
+    )
+
+
+    for object_data_index = 1 to object_data_array.count do
+    (
+        local object_elements = buildWallHierarchyElements object_data_array[object_data_index] object_data_index definite_threshold horizontal_normal_threshold:horizontal_normal_threshold prefer_outer_seed:prefer_outer_seed
+
+
+        for element_data in object_elements do
+        (
+            append all_elements element_data
+        )
+    )
+
+
+    /* First apply a reliable seed to the complete topological element.
+       This fixes unresolved wall faces inside one wall element before cross-object propagation.
+    */
+    for element_data in all_elements do
+    (
+        local seed_class = element_data[5]
+
+
+        if seed_class == 1 or seed_class == 2 then
+        (
+            local face_classes = object_data_array[element_data[1]][6]
+
+
+            for face_index in element_data[2] do
+            (
+                if face_classes[face_index] != seed_class then
+                (
+                    face_classes[face_index] = seed_class
+                    resolved_count += 1
+                )
+            )
+        )
+    )
+
+
+    if connection_threshold > 0.0 and all_elements.count > 1 then
+    (
+        local element_neighbors = #()
+        local visited_elements = #{}
+
+
+        for element_index = 1 to all_elements.count do
+        (
+            append element_neighbors #{}
+        )
+
+
+        for element_index_a = 1 to (all_elements.count - 1) do
+        (
+            local element_a = all_elements[element_index_a]
+
+
+            if not element_a[4] then
+            (
+                for element_index_b = (element_index_a + 1) to all_elements.count do
+                (
+                    local element_b = all_elements[element_index_b]
+
+
+                    if not element_b[4] then
+                    (
+                        local match_count = countWallHierarchyVertexMatches element_a element_b object_data_array connection_threshold maximum_matches:minimum_matching_vertices
+
+
+                        if match_count >= minimum_matching_vertices then
+                        (
+                            element_neighbors[element_index_a][element_index_b] = true
+                            element_neighbors[element_index_b][element_index_a] = true
+                            connection_count += 1
+                        )
+                    )
+                )
+            )
+        )
+
+
+        for start_element = 1 to all_elements.count do
+        (
+            if not visited_elements[start_element] and not all_elements[start_element][4] then
+            (
+                local pending_elements = #(start_element)
+                local network_elements = #{}
+                local has_outer_seed = false
+                local has_inner_seed = false
+                local network_class = 0
+
+
+                visited_elements[start_element] = true
+
+
+                while pending_elements.count > 0 do
+                (
+                    local current_element = pending_elements[pending_elements.count]
+                    local current_seed = all_elements[current_element][5]
+                    deleteItem pending_elements pending_elements.count
+                    network_elements[current_element] = true
+
+
+                    if current_seed == 1 then
+                    (
+                        has_outer_seed = true
+                    )
+                    else if current_seed == 2 then
+                    (
+                        has_inner_seed = true
+                    )
+
+
+                    for neighbor_element in element_neighbors[current_element] do
+                    (
+                        if not visited_elements[neighbor_element] then
+                        (
+                            visited_elements[neighbor_element] = true
+                            append pending_elements neighbor_element
+                        )
+                    )
+                )
+
+
+                if prefer_outer_seed and has_outer_seed then
+                (
+                    /* FORCED OUTER wins when OUTER and INNER hints meet in one wall network. */
+                    network_class = 1
+                )
+                else if has_outer_seed and not has_inner_seed then
+                (
+                    network_class = 1
+                )
+                else if has_inner_seed and not has_outer_seed then
+                (
+                    network_class = 2
+                )
+
+
+                if network_class == 1 or network_class == 2 then
+                (
+                    for element_index in network_elements do
+                    (
+                        local element_data = all_elements[element_index]
+
+
+                        if element_data[5] == 0 or (prefer_outer_seed and network_class == 1 and element_data[5] == 2) then
+                        (
+                            local face_classes = object_data_array[element_data[1]][6]
+
+
+                            for face_index in element_data[2] do
+                            (
+                                if face_classes[face_index] != network_class then
+                                (
+                                    face_classes[face_index] = network_class
+                                    resolved_count += 1
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+
+    format "Wall hierarchy: % elements | % neighbor links | % faces resolved | vertex threshold: %\\n" all_elements.count connection_count resolved_count connection_threshold
+
+
+    #(resolved_count, all_elements.count, connection_count) -- return
+)
+
+
+/* Classifies selected faces into OUTER, INNER, UP, and DOWN.
+   Persistent FORCED OUTER/INNER hints propagate first, then automatic wall tests resolve the rest.
+*/
+function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1) horizontal_normal_threshold:0.85 =
+(
+    local selected_nodes = getWallFaceWorkingNodes()
+    local valid_nodes = #()
+    local object_data_array = #()
+    local bbox_min = undefined
+    local bbox_max = undefined
+    local total_faces = 0
+    local outer_count = 0
+    local inner_count = 0
+    local up_count = 0
+    local down_count = 0
+    local selection_type = #none
+    local thickness_resolved = 0
+    local hierarchy_resolved = 0
+    local forced_hierarchy_resolved = 0
+    local forced_face_count = 0
+    local neighbor_resolved = 0
+    local fallback_resolved = 0
+
+
+    if selected_nodes.count == 0 then
+    (
+        messageBox "Select wall objects first, or run CLASSIFY once so the last object set can be restored." title:"Inner-Outer Wall Finder"
+        #() -- return
+    )
+    else
+    (
+        for object_node in selected_nodes do
+        (
+            local source_data = getFaceGeometrySource object_node
+
+
+            if source_data != undefined then
+            (
+                append valid_nodes object_node
+                local vertex_count = getSourceNumVertices object_node source_data
+
+
+                for vertex_index = 1 to vertex_count do
+                (
+                    local vertex_world = getSourceVertexWorld object_node source_data vertex_index
+
+
+                    if bbox_min == undefined then
+                    (
+                        bbox_min = copy vertex_world
+                        bbox_max = copy vertex_world
+                    )
+                    else
+                    (
+                        if vertex_world.x < bbox_min.x then
+                        (
+                            bbox_min.x = vertex_world.x
+                        )
+                        if vertex_world.y < bbox_min.y then
+                        (
+                            bbox_min.y = vertex_world.y
+                        )
+                        if vertex_world.z < bbox_min.z then
+                        (
+                            bbox_min.z = vertex_world.z
+                        )
+
+
+                        if vertex_world.x > bbox_max.x then
+                        (
+                            bbox_max.x = vertex_world.x
+                        )
+                        if vertex_world.y > bbox_max.y then
+                        (
+                            bbox_max.y = vertex_world.y
+                        )
+                        if vertex_world.z > bbox_max.z then
+                        (
+                            bbox_max.z = vertex_world.z
+                        )
+                    )
+                )
+            )
+        )
+
+
+        if valid_nodes.count == 0 or bbox_min == undefined then
+        (
+            messageBox "No supported objects found. Use Editable Poly or an object with Edit Poly as the top modifier." title:"Inner-Outer Wall Finder"
+            #() -- return
+        )
+        else
+        (
+            wall_face_classifier_last_nodes = for object_node in valid_nodes collect object_node
+
+
+            local bbox_center = (bbox_min + bbox_max) * 0.5
+            local bbox_diagonal = length (bbox_max - bbox_min)
+            local geometry_epsilon = bbox_diagonal * 0.00000001
+            local ray_offset = bbox_diagonal * 0.00001
+
+
+            if geometry_epsilon < 0.0000001 then
+            (
+                geometry_epsilon = 0.0000001
+            )
+
+
+            if ray_offset < 0.0001 then
+            (
+                ray_offset = 0.0001
+            )
+
+
+            for object_node in valid_nodes do
+            (
+                local source_data = getFaceGeometrySource object_node
+                local vertex_count = getSourceNumVertices object_node source_data
+                local face_count = getSourceNumFaces object_node source_data
+                local vertex_world_cache = #()
+                local cached_faces = #()
+                local face_centers = #()
+                local face_normals = #()
+                local face_classes = #()
+                local face_scores = #()
+                local face_vertex_indices = #()
+                local forced_outer_bits = getForcedWallFaceBits object_node source_data 1
+                local forced_inner_bits = getForcedWallFaceBits object_node source_data 2
+
+
+                total_faces += face_count
+                forced_face_count += forced_outer_bits.numberSet
+                forced_face_count += forced_inner_bits.numberSet
+
+
+                for vertex_index = 1 to vertex_count do
+                (
+                    append vertex_world_cache (getSourceVertexWorld object_node source_data vertex_index)
+                )
+
+
+                for face_index = 1 to face_count do
+                (
+                    local face_degree = getSourceFaceDegree object_node source_data face_index
+                    local face_vertices = #()
+                    local face_indices = #()
+
+
+                    for corner_index = 1 to face_degree do
+                    (
+                        local vertex_index = getSourceFaceVertex object_node source_data face_index corner_index
+                        append face_indices vertex_index
+                        append face_vertices vertex_world_cache[vertex_index]
+                    )
+
+
+                    local initial_class = 0
+                    local initial_score = 0.0
+
+
+                    if forced_outer_bits[face_index] then
+                    (
+                        initial_class = 1
+                        initial_score = 1.0
+                    )
+                    else if forced_inner_bits[face_index] then
+                    (
+                        initial_class = 2
+                        initial_score = -1.0
+                    )
+
+
+                    append cached_faces face_vertices
+                    append face_centers (calculatePolygonCenter face_vertices)
+                    append face_normals (calculatePolygonNormal face_vertices epsilon:geometry_epsilon)
+                    append face_classes initial_class
+                    append face_scores initial_score
+                    append face_vertex_indices face_indices
+                )
+
+
+                append object_data_array #(object_node, source_data, cached_faces, face_centers, face_normals, face_classes, face_scores, vertex_world_cache, face_vertex_indices)
+            )
+
+
+            if forced_face_count > 0 then
+            (
+                local forced_hierarchy_result = resolveWallHierarchyByElements object_data_array connection_threshold confidence_threshold:confidence_threshold horizontal_normal_threshold:horizontal_normal_threshold minimum_matching_vertices:2 prefer_outer_seed:true
+                forced_hierarchy_resolved = forced_hierarchy_result[1]
+                hierarchy_resolved += forced_hierarchy_resolved
+            )
+
+
+            for object_data in object_data_array do
+            (
+                local face_centers = object_data[4]
+                local face_normals = object_data[5]
+                local face_classes = object_data[6]
+                local face_scores = object_data[7]
+
+
+                for face_index = 1 to face_classes.count do
+                (
+                    local face_center = face_centers[face_index]
+                    local face_normal = face_normals[face_index]
+
+
+                    if face_classes[face_index] == 1 or face_classes[face_index] == 2 then
+                    (
+                        /* FORCED or force-propagated wall class: preserve it. */
+                    )
+                    else if (length face_normal) <= geometry_epsilon then
+                    (
+                        face_classes[face_index] = 0
+                    )
+                    else if face_normal.z >= horizontal_normal_threshold then
+                    (
+                        face_classes[face_index] = 3
+                    )
+                    else if face_normal.z <= -horizontal_normal_threshold then
+                    (
+                        face_classes[face_index] = 4
+                    )
+                    else
+                    (
+                        local plus_exit = getBBoxExitDistance face_center face_normal bbox_min bbox_max epsilon:geometry_epsilon
+                        local minus_exit = getBBoxExitDistance face_center (-face_normal) bbox_min bbox_max epsilon:geometry_epsilon
+                        local bbox_score = 0.0
+                        local radial_vector = face_center - bbox_center
+                        local radial_score = 0.0
+                        local spatial_score = 0.0
+
+
+                        if (plus_exit + minus_exit) > geometry_epsilon then
+                        (
+                            bbox_score = (minus_exit - plus_exit) / (plus_exit + minus_exit)
+                        )
+
+
+                        if (length radial_vector) > geometry_epsilon then
+                        (
+                            radial_score = dot face_normal (normalize radial_vector)
+                        )
+
+
+                        spatial_score = (bbox_score * 0.70) + (radial_score * 0.30)
+                        face_scores[face_index] = spatial_score
+
+
+                        if spatial_score >= confidence_threshold then
+                        (
+                            face_classes[face_index] = 1
+                        )
+                        else if spatial_score <= -confidence_threshold then
+                        (
+                            face_classes[face_index] = 2
+                        )
+                        else
+                        (
+                            face_classes[face_index] = 0
+                        )
+                    )
+                )
+            )
+
+
+            thickness_resolved = resolveUnresolvedWallsByThickness object_data_array wall_thickness confidence_threshold:confidence_threshold parallel_threshold:0.90 ray_offset:ray_offset epsilon:geometry_epsilon
+
+
+            local hierarchy_result = resolveWallHierarchyByElements object_data_array connection_threshold confidence_threshold:confidence_threshold horizontal_normal_threshold:horizontal_normal_threshold minimum_matching_vertices:2
+            hierarchy_resolved += hierarchy_result[1]
+
+
+            neighbor_resolved = resolveUnresolvedWallFaces object_data_array neighbor_passes:neighbor_passes
+            fallback_resolved = finalizeUnresolvedWallFaces object_data_array
+
+
+            assignWallClassifierMaterial valid_nodes
+
+
+            for object_data in object_data_array do
+            (
+                local object_node = object_data[1]
+                local source_data = object_data[2]
+                local face_classes = object_data[6]
+                local outer_bits = buildFaceClassBits face_classes 1
+                local inner_bits = buildFaceClassBits face_classes 2
+                local up_bits = buildFaceClassBits face_classes 3
+                local down_bits = buildFaceClassBits face_classes 4
+
+
+                outer_count += outer_bits.numberSet
+                inner_count += inner_bits.numberSet
+                up_count += up_bits.numberSet
+                down_count += down_bits.numberSet
+
+
+                setSourceFaceMaterialId object_node source_data outer_bits 1
+                setSourceFaceMaterialId object_node source_data inner_bits 2
+                setSourceFaceMaterialId object_node source_data up_bits 3
+                setSourceFaceMaterialId object_node source_data down_bits 4
+                cacheWallFaceClasses object_node face_classes.count outer_bits inner_bits up_bits down_bits
+            )
+
+
+            if outer_count > 0 then
+            (
+                selection_type = #outer
+            )
+            else if inner_count > 0 then
+            (
+                selection_type = #inner
+            )
+            else if up_count > 0 then
+            (
+                selection_type = #up
+            )
+            else if down_count > 0 then
+            (
+                selection_type = #down
+            )
+
+
+            for object_data in object_data_array do
+            (
+                local object_node = object_data[1]
+                local source_data = object_data[2]
+                local face_classes = object_data[6]
+                local selection_bits = #{}
+
+
+                if selection_type == #inner then
+                (
+                    selection_bits = buildFaceClassBits face_classes 2
+                )
+                else if selection_type == #outer then
+                (
+                    selection_bits = buildFaceClassBits face_classes 1
+                )
+                else if selection_type == #up then
+                (
+                    selection_bits = buildFaceClassBits face_classes 3
+                )
+                else if selection_type == #down then
+                (
+                    selection_bits = buildFaceClassBits face_classes 4
+                )
+
+
+                setSourceFaceSelection object_node source_data selection_bits
+            )
+
+
+            select valid_nodes
+            max modify mode
+            subObjectLevel = 4
+            redrawViews()
+
+
+            format "Inner-Outer Wall Finder 0.28: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
+
+
+            #(valid_nodes.count, total_faces, outer_count, inner_count, up_count, down_count, selection_type, thickness_resolved, hierarchy_resolved, neighbor_resolved, fallback_resolved) -- return
+        )
+    )
+)
+
+
+/* Creates a non-destructive test setup with OUTER/INNER walls and horizontal caps.
+   The box faces provide clear UP and DOWN normal-direction test cases.
+*/
+function createWallFaceClassifierTestScene =
+(
+    local outer_box = box width:200 length:200 height:120 pos:[0, 0, 60] name:(uniqueName "WFC_TEST_OUTER")
+    local inner_box = box width:80 length:80 height:60 pos:[0, 0, 60] name:(uniqueName "WFC_TEST_INNER")
+
+
+    convertToPoly outer_box
+    convertToPoly inner_box
+    polyOp.flipNormals inner_box #all
+
+
+    select #(outer_box, inner_box)
+    redrawViews()
+
+
+    #(outer_box, inner_box) -- return
+)
+
+
+/* Runs a one-click test using the generated scene and default settings.
+   The generated objects remain selected so only those objects are analyzed.
+*/
+function testWallFaceClassifier wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1) =
+(
+    createWallFaceClassifierTestScene()
+    classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:wall_thickness connection_threshold:connection_threshold
+)
+
+
+/* Tests all four Material IDs and the assigned Multi/Sub-Object material.
+   Creates the test scene, classifies it, and prints each assigned sub-material.
+*/
+function testWallFaceClassifierMaterials wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1) =
+(
+    local test_nodes = createWallFaceClassifierTestScene()
+    local result_data = classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:wall_thickness connection_threshold:connection_threshold
+
+
+    if test_nodes.count > 0 then
+    (
+        local classifier_material = test_nodes[1].material
+
+
+        format "Classifier material: %\n" classifier_material
+        format "ID 1 OUTER: % | diffuse: %\n" classifier_material.materialList[1].name classifier_material.materialList[1].diffuse
+        format "ID 2 INNER: % | diffuse: %\n" classifier_material.materialList[2].name classifier_material.materialList[2].diffuse
+        format "ID 3 UP: % | diffuse: %\n" classifier_material.materialList[3].name classifier_material.materialList[3].diffuse
+        format "ID 4 DOWN: % | diffuse: %\n" classifier_material.materialList[4].name classifier_material.materialList[4].diffuse
+    )
+
+
+    result_data -- return
+)
+
+
+/* Tests Material ID face selection after running the classifier.
+   Pass material_id 1, 2, 3, or 4 to test OUTER, INNER, UP, or DOWN.
+*/
+function testWallFaceClassSelection material_id:1 wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1) =
+(
+    createWallFaceClassifierTestScene()
+    classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:wall_thickness connection_threshold:connection_threshold
+    selectWallFacesByMaterialId material_id
+)
+
+
+/* Tests cached class selection after a normal classification pass.
+   Prints cache size and selects OUTER faces through the cached path.
+*/
+function testWallFaceClassifierCache wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1) =
+(
+    local result_data = #()
+
+
+    createWallFaceClassifierTestScene()
+    classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:wall_thickness connection_threshold:connection_threshold
+    result_data = selectWallFacesByMaterialId 1
+    format "Classifier cache entries: % | OUTER selected: %\n" wall_face_classifier_cache.count result_data[2]
+    result_data -- return
+)
+
+
+/* Tests RMB-style manual marking without using the rollout event handler.
+   Object-level test marks every face of a new Editable Poly box as INNER.
+*/
+function testMarkSelectedWallFaces =
+(
+    local test_box = box width:100 length:100 height:100 pos:[0, 0, 50] name:(uniqueName "WFC_TEST_MARK")
+    local result_data = #()
+
+
+    convertToPoly test_box
+    select test_box
+    max modify mode
+    subObjectLevel = 0
+    result_data = markSelectedWallFaces 2
+    format "Manual mark test | objects: % | INNER faces marked: %\n" result_data[1] result_data[2]
+    result_data -- return
+)
+
+
+/* Returns a short suffix for one physical unit type.
+   Used for metric, US, and 1:1 custom display units.
+*/
+function getWallFacePhysicalUnitLabel unit_type =
+(
+    local unit_label = "units"
+
+
+    case unit_type of
+    (
+        #Millimeters: unit_label = "mm"
+        #Centimeters: unit_label = "cm"
+        #Meters: unit_label = "m"
+        #Kilometers: unit_label = "km"
+        #Inches: unit_label = "in"
+        #Feet: unit_label = "ft"
+        #Miles: unit_label = "mi"
+        default: unit_label = "units"
+    )
+
+
+    unit_label -- return
+)
+
+
+/* Returns a short label for the current 3ds Max display units.
+   A 1:1 Custom unit uses its physical unit suffix, for example 1 mm -> mm.
+*/
+function getWallFaceDisplayUnitLabel =
+(
+    local unit_label = "units"
+    local custom_value_epsilon = 0.000001
+
+
+    case units.DisplayType of
+    (
+        #Generic:
+        (
+            unit_label = "units"
+        )
+        #Metric:
+        (
+            unit_label = getWallFacePhysicalUnitLabel units.MetricType
+        )
+        #US:
+        (
+            case units.USType of
+            (
+                #Frac_In: unit_label = "in"
+                #Dec_In: unit_label = "in"
+                #Frac_Ft: unit_label = "ft"
+                #Dec_Ft: unit_label = "ft"
+                #Ft_Frac_In: unit_label = "ft/in"
+                #Ft_Dec_In: unit_label = "ft/in"
+                default: unit_label = "US"
+            )
+        )
+        #custom:
+        (
+            if (abs (units.CustomValue - 1.0)) <= custom_value_epsilon then
+            (
+                unit_label = getWallFacePhysicalUnitLabel units.CustomUnit
+            )
+            else if units.CustomName != "" then
+            (
+                unit_label = units.CustomName
+            )
+            else
+            (
+                unit_label = "custom"
+            )
+        )
+        default:
+        (
+            unit_label = "units"
+        )
+    )
+
+
+    unit_label -- return
+)
+
+
+/* Tests the object > element > face hierarchy pass on the current selected objects.
+   Prints how many faces were resolved by element/network propagation.
+*/
+function testWallHierarchyPropagation connection_threshold:((units.decodeValue "1m") * 0.1) =
+(
+    local result_data = classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:(units.decodeValue "1m") connection_threshold:connection_threshold
+
+
+    if result_data.count == 11 then
+    (
+        format "Hierarchy test: % faces resolved with connection threshold %\n" result_data[9] connection_threshold
+    )
+
+
+    result_data -- return
+)
+
+
+/* Tests the display-unit label helper used by the thickness controls.
+   For Custom units it also prints the scale and physical reference unit.
+*/
+function testWallFaceDisplayUnitLabel =
+(
+    local unit_label = getWallFaceDisplayUnitLabel()
+
+
+    if units.DisplayType == #custom then
+    (
+        format "Display type: % | Custom value: % | Custom unit: % | UI label: %\n" units.DisplayType units.CustomValue units.CustomUnit unit_label
+    )
+    else
+    (
+        format "Display type: % | UI label: %\n" units.DisplayType unit_label
+    )
+
+
+    unit_label -- return
+)
+
+
+/* Tests the unit-independent 1 meter default used by Wall thickness.
+   Prints its value in system units and the current display-unit string.
+*/
+function testWallFaceDefaultThickness =
+(
+    local one_meter = units.decodeValue "1m"
+    format "Wall thickness default = 1m | System-unit value: %\n" one_meter
+    one_meter -- return
+)
+
+
+/* Reports and validates persistent FORCED OUTER/INNER hints on the current selection.
+   With run_classification:true it verifies that classification preserves every forced face.
+*/
+function testWallFaceForcedHints run_classification:false =
+(
+    local selected_nodes = for object_node in selection where superclassof object_node == GeometryClass collect object_node
+    local forced_outer_count = 0
+    local forced_inner_count = 0
+    local failed_face_count = 0
+
+
+    for object_node in selected_nodes do
+    (
+        local source_data = getFaceGeometrySource object_node
+
+
+        if source_data != undefined then
+        (
+            local forced_outer_bits = getForcedWallFaceBits object_node source_data 1
+            local forced_inner_bits = getForcedWallFaceBits object_node source_data 2
+            forced_outer_count += forced_outer_bits.numberSet
+            forced_inner_count += forced_inner_bits.numberSet
+        )
+    )
+
+
+    format "FORCED hints | OUTER: % | INNER: %\n" forced_outer_count forced_inner_count
+
+
+    if run_classification then
+    (
+        classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1)
+
+
+        for object_node in selected_nodes do
+        (
+            local source_data = getFaceGeometrySource object_node
+
+
+            if source_data != undefined then
+            (
+                local forced_outer_bits = getForcedWallFaceBits object_node source_data 1
+                local forced_inner_bits = getForcedWallFaceBits object_node source_data 2
+
+
+                for face_index in forced_outer_bits do
+                (
+                    if getSourceFaceMaterialId object_node source_data face_index != 1 then
+                    (
+                        failed_face_count += 1
+                    )
+                )
+
+
+                for face_index in forced_inner_bits do
+                (
+                    if getSourceFaceMaterialId object_node source_data face_index != 2 then
+                    (
+                        failed_face_count += 1
+                    )
+                )
+            )
+        )
+
+
+        format "FORCED preservation failures: %\n" failed_face_count
+    )
+
+
+    #(forced_outer_count, forced_inner_count, failed_face_count) -- return
+)
+
+
+/* Returns the visible wall-face class name for one classifier color.
+   Used to name objects created by EXPLODE.
+*/
+function getWallFaceClassName material_id =
+(
+    local class_name = "CLASS"
+
+
+    case material_id of
+    (
+        1: class_name = "OUTER"
+        2: class_name = "INNER"
+        3: class_name = "UP"
+        4: class_name = "DOWN"
+        default: class_name = "CLASS"
+    )
+
+
+    class_name -- return
+)
+
+
+/* Explodes selected classified objects into separate color-class objects.
+   Mixed objects are split into OUTER, INNER, UP, and DOWN objects by face Material ID.
+*/
+function explodeSelectedWallFacesByClass =
+(
+    local selected_nodes = for object_node in selection where superclassof object_node == GeometryClass collect object_node
+    local result_nodes = #()
+    local exploded_source_count = 0
+    local created_object_count = 0
+    local skipped_object_count = 0
+
+
+    for object_node in selected_nodes do
+    (
+        if isValidNode object_node then
+        (
+            local source_data = getFaceGeometrySource object_node
+
+
+            if source_data != undefined and hasWallClassifierMaterial object_node then
+            (
+                local face_count = getSourceNumFaces object_node source_data
+                local used_class_ids = #()
+
+
+                for face_index = 1 to face_count do
+                (
+                    local material_id = getSourceFaceMaterialId object_node source_data face_index
+
+
+                    if material_id >= 1 and material_id <= 4 then
+                    (
+                        if (findItem used_class_ids material_id) == 0 then
+                        (
+                            append used_class_ids material_id
+                        )
+                    )
+                )
+
+
+                if used_class_ids.count > 1 then
+                (
+                    local source_name = object_node.name
+                    local source_result_nodes = #()
+
+
+                    for material_id in used_class_ids do
+                    (
+                        local split_node = copy object_node
+                        local class_name = getWallFaceClassName material_id
+
+
+                        split_node.name = uniqueName (source_name + "_" + class_name)
+                        collapseStack split_node
+
+
+                        if classof split_node.baseObject != Editable_Poly then
+                        (
+                            convertToPoly split_node
+                        )
+
+
+                        local split_face_count = polyop.getNumFaces split_node
+                        local delete_bits = #{}
+
+
+                        for split_face_index = 1 to split_face_count do
+                        (
+                            if (polyop.getFaceMatID split_node split_face_index) != material_id then
+                            (
+                                delete_bits[split_face_index] = true
+                            )
+                        )
+
+
+                        if delete_bits.numberSet > 0 then
+                        (
+                            polyop.deleteFaces split_node delete_bits delIsoVerts:true
+                        )
+
+
+                        if (polyop.getNumFaces split_node) > 0 then
+                        (
+                            setForcedWallFaceBits split_node 1 #{}
+                            setForcedWallFaceBits split_node 2 #{}
+                            append source_result_nodes split_node
+                            append result_nodes split_node
+                            created_object_count += 1
+                        )
+                        else
+                        (
+                            delete split_node
+                        )
+                    )
+
+
+                    if source_result_nodes.count > 0 then
+                    (
+                        delete object_node
+                        exploded_source_count += 1
+                    )
+                )
+                else if used_class_ids.count == 1 then
+                (
+                    append result_nodes object_node
+                )
+                else
+                (
+                    skipped_object_count += 1
+                )
+            )
+            else
+            (
+                skipped_object_count += 1
+            )
+        )
+    )
+
+
+    wall_face_classifier_cache = #()
+    wall_face_classifier_last_nodes = for object_node in result_nodes where isValidNode object_node collect object_node
+
+
+    if result_nodes.count > 0 then
+    (
+        select result_nodes
+        max modify mode
+        subObjectLevel = 0
+    )
+
+
+    redrawViews()
+    #(exploded_source_count, created_object_count, skipped_object_count, result_nodes.count) -- return
+)
+
+
+/* Tests EXPLODE after classifying the built-in test scene.
+   Prints how many source objects were split and how many result objects were created.
+*/
+function testWallFaceClassifierExplode wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1) =
+(
+    createWallFaceClassifierTestScene()
+    classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:wall_thickness connection_threshold:connection_threshold
+
+
+    local result_data = explodeSelectedWallFacesByClass()
+    format "EXPLODE test | split sources: % | created objects: % | skipped: % | selected results: %\n" result_data[1] result_data[2] result_data[3] result_data[4]
+
+
+    result_data -- return
+)
+
+
+/* Tests RESET on the current selected supported objects.
+   Verifies FORCED user-property keys are removed, Material IDs are reset, and the classifier material is removed.
+*/
+function testWallFaceClassifierReset =
+(
+    local result_data = resetSelectedWallFaceClassification()
+    local forced_face_count = 0
+    local forced_property_count = 0
+    local non_default_id_count = 0
+    local classifier_material_count = 0
+
+
+    for object_node in selection where superclassof object_node == GeometryClass do
+    (
+        local source_data = getFaceGeometrySource object_node
+
+
+        if doesUserPropExist object_node "WallFaceClassifierForcedOuter" then
+        (
+            forced_property_count += 1
+        )
+
+
+        if doesUserPropExist object_node "WallFaceClassifierForcedInner" then
+        (
+            forced_property_count += 1
+        )
+
+
+        if hasWallClassifierMaterial object_node then
+        (
+            classifier_material_count += 1
+        )
+
+
+        if source_data != undefined then
+        (
+            local forced_outer_bits = getForcedWallFaceBits object_node source_data 1
+            local forced_inner_bits = getForcedWallFaceBits object_node source_data 2
+            local face_count = getSourceNumFaces object_node source_data
+
+
+            forced_face_count += forced_outer_bits.numberSet + forced_inner_bits.numberSet
+
+
+            for face_index = 1 to face_count do
+            (
+                if getSourceFaceMaterialId object_node source_data face_index != 1 then
+                (
+                    non_default_id_count += 1
+                )
+            )
+        )
+    )
+
+
+    format "RESET objects: % | faces: % | forced properties left: % | forced faces left: % | non-default Material IDs: % | classifier materials left: %\n" result_data[1] result_data[2] forced_property_count forced_face_count non_default_id_count classifier_material_count
+    #(result_data[1], result_data[2], forced_property_count, forced_face_count, non_default_id_count, classifier_material_count) -- return
+)
+
+
+/* Tests the two-shared-vertex rule used by FORCED hierarchy propagation.
+   One shared corner must fail while a shared edge of two vertices must pass.
+*/
+function testForcedMinimumSharedVertices =
+(
+    local forced_face = #(1, 2, 3, 4)
+    local corner_touch_face = #(4, 5, 6, 7)
+    local edge_touch_face = #(3, 4, 8, 9)
+    local corner_result = facesShareMinimumVertices forced_face corner_touch_face minimum_shared_vertices:2
+    local edge_result = facesShareMinimumVertices forced_face edge_touch_face minimum_shared_vertices:2
+
+
+    format "FORCED 2-vertex rule | corner touch: % | edge touch: %\n" corner_result edge_result
+    #(corner_result, edge_result) -- return
+)
+
+
+/* Tests FORCED OUTER priority across connected wall elements without changing the scene.
+   An OUTER forced element must override a connected INNER forced element.
+*/
+function testForcedOuterPriority =
+(
+    local shared_vertices = #([0, 0, 0], [0, 0, 10], [10, 0, 10], [10, 0, 0])
+    local face_indices = #(#(1, 2, 3, 4))
+    local outer_data = #(undefined, undefined, #(), #(), #([1, 0, 0]), #(1), #(1.0), shared_vertices, face_indices)
+    local inner_data = #(undefined, undefined, #(), #(), #([1, 0, 0]), #(2), #(-1.0), shared_vertices, face_indices)
+    local object_data_array = #(outer_data, inner_data)
+    local result_data = resolveWallHierarchyByElements object_data_array 1.0 confidence_threshold:0.12 horizontal_normal_threshold:0.85 minimum_matching_vertices:2 prefer_outer_seed:true
+    local outer_result = object_data_array[1][6][1]
+    local inner_result = object_data_array[2][6][1]
+    local priority_ok = (outer_result == 1 and inner_result == 1)
+
+
+    format "FORCED priority | OUTER element: % | connected INNER element becomes: % | passed: %\n" outer_result inner_result priority_ok
+
+
+    priority_ok -- return
+)
+
+
+/* Tests the color-name legend used by the CLASSIFY tooltip.
+   Prints the four visible class labels without material ID numbers.
+*/
+function testWallFaceClassifierColorLegend =
+(
+    format "Green = OUTER | Orange = INNER | Pastel Blue = UP | Pastel Brown = DOWN\n"
+    true -- return
+)
+
+
+/* Tests the default connection-threshold relationship without changing the scene.
+   The expected threshold is exactly ten percent of the supplied wall thickness.
+*/
+function testWallFaceDefaultConnectionThreshold wall_thickness:(units.decodeValue "1m") =
+(
+    local connection_threshold = getDefaultWallConnectionThreshold wall_thickness
+
+
+    format "Wall thickness: % | default Connect threshold: % | ratio: %\n" wall_thickness connection_threshold (connection_threshold / wall_thickness)
+
+
+    connection_threshold -- return
+)
+
+
+/* Tests last-run object restoration and both LMB selection modes.
+   It classifies a test scene, clears node selection, restores matching objects, then selects matching faces.
+*/
+function testWallFaceSelectionRestore =
+(
+    local test_nodes = createWallFaceClassifierTestScene()
+    local classify_result = classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1)
+    local object_result = #()
+    local face_result = #()
+
+
+    clearSelection()
+    object_result = selectWallFacesByMaterialId 1
+
+
+    if selection.count > 0 then
+    (
+        max modify mode
+        subObjectLevel = 4
+        face_result = selectWallFacesByMaterialId 1
+    )
+
+
+    format "Restore test | classified objects: % | OUTER objects restored: % | OUTER faces selected: %\n" classify_result[1] object_result[1] face_result[2]
+
+
+    #(object_result, face_result) -- return
+)
+
+
+
+
+/* Classifies only currently selected supported objects that have no classifier result yet.
+   Existing analyzed objects are left untouched, then the original object selection is restored.
+*/
+function analyzeUnclassifiedSelectedWallObjects wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1) =
+(
+    local original_nodes = for object_node in selection where isValidNode object_node collect object_node
+    local original_subobject_level = subObjectLevel
+    local unanalyzed_nodes = #()
+    local classify_result = #()
+
+
+    for object_node in original_nodes do
+    (
+        local source_data = getFaceGeometrySource object_node
+
+
+        if source_data != undefined then
+        (
+            if not hasWallClassifierMaterial object_node then
+            (
+                append unanalyzed_nodes object_node
+            )
+        )
+    )
+
+
+    if unanalyzed_nodes.count > 0 then
+    (
+        select unanalyzed_nodes
+        max modify mode
+        subObjectLevel = 0
+
+
+        classify_result = classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:wall_thickness connection_threshold:connection_threshold
+
+
+        if original_nodes.count > 0 then
+        (
+            select original_nodes
+            max modify mode
+
+
+            try
+            (
+                subObjectLevel = original_subobject_level
+            )
+            catch
+            (
+            )
+        )
+    )
+
+
+    #(unanalyzed_nodes.count, classify_result) -- return
+)
+
+
+/* Tests automatic analysis used by SELECT OUTER/INNER/UP/DOWN.
+   New test objects must be classified automatically before class selection runs.
+*/
+function testWallFaceAutoAnalyzeSelection wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1) =
+(
+    local test_nodes = createWallFaceClassifierTestScene()
+    local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:wall_thickness connection_threshold:connection_threshold
+    local analyzed_count = 0
+
+
+    for object_node in test_nodes do
+    (
+        if hasWallClassifierMaterial object_node then
+        (
+            analyzed_count += 1
+        )
+    )
+
+
+    format "Auto-analyze test | requested: % | analyzed objects: %\n" analyze_result[1] analyzed_count
+
+
+    #(analyze_result[1], analyzed_count) -- return
+)
+
+
+rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
+(
+    spinner spn_wall_thickness "Wall thickness:" pos:[8,8] width:204 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:70 \
+        tooltip:"Maximum distance to search for the opposite wall. Default: 1 m."
+    label lbl_wall_units "units" pos:[218,12] width:50 height:18 align:#left tooltip:"Current display unit."
+
+
+    spinner spn_connection_threshold "Connect threshold:" pos:[8,34] width:204 height:20 range:[0.001,1000000.0,((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:70 \
+        tooltip:"Matches neighbor vertices; at least 2 must match. Default is 10% of Wall thickness, and changing Wall thickness resets this value."
+    label lbl_connect_units "units" pos:[218,38] width:50 height:18 align:#left tooltip:"Current display unit."
+
+
+    button btn_classify "INNER \\ OUTTER" pos:[8,60] width:82 height:32 tooltip:"LMB: Classify selected objects. If nothing is selected, restore the last classified object set. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = UP | Pastel Brown = DOWN."
+    button btn_explode "EXPLODE" pos:[97,60] width:82 height:32 tooltip:"LMB: Split each selected classified object into separate OUTER, INNER, UP, and DOWN objects."
+    button btn_reset "RESET" pos:[186,60] width:82 height:32 tooltip:"LMB: Reset face classification, remove the classifier material, clear FORCED OUTER/INNER hints, and clear cached class data."
+
+
+    button btn_select_outer "SELECT OUTER" pos:[8,98] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing OUTER faces or face mode selects OUTER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces OUTER, then grow through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. Auto-grown walls are not marked FORCED. TOP/DOWN seams stop growth."
+    button btn_select_inner "SELECT INNER" pos:[141,98] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing INNER faces or face mode selects INNER faces.\n\nRMB: FORCE selected faces or objects INNER. Used as a classification seed."
+    button btn_select_up "SELECT UP" pos:[8,128] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing UP faces or face mode selects UP faces."
+    button btn_select_down "SELECT DOWN" pos:[141,128] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing DOWN faces or face mode selects DOWN faces."
+
+
+    label lbl_status "Ready" pos:[8,158] width:260 height:18 align:#left tooltip:"Classification counts and current selection."
+    button btn_test "Create test scene" pos:[8,180] width:130 height:24 tooltip:"Create simple wall geometry for testing."
+
+
+    on wallFaceClassifierRollout open do
+    (
+        local unit_label = getWallFaceDisplayUnitLabel()
+        lbl_wall_units.text = unit_label
+        lbl_connect_units.text = unit_label
+    )
+
+
+    on spn_wall_thickness changed thickness_value do
+    (
+        local unit_label = getWallFaceDisplayUnitLabel()
+        lbl_wall_units.text = unit_label
+        lbl_connect_units.text = unit_label
+        spn_connection_threshold.value = getDefaultWallConnectionThreshold thickness_value
+    )
+
+
+    on spn_connection_threshold changed threshold_value do
+    (
+        local unit_label = getWallFaceDisplayUnitLabel()
+        lbl_wall_units.text = unit_label
+        lbl_connect_units.text = unit_label
+    )
+
+
+    on btn_classify pressed do
+    (
+        local result_data = #()
+        local unit_label = getWallFaceDisplayUnitLabel()
+        lbl_wall_units.text = unit_label
+        lbl_connect_units.text = unit_label
+
+
+        undo "Classify Wall Faces" on
+        (
+            result_data = classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
+        )
+
+
+        if result_data.count == 11 then
+        (
+            lbl_status.text = ("OUTER: " + result_data[3] as string + "  INNER: " + result_data[4] as string + "  UP: " + result_data[5] as string + "  DOWN: " + result_data[6] as string)
+        )
+    )
+
+
+    on btn_explode pressed do
+    (
+        local result_data = #()
+
+
+        undo "Explode Wall Faces By Class" on
+        (
+            result_data = explodeSelectedWallFacesByClass()
+        )
+
+
+        if result_data.count == 4 then
+        (
+            lbl_status.text = ("EXPLODE: " + result_data[2] as string + " objects created from " + result_data[1] as string + " sources")
+        )
+    )
+
+
+    on btn_reset pressed do
+    (
+        local result_data = #()
+
+
+        undo "Reset Wall Face Classification" on
+        (
+            result_data = resetSelectedWallFaceClassification()
+        )
+
+
+        if result_data.count == 2 then
+        (
+            lbl_status.text = ("RESET: " + result_data[1] as string + " objects | " + result_data[2] as string + " face IDs | material + FORCED data cleared")
+        )
+    )
+
+
+    on btn_select_outer pressed do
+    (
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
+        local result_data = selectWallFacesByMaterialId 1
+
+
+        if result_data.count == 3 then
+        (
+            if result_data[3] == #faces then
+            (
+                lbl_status.text = ("OUTER faces: " + result_data[2] as string)
+            )
+            else
+            (
+                lbl_status.text = ("OUTER objects: " + result_data[1] as string)
+            )
+        )
+    )
+
+
+    on btn_select_outer rightclick do
+    (
+        local result_data = #()
+        local growth_result = #()
+        local seed_data_array = getWallFaceGrowthSeedData 1
+
+
+        undo "Force And Grow Wall Faces OUTER" on
+        (
+            result_data = markSelectedWallFaces 1
+            growth_result = growCachedWallFaceClass seed_data_array 1 spn_connection_threshold.value
+        )
+
+
+        if result_data.count == 3 then
+        (
+            if growth_result.count == 3 then
+            (
+                lbl_status.text = ("FORCED OUTER: " + result_data[2] as string + " faces | grew " + growth_result[2] as string + " faces on " + growth_result[1] as string + " cached walls")
+            )
+            else
+            (
+                lbl_status.text = ("FORCED OUTER: " + result_data[2] as string + " faces | " + result_data[3] as string)
+            )
+        )
+    )
+
+
+    on btn_select_inner pressed do
+    (
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
+        local result_data = selectWallFacesByMaterialId 2
+
+
+        if result_data.count == 3 then
+        (
+            if result_data[3] == #faces then
+            (
+                lbl_status.text = ("INNER faces: " + result_data[2] as string)
+            )
+            else
+            (
+                lbl_status.text = ("INNER objects: " + result_data[1] as string)
+            )
+        )
+    )
+
+
+    on btn_select_inner rightclick do
+    (
+        local result_data = #()
+
+
+        undo "Force Wall Faces INNER" on
+        (
+            result_data = markSelectedWallFaces 2
+        )
+
+
+        if result_data.count == 3 then
+        (
+            lbl_status.text = ("FORCED INNER: " + result_data[2] as string + " faces | " + result_data[3] as string)
+        )
+    )
+
+
+    on btn_select_up pressed do
+    (
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
+        local result_data = selectWallFacesByMaterialId 3
+
+
+        if result_data.count == 3 then
+        (
+            if result_data[3] == #faces then
+            (
+                lbl_status.text = ("UP faces: " + result_data[2] as string)
+            )
+            else
+            (
+                lbl_status.text = ("UP objects: " + result_data[1] as string)
+            )
+        )
+    )
+
+
+    on btn_select_down pressed do
+    (
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
+        local result_data = selectWallFacesByMaterialId 4
+
+
+        if result_data.count == 3 then
+        (
+            if result_data[3] == #faces then
+            (
+                lbl_status.text = ("DOWN faces: " + result_data[2] as string)
+            )
+            else
+            (
+                lbl_status.text = ("DOWN objects: " + result_data[1] as string)
+            )
+        )
+    )
+
+
+    on btn_test pressed do
+    (
+        createWallFaceClassifierTestScene()
+        lbl_status.text = "Test scene created."
+    )
+)
+
+
+
+
+
+
+rollout WallFixerRollout "Wall-Fixer" width:344 height:748
+(
+    progressbar workflow_progress "" pos:[8,8] width:328 height:14 value:0 color:(color 0 180 0) orient:#horizontal
+    dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,6] width:76 height:40
+    dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:19
+    dotNetControl status_line_bottom "System.Windows.Forms.RichTextBox" pos:[88,28] width:248 height:19
+    subRollout workflow_subrollout "" pos:[8,54] width:328 height:686
+
+
+    local status_texts = #("Ready.", "")
+    local last_progress_value = -1
+
+
+    /*
+    Converts multiline reports into a compact single status line.
+    The status header retains only the two newest messages.
+    */
+    function compactStatusText message_text =
+(
+        text_value = if message_text == undefined then "" else (message_text as string)
+        text_value = substituteString text_value "\r\n" " | "
+        text_value = substituteString text_value "\n" " | "
+        text_value = substituteString text_value "\r" " | "
+        text_value
+        -- return
+    )
+
+
+    /*
+    Draws one plain status-history line.
+    Result labels are shown only in the progress-bar position.
+    */
+    function renderStatusLine status_control message_text =
+    (
+        status_control.Clear()
+        status_control.SelectionFont = status_control.Font
+        status_control.SelectionColor = status_control.ForeColor
+        status_control.AppendText (compactStatusText message_text)
+        -- return
+    )
+
+
+    /*
+    Shows the completed process state in the progress-bar position.
+    Final SUCCESS/WARNING/ERROR states hide the progress bar until another process starts.
+    */
+    function showProcessResult result_type =
+    (
+        color_class = dotNetClass "System.Drawing.Color"
+        result_text = "SUCCESS"
+        result_color = color_class.HotPink
+
+
+        case result_type of
+        (
+            #warning:
+            (
+                result_text = "WARNING"
+                result_color = color_class.DarkOrange
+            )
+            #error:
+            (
+                result_text = "ERROR"
+                result_color = color_class.Red
+            )
+            default:
+            (
+                result_text = "SUCCESS"
+                result_color = color_class.HotPink
+            )
+        )
+
+
+        workflow_progress.visible = false
+        status_line_top.Visible = true
+        status_line_bottom.Visible = true
+        process_status_label.Text = result_text
+        process_status_label.ForeColor = result_color
+        process_status_label.Visible = true
+        -- return
+    )
+
+
+    /*
+    Pushes one plain message into the shared two-line status history.
+    The message type controls only the result label shown above it.
+    */
+    function setStatus message_type message_text =
+    (
+        status_texts[2] = status_texts[1]
+        status_texts[1] = compactStatusText message_text
+
+
+        renderStatusLine status_line_top status_texts[1]
+        renderStatusLine status_line_bottom status_texts[2]
+
+
+        if (message_type == #success) or (message_type == #warning) or (message_type == #error) then
+        (
+            showProcessResult message_type
+        )
+
+
+        try
+        (
+            (dotNetClass "System.Windows.Forms.Application").DoEvents()
+        )
+        catch
+        (
+        )
+        -- return
+    )
+
+
+    /*
+    Sets the global progress bar directly and clamps it to 0-100.
+    Starting or updating work shows the bar and hides the completed-state label.
+    */
+    function setProgress progress_value =
+    (
+        clamped_value = progress_value as integer
+        if clamped_value < 0 then clamped_value = 0
+        if clamped_value > 100 then clamped_value = 100
+
+
+        if clamped_value != last_progress_value then
+        (
+            last_progress_value = clamped_value
+
+
+            if clamped_value < 100 then
+            (
+                process_status_label.Visible = false
+                status_line_top.Visible = false
+                status_line_bottom.Visible = false
+                workflow_progress.visible = true
+            )
+
+
+            workflow_progress.value = clamped_value
+
+
+            try
+            (
+                (dotNetClass "System.Windows.Forms.Application").DoEvents()
+            )
+            catch
+            (
+            )
+        )
+        -- return
+    )
+
+
+    /*
+    Receives the existing batch slicer's processed/total object counts.
+    It updates both the green progress bar and the shared plain status line.
+    */
+    function updateSliceProgress processed_count total_count =(
+        progress_percent = 0
+
+
+        if total_count > 0 then
+        (
+            progress_percent = ((100.0 * processed_count) / total_count) as integer
+        )
+
+
+        setProgress progress_percent
+        setStatus #message ((processed_count as string) + " / " + (total_count as string) + " objects")
+        -- return
+    )
+
+
+    /*
+    Returns the current inherited slicing direction requested by the new UI.
+    Vertical and Horizontal preserve the current two-modifier directional behavior.
+    */
+    function getSliceCutMode =
+    (
+        if WallFixerSliceWallsRollout.slice_direction_radio.state == 2 then
+        (
+            #horizontal
+        )
+        else
+        (
+            #vertical
+        )
+        -- return
+    )
+
+
+    /*
+    Returns the inherited slice-plane definition mode from the existing INI setting.
+    Edge Direction remains the default when no legacy setting is present.
+    */
+    function getSlicePlaneMode =
+    (
+        if saved_slice_plane_mode_index == 1 then
+        (
+            #globalAxis
+        )
+        else
+        (
+            #nextVert
+        )
+        -- return
+    )
+
+
+    /*
+    Persists all visible Wall-Fixer controls and optional dialog geometry.
+    Legacy Core settings are also updated so inherited functions keep their existing behavior.
+    */
+    function saveUiSettings dialog_position:undefined dialog_size:undefined =
+    (
+        cut_mode_index = if WallFixerSliceWallsRollout.slice_direction_radio.state == 2 then 2 else 3
+
+
+        setIniSetting wall_fixer_ui_ini_path "Controls" "WeldVertices" (if WallFixerOptionsRollout.weld_checkbox.checked then "1" else "0")
+        setIniSetting wall_fixer_ui_ini_path "Controls" "WeldThreshold" (saved_weld_threshold as string)
+        setIniSetting wall_fixer_ui_ini_path "Controls" "DisplayHiddenEdges" (if WallFixerOptionsRollout.hidden_edges_checkbutton.checked then "1" else "0")
+        setIniSetting wall_fixer_ui_ini_path "Controls" "DoubleSide" (if WallFixerOptionsRollout.double_side_checkbutton.checked then "1" else "0")
+        setIniSetting wall_fixer_ui_ini_path "Controls" "AutoSmooth" (if WallFixerOptionsRollout.auto_smooth_checkbox.checked then "1" else "0")
+        setIniSetting wall_fixer_ui_ini_path "Controls" "SlicePrecision" (WallFixerOptionsRollout.slice_precision_spinner.value as string)
+        setIniSetting wall_fixer_ui_ini_path "Controls" "SliceDirection" (WallFixerSliceWallsRollout.slice_direction_radio.state as string)
+        setIniSetting wall_fixer_ui_ini_path "Controls" "SliceQuiet" (if WallFixerSliceWallsRollout.quiet_checkbox.checked then "1" else "0")
+
+
+        if dialog_position != undefined then
+        (
+            setIniSetting wall_fixer_ui_ini_path "Window" "X" ((dialog_position.x as integer) as string)
+            setIniSetting wall_fixer_ui_ini_path "Window" "Y" ((dialog_position.y as integer) as string)
+        )
+
+
+        if dialog_size != undefined then
+        (
+            setIniSetting wall_fixer_ui_ini_path "Window" "Width" ((dialog_size.x as integer) as string)
+            setIniSetting wall_fixer_ui_ini_path "Window" "Height" ((dialog_size.y as integer) as string)
+        )
+
+
+        WallFixer.saveSettings \
+            WallFixerOptionsRollout.weld_checkbox.checked \
+            saved_weld_threshold \
+            WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
+            WallFixerOptionsRollout.double_side_checkbutton.checked \
+            WallFixerOptionsRollout.auto_smooth_checkbox.checked \
+            cut_mode_index \
+            saved_angle_threshold \
+            planar_tolerance:saved_planar_tolerance \
+            slice_plane_mode_index:saved_slice_plane_mode_index \
+            border_angle_threshold:saved_border_angle_threshold \
+            right_angle_threshold:saved_right_angle_threshold \
+            double_vert_threshold:saved_double_vert_threshold \
+            double_face_threshold:saved_double_face_threshold \
+            slice_precision:WallFixerOptionsRollout.slice_precision_spinner.value \
+            quiet_batch:WallFixerSliceWallsRollout.quiet_checkbox.checked \
+            dialog_position:dialog_position
+        -- return
+    )
+
+
+    /*
+    Runs the inherited Auto Smooth action from the Options rollout.
+    The operation remains undoable and reports through the shared Wall-Fixer status area.
+    */
+    function runSmooth =
+    (
+        setProgress 0
+        setStatus #message "Applying Auto Smooth..."
+
+
+        undo "Wall-Fixer - Auto Smooth" on
+        (
+            WallFixer.autoSmoothSelection()
+        )
+
+
+        completeRedraw()
+        setProgress 100
+        setStatus #success "Auto Smooth completed."
+        true
+        -- return
+    )
+
+
+    /*
+    Persists all controls imported from Straight Edge Fixer.
+    Geometry logic continues using its original settings store.
+    */
+    function saveStraightEdgeSettings =
+    (
+        setIniSetting wall_fixer_ui_ini_path "Controls" "LevelTolerance" (WallFixerEdgeFixerRollout.level_tolerance_spinner.value as string)
+        setIniSetting wall_fixer_ui_ini_path "Controls" "MinLevelEdges" (WallFixerEdgeFixerRollout.min_level_edges_spinner.value as string)
+        setIniSetting wall_fixer_ui_ini_path "Controls" "SearchInZ" (WallFixerEdgeFixerRollout.search_in_z_spinner.value as string)
+        setIniSetting wall_fixer_ui_ini_path "Controls" "EdgeAngle" (WallFixerEdgeFixerRollout.edge_angle_spinner.value as string)
+        setIniSetting wall_fixer_ui_ini_path "Controls" "StraightQuiet" (if WallFixerEdgeFixerRollout.straight_quiet_checkbox.checked then "1" else "0")
+
+
+        StraightEdgeFixer.saveSettings \
+            WallFixerEdgeFixerRollout.level_tolerance_spinner.value \
+            WallFixerEdgeFixerRollout.min_level_edges_spinner.value \
+            WallFixerEdgeFixerRollout.search_in_z_spinner.value \
+            WallFixerEdgeFixerRollout.edge_angle_spinner.value \
+            WallFixerEdgeFixerRollout.straight_quiet_checkbox.checked
+        -- return
+    )
+
+
+    /*
+    Converts selected geometry to Editable Poly only when the base object is not already Editable Poly.
+    This wrapper is used only by inherited functions that require a base Editable Poly.
+    */
+    function ensureSelectionEditablePoly =
+    (
+        selected_nodes = selection as array
+        converted_count = 0
+        failed_count = 0
+
+
+        for node in selected_nodes do
+        (
+            if isValidNode node and superClassOf node == GeometryClass then
+            (
+                if classOf node.baseObject != Editable_Poly then
+                (
+                    conversion_success = true
+
+
+                    try
+                    (
+                        convertToPoly node
+                    )
+                    catch
+                    (
+                        conversion_success = false
+                    )
+
+
+                    if conversion_success and classOf node.baseObject == Editable_Poly then
+                    (
+                        converted_count += 1
+                    )
+                    else
+                    (
+                        failed_count += 1
+                    )
+                )
+            )
+        )
+
+
+        #(converted_count, failed_count)
+        -- return
+    )
+
+
+    /*
+    Runs the duplicate-vertex check/fix using the visible Weld threshold.
+    LMB finds duplicate vertices; RMB selects the same candidates and welds them with weldSelectedEPolyVerts.
+    */
+    function runDuplicateVerts fix_vertices:false =
+    (
+        setProgress 0
+        WallFixerPreProcessRollout.weld_unit_label.text = wallFixerGetDisplayUnitLabel()
+        weld_threshold = WallFixerPreProcessRollout.weld_threshold_spinner.value
+        saved_weld_threshold = weld_threshold
+        saved_double_vert_threshold = weld_threshold
+        wall_fixer_weld_threshold_syncing = true
+
+
+        try
+        (
+            WallFixerOptionsRollout.weld_threshold_spinner.value = weld_threshold
+        )
+        catch
+        (
+        )
+
+
+        wall_fixer_weld_threshold_syncing = false
+        setIniSetting wall_fixer_ui_ini_path "Controls" "WeldThreshold" (weld_threshold as string)
+        setStatus #message (if fix_vertices then "Welding duplicated vertices..." else "Checking unwelded vertices...")
+
+
+        conversion_nodes = selection as array
+        conversion_failed_count = 0
+
+
+        for scene_node in conversion_nodes do
+        (
+            if isValidNode scene_node and superClassOf scene_node == GeometryClass then
+            (
+                if classOf scene_node.baseObject != Editable_Poly then
+                (
+                    conversion_success = true
+
+
+                    try
+                    (
+                        convertToPoly scene_node
+                    )
+                    catch
+                    (
+                        conversion_success = false
+                    )
+
+
+                    if (not conversion_success) or (classOf scene_node.baseObject != Editable_Poly) then
+                    (
+                        conversion_failed_count += 1
+                    )
+                )
+            )
+        )
+
+
+        if conversion_failed_count > 0 then
+        (
+            setStatus #error ((conversion_failed_count as string) + " selected object(s) could not be converted to Editable Poly.")
+            false
+        )
+        else
+        (
+            completed = WallFixer.selectDoubleVerts position_threshold:weld_threshold
+
+
+            if completed and fix_vertices then
+            (
+                selected_nodes = selection as array
+                removed_count = 0
+                weld_failed_count = 0
+
+
+                for node in selected_nodes do
+                (
+                    if isValidNode node and classOf node.baseObject == Editable_Poly then
+                    (
+                        weld_result = weldSelectedEPolyVerts node weld_threshold
+
+
+                        if weld_result == false then
+                        (
+                            weld_failed_count += 1
+                        )
+                        else
+                        (
+                            removed_count += weld_result
+                        )
+                    )
+                )
+
+
+                if weld_failed_count > 0 then
+                (
+                    completed = false
+                    setStatus #error ((weld_failed_count as string) + " object(s) could not be welded.")
+                )
+                else
+                (
+                    WallFixer.selectDoubleVerts position_threshold:weld_threshold
+                    remaining_unweld_verts = 0
+
+
+                    for node in selected_nodes do
+                    (
+                        if isValidNode node and classOf node.baseObject == Editable_Poly then
+                        (
+                            selected_verts = polyOp.getVertSelection node.baseObject
+                            remaining_unweld_verts += selected_verts.numberSet
+                        )
+                    )
+
+
+                    if remaining_unweld_verts > 0 then
+                    (
+                        setStatus #warning ((removed_count as string) + " vertices welded; unresolved vertices remain selected.")
+                    )
+                    else if removed_count > 0 then
+                    (
+                        try
+                        (
+                            subObjectLevel = 0
+                        )
+                        catch
+                        (
+                        )
+
+
+                        setStatus #success ((removed_count as string) + " vertices welded.")
+                    )
+                    else
+                    (
+                        try
+                        (
+                            subObjectLevel = 0
+                        )
+                        catch
+                        (
+                        )
+
+
+                        setStatus #success "No vertices needed welding."
+                    )
+                )
+            )
+
+
+            setProgress 100
+
+
+            if completed and not fix_vertices then
+            (
+                selected_nodes = selection as array
+                total_unweld_verts = 0
+
+
+                for node in selected_nodes do
+                (
+                    if isValidNode node and classOf node.baseObject == Editable_Poly then
+                    (
+                        base_obj = node.baseObject
+                        selected_verts = polyop.getVertSelection base_obj
+                        total_unweld_verts += selected_verts.numberSet
+
+
+                        if selected_verts.numberSet > 0 then
+                        (
+                            open_edges = polyop.getOpenEdges base_obj
+                            polyop.setEdgeSelection base_obj open_edges
+                            update node
+                        )
+                    )
+                )
+
+
+                if total_unweld_verts > 0 then
+                (
+                    try
+                    (
+                        max modify mode
+                        subObjectLevel = 1
+                    )
+                    catch
+                    (
+                    )
+
+
+                    setStatus #warning "Unweld verts selected"
+                )
+                else
+                (
+                    try
+                    (
+                        subObjectLevel = 0
+                    )
+                    catch
+                    (
+                    )
+
+
+                    setStatus #success "All vertices are welded."
+                )
+            )
+            else if not completed then
+            (
+                if fix_vertices == false then
+                (
+                    setStatus #error "Vertex check operation could not be completed."
+                )
+            )
+
+
+            completed
+        )
+        -- return
+    )
+
+
+    /*
+    Canonicalizes a face normal so opposite parallel faces share one wall orientation.
+    The dominant component is always forced positive for stable sign-independent comparisons.
+    */
+    function getSmartExplodeCanonicalNormal face_normal =
+    (
+        result_normal = face_normal
+        normal_length = length result_normal
+
+
+        if normal_length > 0.0000001 then
+        (
+            result_normal = result_normal / normal_length
+            abs_x = abs result_normal.x
+            abs_y = abs result_normal.y
+            abs_z = abs result_normal.z
+
+
+            if abs_x >= abs_y and abs_x >= abs_z then
+            (
+                if result_normal.x < 0.0 then result_normal = -result_normal
+            )
+            else if abs_y >= abs_x and abs_y >= abs_z then
+            (
+                if result_normal.y < 0.0 then result_normal = -result_normal
+            )
+            else
+            (
+                if result_normal.z < 0.0 then result_normal = -result_normal
+            )
+        )
+
+
+        result_normal
+        -- return
+    )
+
+
+    /*
+    Returns canonical normal, center and signed world-space normal for one snapshot triangle.
+    The signed normal is retained so FACE DIRECTION can detect backside faces after NORMALS grouping.
+    */
+    function getSmartExplodeMeshFaceData source_mesh source_node face_index =
+    (
+        result_data = undefined
+        face_vertices = getFace source_mesh face_index
+        vertex_a = (getVert source_mesh (face_vertices.x as integer)) * source_node.objectTransform
+        vertex_b = (getVert source_mesh (face_vertices.y as integer)) * source_node.objectTransform
+        vertex_c = (getVert source_mesh (face_vertices.z as integer)) * source_node.objectTransform
+        cross_value = cross (vertex_b - vertex_a) (vertex_c - vertex_a)
+        cross_length = length cross_value
+
+
+        if cross_length > 0.0000001 then
+        (
+            signed_normal = cross_value / cross_length
+            face_normal = getSmartExplodeCanonicalNormal signed_normal
+            face_center = (vertex_a + vertex_b + vertex_c) / 3.0
+            result_data = #(face_normal, face_center, signed_normal)
+        )
+
+
+        result_data
+        -- return
+    )
+
+
+
+
+    /*
+    Builds one canonical plane candidate from three non-collinear world-space points.
+    The normal sign is stabilized so candidate comparisons remain consistent.
+    */
+    function getPlanarPlaneCandidate point_a point_b point_c =
+    (
+        candidate_data = undefined
+        cross_value = cross (point_b - point_a) (point_c - point_a)
+        cross_length = length cross_value
+
+
+        if cross_length > 0.0000001 then
+        (
+            plane_normal = getSmartExplodeCanonicalNormal (cross_value / cross_length)
+            plane_offset = dot point_a plane_normal
+            candidate_data = #(plane_normal, plane_offset)
+        )
+
+
+        candidate_data
+        -- return
+    )
+
+
+    /*
+    Scores one plane candidate by vertex support, face-normal agreement and total vertex deviation.
+    Higher inlier count wins; angular agreement and deviation provide deterministic tie-breakers.
+    */
+    function scorePlanarPlaneCandidate world_points face_normal_records plane_normal plane_offset planar_tolerance =
+    (
+        inlier_vertices = #{}
+        inlier_count = 0
+        total_deviation = 0.0
+        angular_cost = 0.0
+
+
+        for vertex_index = 1 to world_points.count do
+        (
+            vertex_deviation = abs((dot world_points[vertex_index] plane_normal) - plane_offset)
+            total_deviation += vertex_deviation
+
+
+            if vertex_deviation <= planar_tolerance then
+            (
+                inlier_vertices[vertex_index] = true
+                inlier_count += 1
+            )
+        )
+
+
+        for face_record in face_normal_records do
+        (
+            angular_cost += (1.0 - (dot plane_normal face_record[1])) * face_record[2]
+        )
+
+
+        #(inlier_count, angular_cost, total_deviation, inlier_vertices)
+        -- return
+    )
+
+
+    /*
+    Classifies the evaluated wall as near-vertical, near-horizontal or unrestricted.
+    Face-count voting uses the existing normal tolerance only as a tie-break aid for robust plane detection.
+    */
+    function getPlanarOrientationMode face_normal_records normal_angle_tolerance =
+    (
+        safe_angle = normal_angle_tolerance
+        if safe_angle < 0.1 then safe_angle = 0.1
+        if safe_angle > 20.0 then safe_angle = 20.0
+
+
+        vertical_limit = sin safe_angle
+        horizontal_limit = cos safe_angle
+        vertical_count = 0
+        horizontal_count = 0
+
+
+        for face_record in face_normal_records do
+        (
+            face_normal = face_record[1]
+            absolute_z = abs face_normal.z
+
+
+            if absolute_z <= vertical_limit then vertical_count += 1
+            if absolute_z >= horizontal_limit then horizontal_count += 1
+        )
+
+
+        orientation_mode = #free
+
+
+        if face_normal_records.count > 0 then
+        (
+            if (vertical_count * 2) >= face_normal_records.count then
+            (
+                orientation_mode = #vertical
+            )
+            else if (horizontal_count * 2) >= face_normal_records.count then
+            (
+                orientation_mode = #horizontal
+            )
+        )
+
+
+        orientation_mode
+        -- return
+    )
+
+
+    /*
+    Returns a small orientation penalty for one candidate wall plane.
+    Vertical walls prefer normal Z=0; horizontal surfaces prefer an absolute normal Z of 1.
+    */
+    function getPlanarOrientationCost plane_normal orientation_mode =
+    (
+        orientation_cost = 0.0
+
+
+        case orientation_mode of
+        (
+            #vertical:
+            (
+                orientation_cost = abs plane_normal.z
+            )
+            #horizontal:
+            (
+                orientation_cost = 1.0 - (abs plane_normal.z)
+            )
+            default:
+            (
+                orientation_cost = 0.0
+            )
+        )
+
+
+        orientation_cost
+        -- return
+    )
+
+
+    /*
+    Compares two robust plane candidates without depending on loop order.
+    Vertex support wins first, then architectural orientation and geometric deviation; face-derived priority is only a late tie-breaker.
+    */
+    function isPlanarCandidateBetter candidate_score candidate_orientation_cost candidate_priority best_inlier_count best_orientation_cost best_candidate_priority best_angular_cost best_total_deviation =
+    (
+        candidate_better = false
+        comparison_epsilon = 0.000001
+
+
+        if candidate_score[1] > best_inlier_count then
+        (
+            candidate_better = true
+        )
+        else if candidate_score[1] == best_inlier_count then
+        (
+            if candidate_orientation_cost < (best_orientation_cost - comparison_epsilon) then
+            (
+                candidate_better = true
+            )
+            else if abs(candidate_orientation_cost - best_orientation_cost) <= comparison_epsilon then
+            (
+                if candidate_score[3] < (best_total_deviation - comparison_epsilon) then
+                (
+                    candidate_better = true
+                )
+                else if abs(candidate_score[3] - best_total_deviation) <= comparison_epsilon then
+                (
+                    if candidate_priority < best_candidate_priority then
+                    (
+                        candidate_better = true
+                    )
+                    else if candidate_priority == best_candidate_priority and candidate_score[2] < (best_angular_cost - comparison_epsilon) then
+                    (
+                        candidate_better = true
+                    )
+                )
+            )
+        )
+
+
+        candidate_better
+        -- return
+    )
+
+
+    /*
+    Analyzes one evaluated wall and returns its robust majority plane plus outlier vertices.
+    Face planes are preferred on equal support; sampled vertex planes recover the intended plane when a bad corner distorts triangulated faces.
+    */
+    function analyzePlanarWall source_node planar_tolerance:1.0 normal_angle_tolerance:5.0 =
+    (
+        result_data = #(false, [0,0,1], 0.0, #{}, 0.0, 0, "Unable to analyze wall.")
+        analysis_mesh = undefined
+
+
+        if source_node == undefined or not(isValidNode source_node) or superClassOf source_node != GeometryClass then
+        (
+            result_data = #(false, [0,0,1], 0.0, #{}, 0.0, 0, "Invalid geometry object.")
+        )
+        else
+        (
+            try
+            (
+                analysis_mesh = snapshotAsMesh source_node
+
+
+                if analysis_mesh == undefined or analysis_mesh.numfaces <= 0 or analysis_mesh.numverts < 3 then
+                (
+                    result_data = #(false, [0,0,1], 0.0, #{}, 0.0, 0, "Wall has no usable evaluated mesh.")
+                )
+                else
+                (
+                    safe_tolerance = amax 0.000001 planar_tolerance
+                    world_points = #()
+                    face_normal_records = #()
+                    face_candidates = #()
+
+
+                    for vertex_index = 1 to analysis_mesh.numverts do
+                    (
+                        append world_points ((getVert analysis_mesh vertex_index) * source_node.objectTransform)
+                    )
+
+
+                    for face_index = 1 to analysis_mesh.numfaces do
+                    (
+                        face_vertices = getFace analysis_mesh face_index
+                        vertex_a = world_points[(face_vertices.x as integer)]
+                        vertex_b = world_points[(face_vertices.y as integer)]
+                        vertex_c = world_points[(face_vertices.z as integer)]
+                        cross_value = cross (vertex_b - vertex_a) (vertex_c - vertex_a)
+                        cross_length = length cross_value
+
+
+                        if cross_length > 0.0000001 then
+                        (
+                            face_normal = getSmartExplodeCanonicalNormal (cross_value / cross_length)
+                            append face_normal_records #(face_normal, cross_length)
+                            append face_candidates #(face_normal, dot vertex_a face_normal)
+                        )
+                    )
+
+
+                    if face_candidates.count == 0 then
+                    (
+                        result_data = #(false, [0,0,1], 0.0, #{}, 0.0, analysis_mesh.numverts, "No non-degenerate wall faces were found.")
+                    )
+                    else
+                    (
+                        orientation_mode = getPlanarOrientationMode face_normal_records normal_angle_tolerance
+                        best_normal = undefined
+                        best_offset = 0.0
+                        best_inlier_count = -1
+                        best_orientation_cost = 1.0e30
+                        best_candidate_priority = 999
+                        best_angular_cost = 1.0e30
+                        best_total_deviation = 1.0e30
+                        best_inliers = #{}
+
+
+                        for candidate_data in face_candidates do
+                        (
+                            candidate_score = scorePlanarPlaneCandidate world_points face_normal_records candidate_data[1] candidate_data[2] safe_tolerance
+                            candidate_orientation_cost = getPlanarOrientationCost candidate_data[1] orientation_mode
+                            candidate_priority = 0
+                            candidate_better = isPlanarCandidateBetter \
+                                candidate_score \
+                                candidate_orientation_cost \
+                                candidate_priority \
+                                best_inlier_count \
+                                best_orientation_cost \
+                                best_candidate_priority \
+                                best_angular_cost \
+                                best_total_deviation
+
+
+                            if candidate_better then
+                            (
+                                best_normal = candidate_data[1]
+                                best_offset = candidate_data[2]
+                                best_inlier_count = candidate_score[1]
+                                best_orientation_cost = candidate_orientation_cost
+                                best_candidate_priority = candidate_priority
+                                best_angular_cost = candidate_score[2]
+                                best_total_deviation = candidate_score[3]
+                                best_inliers = candidate_score[4]
+                            )
+                        )
+
+
+                        sample_indices = #()
+                        sample_limit = if world_points.count <= 32 then world_points.count else 12
+
+
+                        if sample_limit == world_points.count then
+                        (
+                            for vertex_index = 1 to world_points.count do append sample_indices vertex_index
+                        )
+                        else
+                        (
+                            for sample_index = 0 to (sample_limit - 1) do
+                            (
+                                vertex_index = 1 + (((sample_index as float) * (world_points.count - 1) / (sample_limit - 1)) as integer)
+                                if findItem sample_indices vertex_index == 0 then append sample_indices vertex_index
+                            )
+                        )
+
+
+                        if sample_indices.count >= 3 then
+                        (
+                            for sample_a = 1 to (sample_indices.count - 2) do
+                            (
+                                for sample_b = (sample_a + 1) to (sample_indices.count - 1) do
+                                (
+                                    for sample_c = (sample_b + 1) to sample_indices.count do
+                                    (
+                                        candidate_data = getPlanarPlaneCandidate \
+                                            world_points[sample_indices[sample_a]] \
+                                            world_points[sample_indices[sample_b]] \
+                                            world_points[sample_indices[sample_c]]
+
+
+                                        if candidate_data != undefined then
+                                        (
+                                            candidate_score = scorePlanarPlaneCandidate world_points face_normal_records candidate_data[1] candidate_data[2] safe_tolerance
+                                            candidate_orientation_cost = getPlanarOrientationCost candidate_data[1] orientation_mode
+                                            candidate_priority = 1
+candidate_better = isPlanarCandidateBetter \
+                                                candidate_score \
+                                                candidate_orientation_cost \
+                                                candidate_priority \
+                                                best_inlier_count \
+                                                best_orientation_cost \
+                                                best_candidate_priority \
+                                                best_angular_cost \
+                                                best_total_deviation
+
+
+                                            if candidate_better then
+                                            (
+                                                best_normal = candidate_data[1]
+                                                best_offset = candidate_data[2]
+                                                best_inlier_count = candidate_score[1]
+                                                best_orientation_cost = candidate_orientation_cost
+                                                best_candidate_priority = candidate_priority
+                                                best_angular_cost = candidate_score[2]
+                                                best_total_deviation = candidate_score[3]
+                                                best_inliers = candidate_score[4]
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+
+
+                        if best_normal == undefined or best_inlier_count < 3 or (best_inlier_count * 2) <= world_points.count then
+                        (
+                            result_data = #(false, [0,0,1], 0.0, #{}, 0.0, analysis_mesh.numverts, "No majority wall plane was found. Run Step 2 first.")
+                        )
+                        else
+                        (
+                            /*
+                            Keep the winning candidate plane instead of averaging all broad-tolerance support vertices into it.
+                            A bad N-gon corner can still be inside the support tolerance and must not drag the repair plane toward itself.
+                            */
+                            target_offset = best_offset
+
+
+                            /*
+                            Use the broad tolerance only to find the dominant wall plane.
+                            Final coplanarity is strict so small N-gon defects are still selected and repaired.
+                            */
+                            strict_planar_tolerance = amin safe_tolerance 0.001
+                            strict_planar_tolerance = amax strict_planar_tolerance 0.000001
+                            outlier_vertices = #{}
+                            max_deviation = 0.0
+
+
+                            for vertex_index = 1 to world_points.count do
+                            (
+                                vertex_deviation = abs((dot world_points[vertex_index] best_normal) - target_offset)
+
+
+                                if vertex_deviation > max_deviation then max_deviation = vertex_deviation
+                                if vertex_deviation > strict_planar_tolerance then outlier_vertices[vertex_index] = true
+                            )
+
+
+                            result_data = #(true, best_normal, target_offset, outlier_vertices, max_deviation, analysis_mesh.numverts, "")
+                        )
+                    )
+                )
+            )
+            catch
+            (
+                result_data = #(false, [0,0,1], 0.0, #{}, 0.0, 0, (getCurrentException() as string))
+            )
+        )
+
+
+        if analysis_mesh != undefined then
+        (
+            try(free analysis_mesh)catch()
+        )
+
+
+        result_data
+        -- return
+    )
+
+
+    /*
+    Removes only the temporary top Edit Poly created by Step 3 LMB.
+    This prevents a check-only selection marker from forcing an unnecessary collapse during RMB repair.
+    */
+    function removePlanarSelectionMarker source_node =
+    (
+        marker_removed = false
+
+
+        if source_node != undefined and isValidNode source_node and source_node.modifiers.count > 0 then
+        (
+            try
+            (
+                top_modifier = source_node.modifiers[1]
+
+
+                if classOf top_modifier == Edit_Poly and top_modifier.name == "NON PLANAR VERTS" then
+                (
+                    deleteModifier source_node top_modifier
+                    update source_node
+                    marker_removed = true
+                )
+            )
+            catch
+            (
+                marker_removed = false
+            )
+        )
+
+
+        marker_removed
+        -- return
+    )
+
+
+    /*
+    Clears the previous Step 3 vertex selection before running a new LMB check.
+    Existing top Edit Poly modifiers are reused; a stale script marker is removed first.
+    */
+    function clearPlanarCheckSelection source_node =
+    (
+        selection_cleared = false
+
+
+        if source_node != undefined and isValidNode source_node then
+        (
+            removePlanarSelectionMarker source_node
+            top_edit_poly = undefined
+
+
+            if source_node.modifiers.count > 0 then
+            (
+                try
+                (
+                    if classOf source_node.modifiers[1] == Edit_Poly then top_edit_poly = source_node.modifiers[1]
+                )
+                catch
+                (
+                    top_edit_poly = undefined
+                )
+            )
+
+
+            if top_edit_poly != undefined then
+            (
+                try
+                (
+                    select source_node
+                    max modify mode
+                    modPanel.setCurrentObject top_edit_poly
+                    top_edit_poly.SetPrimaryNode source_node
+                    top_edit_poly.useStackSelection = false
+                    top_edit_poly.SetEPolySelLevel #Vertex
+                    subObjectLevel = 1
+                    empty_selection = #{}
+                    top_edit_poly.SetSelection #Vertex empty_selection node:source_node
+                    selection_cleared = true
+                )
+                catch
+                (
+                    selection_cleared = false
+                )
+            )
+            else if source_node.modifiers.count == 0 and classOf source_node.baseObject == Editable_Poly then
+            (
+                try
+                (
+                    polyop.setVertSelection source_node.baseObject #{}
+                    update source_node
+                    selection_cleared = true
+                )
+                catch
+                (
+                    selection_cleared = false
+                )
+            )
+            else
+            (
+                selection_cleared = true
+            )
+        )
+
+
+        selection_cleared
+        -- return
+    )
+
+
+    /*
+    Unhides and selects planar-check outliers without collapsing or changing wall topology.
+    A current top Edit Poly is reused; a temporary NON PLANAR VERTS modifier is added only when no editable top level exists.
+    */
+    function selectPlanarOutlierVerts source_node outlier_vertices expected_vertex_count =
+    (
+        selection_success = false
+
+
+        if source_node != undefined and isValidNode source_node and outlier_vertices.numberSet > 0 then
+        (
+            top_edit_poly = undefined
+
+
+            if source_node.modifiers.count > 0 then
+            (
+                try
+                (
+                    if classOf source_node.modifiers[1] == Edit_Poly then top_edit_poly = source_node.modifiers[1]
+                )
+                catch
+                (
+                    top_edit_poly = undefined
+                )
+            )
+
+
+            if top_edit_poly != undefined then
+            (
+                try
+                (
+                    select source_node
+                    max modify mode
+                    modPanel.setCurrentObject top_edit_poly
+                    top_edit_poly.SetPrimaryNode source_node
+                    top_edit_poly.useStackSelection = false
+                    top_edit_poly.SetEPolySelLevel #Vertex
+                    subObjectLevel = 1
+
+
+                    /*
+                    Hidden outlier vertices must be visible before selection.
+                    Edit Poly exposes Unhide All Vertices through ButtonOp.
+                    */
+                    top_edit_poly.ButtonOp #UnhideAllVertex
+                    update source_node
+
+
+                    selection_bits = copy outlier_vertices
+                    top_edit_poly.SetSelection #Vertex selection_bits node:source_node
+                    selection_success = (top_edit_poly.GetSelection #Vertex node:source_node) == outlier_vertices
+                )
+                catch
+                (
+                    selection_success = false
+                )
+            )
+            else if source_node.modifiers.count == 0 and classOf source_node.baseObject == Editable_Poly then
+            (
+                try
+                (
+                    if polyop.getNumVerts source_node.baseObject == expected_vertex_count then
+                    (
+                        /*
+                        Unhide vertices before selecting the non-planar result.
+                        */
+                        polyop.unHideAllVerts source_node.baseObject
+                        polyop.setVertSelection source_node.baseObject outlier_vertices
+                        update source_node
+                        selection_success = (polyop.getVertSelection source_node.baseObject) == outlier_vertices
+                    )
+                )
+                catch
+                (
+                    selection_success = false
+                )
+            )
+            else
+            (
+                selection_modifier = undefined
+
+
+                try
+                (
+                    selection_modifier = Edit_Poly name:"NON PLANAR VERTS"
+                    addModifier source_node selection_modifier
+                    update source_node
+
+
+                    select source_node
+                    max modify mode
+                    modPanel.setCurrentObject selection_modifier
+                    selection_modifier.SetPrimaryNode source_node
+                    selection_modifier.useStackSelection = false
+                    selection_modifier.SetEPolySelLevel #Vertex
+                    subObjectLevel = 1
+
+
+                    /*
+                    Ensure hidden outlier vertices are visible in the temporary Edit Poly marker.
+                    */
+                    selection_modifier.ButtonOp #UnhideAllVertex
+                    update source_node
+
+
+                    selection_bits = copy outlier_vertices
+                    selection_modifier.SetSelection #Vertex selection_bits node:source_node
+                    selection_success = (selection_modifier.GetSelection #Vertex node:source_node) == outlier_vertices
+                )
+                catch
+                (
+                    selection_success = false
+                )
+
+
+                if not selection_success and selection_modifier != undefined then
+                (
+                    try
+                    (
+                        deleteModifier source_node selection_modifier
+                        update source_node
+                    )
+                    catch
+                    (
+                    )
+                )
+            )
+        )
+
+
+        selection_success
+        -- return
+    )
+
+
+    /*
+    Builds a stable plane from the other vertices of one polygon face.
+    Detected outliers are excluded first; when too few clean vertices remain, only the vertex being repaired is excluded.
+    */
+    function getPlanarFaceRepairPlane source_node face_index vertex_index outlier_vertices =
+    (
+        plane_data = undefined
+
+
+        if source_node != undefined and isValidNode source_node and classOf source_node.baseObject == Editable_Poly then
+        (
+            source_poly = source_node.baseObject
+            face_vertices = polyop.getFaceVerts source_poly face_index
+            candidate_vertices = #()
+
+
+            for face_vertex_index in face_vertices do
+            (
+                if face_vertex_index != vertex_index and not outlier_vertices[face_vertex_index] then
+                (
+                    if findItem candidate_vertices face_vertex_index == 0 then append candidate_vertices face_vertex_index
+                )
+            )
+
+
+            if candidate_vertices.count < 3 then
+            (
+                candidate_vertices = #()
+
+
+                for face_vertex_index in face_vertices do
+                (
+                    if face_vertex_index != vertex_index then
+                    (
+                        if findItem candidate_vertices face_vertex_index == 0 then append candidate_vertices face_vertex_index
+                    )
+                )
+            )
+
+
+            if candidate_vertices.count >= 3 then
+            (
+                best_cross_length = 0.0
+                best_cross_value = undefined
+                best_point = undefined
+
+
+                for point_a_index = 1 to (candidate_vertices.count - 2) do
+                (
+                    point_a = (polyop.getVert source_poly candidate_vertices[point_a_index]) * source_node.objectTransform
+
+
+                    for point_b_index = (point_a_index + 1) to (candidate_vertices.count - 1) do
+                    (
+                        point_b = (polyop.getVert source_poly candidate_vertices[point_b_index]) * source_node.objectTransform
+
+
+                        for point_c_index = (point_b_index + 1) to candidate_vertices.count do
+                        (
+                            point_c = (polyop.getVert source_poly candidate_vertices[point_c_index]) * source_node.objectTransform
+                            cross_value = cross (point_b - point_a) (point_c - point_a)
+                            cross_length = length cross_value
+
+
+                            if cross_length > best_cross_length then
+                            (
+                                best_cross_length = cross_length
+                                best_cross_value = cross_value
+                                best_point = point_a
+                            )
+                        )
+                    )
+                )
+
+
+                if best_cross_value != undefined and best_cross_length > 0.0000001 then
+                (
+                    target_normal = getSmartExplodeCanonicalNormal (best_cross_value / best_cross_length)
+                    target_offset = dot best_point target_normal
+                    plane_data = #(target_normal, target_offset, candidate_vertices.count, best_cross_length, face_index)
+                )
+            )
+        )
+
+
+        plane_data
+        -- return
+    )
+
+
+    /*
+    Finds the strongest owning-face plane for one non-planar vertex.
+    N-gons are preferred by clean support count, then by the area of the defining triangle.
+    */
+    function getPlanarVertexRepairPlane source_node vertex_index outlier_vertices =
+    (
+        best_plane_data = undefined
+
+
+        if source_node != undefined and isValidNode source_node and classOf source_node.baseObject == Editable_Poly then
+        (
+            source_poly = source_node.baseObject
+            faces_using_vertex = polyop.getFacesUsingVert source_poly #{vertex_index}
+            best_support_count = -1
+            best_cross_length = -1.0
+
+
+            for face_index in faces_using_vertex do
+            (
+                plane_data = getPlanarFaceRepairPlane source_node face_index vertex_index outlier_vertices
+
+
+                if plane_data != undefined then
+                (
+                    support_count = plane_data[3]
+                    cross_length = plane_data[4]
+
+
+                    if support_count > best_support_count or (support_count == best_support_count and cross_length > best_cross_length) then
+                    (
+                        best_plane_data = plane_data
+                        best_support_count = support_count
+                        best_cross_length = cross_length
+                    )
+                )
+            )
+        )
+
+
+        best_plane_data
+        -- return
+    )
+
+
+    /*
+    Moves each non-planar vertex onto a plane defined by the other vertices of its owning polygon face.
+    The evaluated stack is collapsed only for walls that actually require a repair.
+    */
+    function makePlanarWall source_node planar_tolerance:1.0 normal_angle_tolerance:5.0 =
+    (
+        result_data = #(false, 0, "Unable to repair wall.")
+        precheck = analyzePlanarWall source_node planar_tolerance:planar_tolerance normal_angle_tolerance:normal_angle_tolerance
+
+
+        if not precheck[1] then
+        (
+            result_data = #(false, 0, precheck[7])
+        )
+        else if precheck[4].numberSet == 0 then
+        (
+            result_data = #(true, 0, "")
+        )
+        else
+        (
+            conversion_success = true
+
+
+            if source_node.modifiers.count > 0 or classOf source_node.baseObject != Editable_Poly then
+            (
+                try
+                (
+                    convertToPoly source_node
+                )
+                catch
+                (
+                    conversion_success = false
+                )
+            )
+
+
+            if not conversion_success or classOf source_node.baseObject != Editable_Poly then
+            (
+                result_data = #(false, 0, "Wall could not be converted to Editable Poly for repair.")
+            )
+            else
+            (
+                repair_data = analyzePlanarWall source_node planar_tolerance:planar_tolerance normal_angle_tolerance:normal_angle_tolerance
+
+
+                if not repair_data[1] then
+                (
+                    result_data = #(false, 0, repair_data[7])
+                )
+                else
+                (
+                    outlier_vertices = repair_data[4]
+                    repaired_count = 0
+                    failed_repair_count = 0
+                    inverse_object_tm = inverse source_node.objectTransform
+
+
+                    for vertex_index in outlier_vertices do
+                    (
+                        repair_plane = getPlanarVertexRepairPlane source_node vertex_index outlier_vertices
+
+
+                        if repair_plane != undefined then
+                        (
+                            target_normal = repair_plane[1]
+                            target_offset = repair_plane[2]
+                            vertex_local = polyop.getVert source_node.baseObject vertex_index
+                            vertex_world = vertex_local * source_node.objectTransform
+                            signed_deviation = (dot vertex_world target_normal) - target_offset
+                            target_world = vertex_world - (target_normal * signed_deviation)
+                            target_local = target_world * inverse_object_tm
+                            polyop.setVert source_node.baseObject vertex_index target_local
+                            repaired_count += 1
+                        )
+                        else
+                        (
+                            failed_repair_count += 1
+                        )
+                    )
+
+
+                    update source_node
+                    verify_data = analyzePlanarWall source_node planar_tolerance:planar_tolerance normal_angle_tolerance:normal_angle_tolerance
+
+
+                    if failed_repair_count > 0 then
+                    (
+                        result_data = #(false, repaired_count, "Unable to build an owning-face plane for " + (failed_repair_count as string) + " non-planar vert(s).")
+                    )
+                    else if verify_data[1] and verify_data[4].numberSet == 0 then
+                    (
+                        result_data = #(true, repaired_count, "")
+                    )
+                    else
+                    (
+                        remaining_count = if verify_data[1] then verify_data[4].numberSet else repaired_count
+                        result_data = #(false, repaired_count, "Repair verification failed; remaining non-planar verts: " + (remaining_count as string))
+                    )
+                )
+            )
+        )
+
+
+        result_data
+        -- return
+    )
+
+
+    /*
+    Checks selected walls on LMB and repairs only detected non-planar vertices on RMB.
+    Valid walls remain untouched; temporary Step 3 selection markers are never allowed to force a repair collapse.
+    */
+    function runPlanarWalls fix_vertices:false =
+    (
+        selected_nodes = selection as array
+        geometry_nodes = #()
+        total_outliers = 0
+        selected_outliers = 0
+        problem_nodes = #()
+        failed_nodes = #()
+        repaired_vertices = 0
+        repaired_walls = 0
+        failed_walls = 0
+        failure_messages = #()
+        planar_tolerance = amax 0.000001 saved_planar_tolerance
+        normal_angle_tolerance = amax 0.1 saved_angle_threshold
+
+
+        for source_node in selected_nodes do
+        (
+            if source_node != undefined and isValidNode source_node and superClassOf source_node == GeometryClass then
+            (
+                append geometry_nodes source_node
+            )
+        )
+
+
+        if geometry_nodes.count == 0 then
+        (
+            setStatus #error "Select at least one wall object."
+            false
+        )
+        else
+        (
+            setProgress 0
+            setStatus #message (if fix_vertices then "Making selected walls planar..." else "Checking selected walls for non-planar vertices...")
+
+
+            if fix_vertices then
+            (
+                undo "Wall-Fixer - Make Walls Planar" on
+                (
+                    with redraw off
+                    (
+                        for node_index = 1 to geometry_nodes.count do
+                        (
+                            source_node = geometry_nodes[node_index]
+
+
+                            /*
+                            A previous LMB marker contains selection only.
+                            Remove it before deciding whether the real object stack requires conversion.
+                            */
+                            removePlanarSelectionMarker source_node
+
+
+                            precheck = analyzePlanarWall source_node planar_tolerance:planar_tolerance normal_angle_tolerance:normal_angle_tolerance
+
+
+                            if precheck[1] then
+                            (
+                                total_outliers += precheck[4].numberSet
+
+
+                                if precheck[4].numberSet > 0 then
+                                (
+                                    repair_result = makePlanarWall source_node planar_tolerance:planar_tolerance normal_angle_tolerance:normal_angle_tolerance
+
+
+                                    if repair_result[1] then
+                                    (
+                                        repaired_vertices += repair_result[2]
+                                        repaired_walls += 1
+                                    )
+                                    else
+                                    (
+                                        failed_walls += 1
+                                        if findItem failed_nodes source_node == 0 then append failed_nodes source_node
+                                        append failure_messages (source_node.name + ": " + repair_result[3])
+                                    )
+                                )
+                            )
+                            else
+                            (
+                                failed_walls += 1
+                                if findItem failed_nodes source_node == 0 then append failed_nodes source_node
+                                append failure_messages (source_node.name + ": " + precheck[7])
+                            )
+
+
+                            setProgress ((100.0 * node_index / geometry_nodes.count) as integer)
+                        )
+                    )
+                )
+
+
+                clearSelection()
+
+
+                if failed_nodes.count > 0 then
+                (
+                    select failed_nodes
+                )
+                else
+                (
+                    select geometry_nodes
+                )
+
+
+                subObjectLevel = 0
+                redrawViews()
+                setProgress 100
+
+
+                if failed_walls > 0 then
+                (
+                    failure_text = if failure_messages.count > 0 then failure_messages[1] else "One or more walls could not be repaired."
+                    setStatus #warning ("Made planar: " + (repaired_walls as string) + " wall(s), " + (repaired_vertices as string) + " vert(s). Failed: " + (failed_walls as string) + ". " + failure_text)
+                    false
+                )
+                else if total_outliers == 0 then
+                (
+                    setStatus #success "All walls are planar"
+                    true
+                )
+                else
+                (
+                    setStatus #success ("Walls made planar: " + (repaired_walls as string) + " wall(s), " + (repaired_vertices as string) + " vert(s)")
+                    true
+                )
+            )
+            else
+            (
+                for node_index = 1 to geometry_nodes.count do
+                (
+                    source_node = geometry_nodes[node_index]
+                    clearPlanarCheckSelection source_node
+                    check_data = analyzePlanarWall source_node planar_tolerance:planar_tolerance normal_angle_tolerance:normal_angle_tolerance
+
+
+                    if check_data[1] then
+                    (
+                        outlier_vertices = check_data[4]
+                        total_outliers += outlier_vertices.numberSet
+
+
+                        if outlier_vertices.numberSet > 0 then
+                        (
+                            if selectPlanarOutlierVerts source_node outlier_vertices check_data[6] then
+                            (
+                                selected_outliers += outlier_vertices.numberSet
+                                if findItem problem_nodes source_node == 0 then append problem_nodes source_node
+                            )
+                            else
+                            (
+                                failed_walls += 1
+                                if findItem failed_nodes source_node == 0 then append failed_nodes source_node
+                                append failure_messages (source_node.name + ": non-planar verts were found but could not be selected.")
+                            )
+                        )
+                    )
+                    else
+                    (
+                        failed_walls += 1
+                        if findItem failed_nodes source_node == 0 then append failed_nodes source_node
+                        append failure_messages (source_node.name + ": " + check_data[7])
+                    )
+
+
+                    setProgress ((100.0 * node_index / geometry_nodes.count) as integer)
+                )
+
+
+                clearSelection()
+
+
+                if problem_nodes.count > 0 then
+                (
+                    select problem_nodes
+                    max modify mode
+                    subObjectLevel = 1
+                )
+                else if failed_nodes.count > 0 then
+                (
+                    select failed_nodes
+                    subObjectLevel = 0
+                )
+                else
+                (
+                    select geometry_nodes
+                    subObjectLevel = 0
+                )
+
+
+                redrawViews()
+                setProgress 100
+
+
+                if failed_walls > 0 then
+                (
+                    failure_text = if failure_messages.count > 0 then failure_messages[1] else "One or more walls could not be analyzed."
+                    setStatus #warning ("Planar check found " + (total_outliers as string) + " non-planar vert(s). Failed walls: " + (failed_walls as string) + ". " + failure_text)
+                    false
+                )
+                else if total_outliers == 0 then
+                (
+                    setStatus #success "All walls are planar"
+                    true
+                )
+                else if selected_outliers == total_outliers then
+                (
+                    setStatus #warning ((total_outliers as string) + " verts out of plane")
+                    true
+                )
+                else
+                (
+                    setStatus #warning ("Non-planar verts found: " + (total_outliers as string) + "; selected: " + (selected_outliers as string) + ". RMB makes the required walls planar.")
+                    true
+                )
+            )
+        )
+        -- return
+    )
+
+
+    /*
+    Groups snapshot triangles by sign-independent face-normal orientation.
+    Faces within the requested angular tolerance are treated as one compatible wall direction.
+    */
+    function getSmartExplodeMeshNormalGroups source_mesh source_node angle_tolerance:1.0 =
+    (
+        result_groups = #()
+        cosine_tolerance = cos angle_tolerance
+
+
+        for face_index = 1 to source_mesh.numfaces do
+        (
+            face_data = getSmartExplodeMeshFaceData source_mesh source_node face_index
+
+
+            if face_data != undefined then
+            (
+                face_normal = face_data[1]
+                matched_group_index = 0
+
+
+                for group_index = 1 to result_groups.count while matched_group_index == 0 do
+                (
+                    if (dot face_normal result_groups[group_index][1]) >= cosine_tolerance then
+                    (
+                        matched_group_index = group_index
+                    )
+                )
+
+
+                if matched_group_index == 0 then
+                (
+                    face_bits = #{}
+                    face_bits[face_index] = true
+                    append result_groups #(face_normal, face_bits)
+                )
+                else
+                (
+                    result_groups[matched_group_index][2][face_index] = true
+                )
+            )
+        )
+
+
+        result_groups
+        -- return
+    )
+
+
+    /*
+    Groups snapshot triangles by signed direction along one already-confirmed wall-normal orientation.
+    Positive-facing and backside-facing normals become separate objects before wall-position analysis.
+    */
+    function getSmartExplodeMeshFaceDirectionGroups source_mesh source_node reference_normal =
+    (
+        front_faces = #{}
+        backside_faces = #{}
+
+
+        for face_index = 1 to source_mesh.numfaces do
+        (
+            face_data = getSmartExplodeMeshFaceData source_mesh source_node face_index
+
+
+            if face_data != undefined then
+            (
+                signed_normal = face_data[3]
+
+
+                if (dot signed_normal reference_normal) < 0.0 then
+                (
+                    backside_faces[face_index] = true
+                )
+                else
+                (
+                    front_faces[face_index] = true
+                )
+            )
+        )
+
+
+        result_groups = #()
+
+
+        if front_faces.numberSet > 0 then append result_groups #(1.0, front_faces)
+        if backside_faces.numberSet > 0 then append result_groups #(-1.0, backside_faces)
+
+
+        result_groups
+        -- return
+    )
+
+
+    /*
+    Groups snapshot triangles by wall-plane offset along one canonical wall normal.
+    This distinguishes parallel wall layers while naturally ignoring displacement within the wall plane, including Z on vertical walls.
+    */
+    function getSmartExplodeMeshPositionGroups source_mesh source_node reference_normal position_tolerance:1.0 =
+    (
+        result_groups = #()
+
+
+        for face_index = 1 to source_mesh.numfaces do
+        (
+            face_data = getSmartExplodeMeshFaceData source_mesh source_node face_index
+
+
+            if face_data != undefined then
+            (
+                plane_offset = dot face_data[2] reference_normal
+                matched_group_index = 0
+
+
+                for group_index = 1 to result_groups.count while matched_group_index == 0 do
+                (
+                    if abs (plane_offset - result_groups[group_index][1]) <= position_tolerance then
+                    (
+                        matched_group_index = group_index
+                    )
+                )
+
+
+                if matched_group_index == 0 then
+                (
+                    face_bits = #{}
+                    face_bits[face_index] = true
+                    append result_groups #(plane_offset, face_bits)
+                )
+                else
+                (
+                    result_groups[matched_group_index][2][face_index] = true
+                )
+            )
+        )
+result_groups
+        -- return
+    )
+
+
+    /*
+    Collects disconnected face elements from the temporary TriMesh snapshot.
+    Each returned bitarray contains one complete connected component.
+    */
+    function getSmartExplodeMeshElementGroups source_mesh =
+    (
+        result_groups = #()
+        remaining_faces = #{}
+
+
+        if source_mesh.numfaces > 0 then remaining_faces = #{1..source_mesh.numfaces}
+
+
+        while remaining_faces.numberSet > 0 do
+        (
+            remaining_array = remaining_faces as array
+            seed_face = remaining_array[1]
+            element_faces = meshop.getElementsUsingFace source_mesh #{seed_face}
+            append result_groups element_faces
+            remaining_faces = remaining_faces - element_faces
+        )
+
+
+        result_groups
+        -- return
+    )
+
+
+    /*
+    Analyzes one evaluated object without changing the original scene node or modifier stack.
+    Precedence is NORMALS, FACE DIRECTION, XY POSITION, ELEMENTS, then already-valid.
+    */
+    function analyzeSmartExplodeNode source_node normal_angle_tolerance:1.0 position_tolerance:1.0 =
+    (
+        result_data = #(#error, 0)
+        analysis_mesh = undefined
+
+
+        if source_node != undefined and isValidNode source_node and superClassOf source_node == GeometryClass then
+        (
+            try
+            (
+                analysis_mesh = snapshotAsMesh source_node
+
+
+                if analysis_mesh != undefined and analysis_mesh.numfaces > 0 then
+                (
+                    normal_groups = getSmartExplodeMeshNormalGroups analysis_mesh source_node angle_tolerance:normal_angle_tolerance
+
+
+                    if normal_groups.count > 1 then
+                    (
+                        result_data = #(#normals, normal_groups.count)
+                    )
+                    else if normal_groups.count == 1 then
+                    (
+                        face_direction_groups = getSmartExplodeMeshFaceDirectionGroups analysis_mesh source_node normal_groups[1][1]
+
+
+                        if face_direction_groups.count > 1 then
+                        (
+                            result_data = #(#faceDirection, face_direction_groups.count)
+                        )
+                        else
+                        (
+                            position_groups = getSmartExplodeMeshPositionGroups analysis_mesh source_node normal_groups[1][1] position_tolerance:position_tolerance
+
+
+                            if position_groups.count > 1 then
+                            (
+                                result_data = #(#position, position_groups.count)
+                            )
+                            else
+                            (
+                                element_groups = getSmartExplodeMeshElementGroups analysis_mesh
+
+
+                                if element_groups.count > 1 then
+                                (
+                                    result_data = #(#elements, element_groups.count)
+                                )
+                                else
+                                (
+                                    result_data = #(#valid, 1)
+                                )
+                            )
+                        )
+                    )
+                    else
+                    (
+                        result_data = #(#error, 0)
+                    )
+                )
+            )
+            catch
+            (
+                result_data = #(#error, 0)
+            )
+        )
+
+
+        if analysis_mesh != undefined then
+        (
+            try
+            (
+                free analysis_mesh
+            )
+            catch
+            (
+            )
+        )
+
+
+        result_data
+        -- return
+    )
+
+
+    /*
+    Groups current Editable Poly faces by sign-independent world-space normal orientation.
+    This is run only after snapshot analysis has already proved that a normals split is required.
+    */
+    function getSmartExplodePolyNormalGroups source_node angle_tolerance:1.0 =
+    (
+        result_groups = #()
+        grouped_faces = #{}
+        cosine_tolerance = cos angle_tolerance
+        face_count = polyop.getNumFaces source_node.baseObject
+
+
+        for face_index = 1 to face_count do
+        (
+            face_normal = undefined
+
+
+            try
+            (
+                in coordsys world
+                (
+                    face_normal = polyop.getFaceNormal source_node face_index
+                )
+            )
+            catch
+            (
+                face_normal = undefined
+            )
+
+
+            if face_normal != undefined and length face_normal > 0.0000001 then
+            (
+                face_normal = getSmartExplodeCanonicalNormal face_normal
+                matched_group_index = 0
+
+
+                for group_index = 1 to result_groups.count while matched_group_index == 0 do
+                (
+                    if (dot face_normal result_groups[group_index][1]) >= cosine_tolerance then
+                    (
+                        matched_group_index = group_index
+                    )
+                )
+
+
+                if matched_group_index == 0 then
+                (
+                    face_bits = #{}
+                    face_bits[face_index] = true
+                    append result_groups #(face_normal, face_bits)
+                )
+                else
+                (
+                    result_groups[matched_group_index][2][face_index] = true
+                )
+
+
+                grouped_faces[face_index] = true
+            )
+        )
+
+
+        if result_groups.count > 0 and grouped_faces.numberSet < face_count then
+(
+            missing_faces = #{1..face_count} - grouped_faces
+            result_groups[1][2] = result_groups[1][2] + missing_faces
+        )
+
+
+        result_groups
+        -- return
+    )
+
+
+    /*
+    Groups current Editable Poly faces by signed world-space direction along one wall-normal orientation.
+    Opposite/backside normals are separated while preserving all native face data during the later detach.
+    */
+    function getSmartExplodePolyFaceDirectionGroups source_node reference_normal =
+    (
+        front_faces = #{}
+        backside_faces = #{}
+        unresolved_faces = #{}
+        face_count = polyop.getNumFaces source_node.baseObject
+
+
+        for face_index = 1 to face_count do
+        (
+            signed_normal = undefined
+
+
+            try
+            (
+                in coordsys world
+                (
+                    signed_normal = polyop.getFaceNormal source_node face_index
+                )
+            )
+            catch
+            (
+                signed_normal = undefined
+            )
+
+
+            if signed_normal != undefined and length signed_normal > 0.0000001 then
+            (
+                signed_normal = normalize signed_normal
+
+
+                if (dot signed_normal reference_normal) < 0.0 then
+                (
+                    backside_faces[face_index] = true
+                )
+                else
+                (
+                    front_faces[face_index] = true
+                )
+            )
+            else
+            (
+                unresolved_faces[face_index] = true
+            )
+        )
+
+
+        if unresolved_faces.numberSet > 0 then
+        (
+            if front_faces.numberSet > 0 then
+            (
+                front_faces = front_faces + unresolved_faces
+            )
+            else if backside_faces.numberSet > 0 then
+            (
+                backside_faces = backside_faces + unresolved_faces
+            )
+        )
+
+
+        result_groups = #()
+
+
+        if front_faces.numberSet > 0 then append result_groups #(1.0, front_faces)
+        if backside_faces.numberSet > 0 then append result_groups #(-1.0, backside_faces)
+
+
+        result_groups
+        -- return
+    )
+
+
+    /*
+    Groups current Editable Poly faces by world-space wall-plane offset.
+    The supplied normal defines the axis perpendicular to the wall plane, so in-plane XY/Z extent is ignored.
+    */
+    function getSmartExplodePolyPositionGroups source_node reference_normal position_tolerance:1.0 =
+    (
+        result_groups = #()
+        grouped_faces = #{}
+        face_count = polyop.getNumFaces source_node.baseObject
+
+
+        for face_index = 1 to face_count do
+        (
+            face_center = undefined
+
+
+            try
+            (
+                in coordsys world
+                (
+                    face_center = polyop.getFaceCenter source_node face_index
+                )
+            )
+            catch
+            (
+                face_center = undefined
+            )
+
+
+            if face_center != undefined then
+            (
+                plane_offset = dot face_center reference_normal
+                matched_group_index = 0
+
+
+                for group_index = 1 to result_groups.count while matched_group_index == 0 do
+                (
+                    if abs (plane_offset - result_groups[group_index][1]) <= position_tolerance then
+                    (
+                        matched_group_index = group_index
+                    )
+                )
+
+
+                if matched_group_index == 0 then
+                (
+                    face_bits = #{}
+                    face_bits[face_index] = true
+                    append result_groups #(plane_offset, face_bits)
+                )
+                else
+                (
+                    result_groups[matched_group_index][2][face_index] = true
+                )
+
+
+                grouped_faces[face_index] = true
+            )
+        )
+
+
+        if result_groups.count > 0 and grouped_faces.numberSet < face_count then
+        (
+            missing_faces = #{1..face_count} - grouped_faces
+            result_groups[1][2] = result_groups[1][2] + missing_faces
+)
+
+
+        result_groups
+        -- return
+    )
+
+
+    /*
+    Collects disconnected elements from the confirmed Editable Poly source.
+    This is used only when normals and wall-plane position have both passed analysis.
+    */
+    function getSmartExplodePolyElementGroups source_node =
+    (
+        result_groups = #()
+        face_count = polyop.getNumFaces source_node.baseObject
+        remaining_faces = #{}
+
+
+        if face_count > 0 then remaining_faces = #{1..face_count}
+
+
+        while remaining_faces.numberSet > 0 do
+        (
+            remaining_array = remaining_faces as array
+            seed_face = remaining_array[1]
+            element_faces = polyop.getElementsUsingFace source_node.baseObject #{seed_face}
+            append result_groups element_faces
+            remaining_faces = remaining_faces - element_faces
+        )
+
+
+        result_groups
+        -- return
+    )
+
+
+    /*
+    Returns the next distinct viewport wirecolor for a newly exploded wall object.
+    The sequence resets for each Explode Objects to Walls command so all new results are visually separated.
+    */
+    function getNextSmartExplodeWireColor =
+    (
+        color_palette = #(
+            (color 255 92 92),
+            (color 92 180 255),
+            (color 116 230 116),
+            (color 255 194 82),
+            (color 196 120 255),
+            (color 76 224 210),
+            (color 255 120 196),
+            (color 218 224 88),
+            (color 120 138 255),
+            (color 255 146 82),
+            (color 104 210 160),
+            (color 226 110 255),
+            (color 255 108 132),
+            (color 88 202 238),
+            (color 164 224 92),
+            (color 246 170 90),
+            (color 154 122 255),
+            (color 82 220 188),
+            (color 255 132 224),
+            (color 206 214 100),
+            (color 112 162 255),
+            (color 255 116 88),
+            (color 122 220 126),
+            (color 236 126 202)
+        )
+
+
+        wall_fixer_explode_wire_color_counter += 1
+        palette_index = mod (wall_fixer_explode_wire_color_counter - 1) color_palette.count + 1
+
+
+        color_palette[palette_index]
+        -- return
+    )
+
+
+    /*
+    Copies relevant node-level display and user-property data to one detached wall node.
+    Face Material IDs, mapping channels and smoothing data are preserved by native Editable Poly detaching.
+    */
+    function copySmartExplodeNodeProperties source_node target_node user_property_buffer =
+    (
+        if source_node != undefined and target_node != undefined then
+        (
+            try
+            (
+                target_node.material = source_node.material
+            )
+            catch
+            (
+            )
+
+
+            try
+            (
+                target_node.wirecolor = source_node.wirecolor
+            )
+            catch
+            (
+            )
+
+
+            try
+            (
+                target_node.allEdges = source_node.allEdges
+            )
+            catch
+            (
+            )
+
+
+            try
+            (
+                target_node.backFaceCull = source_node.backFaceCull
+            )
+            catch
+            (
+            )
+
+
+            try
+            (
+                target_node.renderable = source_node.renderable
+            )
+            catch
+            (
+            )
+
+
+            try
+            (
+                target_node.primaryVisibility = source_node.primaryVisibility
+            )
+            catch
+            (
+            )
+
+
+            try
+            (
+                target_node.secondaryVisibility = source_node.secondaryVisibility
+            )
+            catch
+            (
+            )
+
+
+            if user_property_buffer != undefined and user_property_buffer != "" then
+            (
+                try
+                (
+                    setUserPropBuffer target_node user_property_buffer
+                )
+                catch
+                (
+                )
+            )
+        )
+
+
+        target_node
+        -- return
+    )
+
+
+    /*
+    Detaches every confirmed face group to a new Editable Poly node, then removes the collapsed source.
+    Faces are copied with delete:false until every group succeeds, preventing face-index renumbering during the split.
+    */
+    function detachSmartExplodePolyGroups source_node face_groups name_suffix:"_Wall_" =
+    (
+        result_nodes = #()
+        operation_success = false
+        source_user_properties = ""
+
+
+        try
+        (
+            source_user_properties = getUserPropBuffer source_node
+        )
+        catch
+        (
+            source_user_properties = ""
+        )
+
+
+        if (source_node != undefined) and (isValidNode source_node) and (classOf source_node.baseObject == Editable_Poly) and (face_groups.count > 1) then
+        (
+            detach_failed = false
+
+
+            for group_index = 1 to face_groups.count while not detach_failed do
+            (
+                group_faces = face_groups[group_index]
+
+
+                if group_faces.numberSet > 0 then
+                (
+                    detached_name = uniqueName (source_node.name + name_suffix)
+                    detach_result = false
+
+
+                    try
+                    (
+                        detach_result = polyop.detachFaces source_node group_faces delete:false asNode:true name:detached_name
+                    )
+                    catch
+                    (
+                        detach_result = false
+                    )
+
+
+                    detached_node = if detach_result then getNodeByName detached_name else undefined
+
+
+                    if detached_node != undefined and isValidNode detached_node then
+                    (
+                        copySmartExplodeNodeProperties source_node detached_node source_user_properties
+                        detached_node.wirecolor = getNextSmartExplodeWireColor()
+                        append result_nodes detached_node
+                    )
+                    else
+                    (
+                        detach_failed = true
+                    )
+                )
+            )if not detach_failed and result_nodes.count == face_groups.count then
+            (
+                delete source_node
+                operation_success = true
+            )
+            else
+            (
+                for created_node in result_nodes do
+                (
+                    if isValidNode created_node then delete created_node
+                )
+
+
+                result_nodes = #()
+            )
+        )
+
+
+        #(operation_success, result_nodes)
+        -- return
+    )
+
+
+    /*
+    Collapses one already-confirmed split candidate to Editable Poly and executes only the required split level.
+    Snapshot analysis has already established that modifying this original node is necessary.
+    */
+    function executeSmartExplodeNode source_node operation_type normal_angle_tolerance:1.0 position_tolerance:1.0 =
+    (
+        result_data = #(false, #())
+        conversion_success = false
+
+
+        try
+        (
+            convertToPoly source_node
+            conversion_success = isValidNode source_node and classOf source_node.baseObject == Editable_Poly
+        )
+        catch
+        (
+            conversion_success = false
+        )
+
+
+        if conversion_success then
+        (
+            face_groups = #()
+
+
+            case operation_type of
+            (
+                #normals:
+                (
+                    normal_groups = getSmartExplodePolyNormalGroups source_node angle_tolerance:normal_angle_tolerance
+                    for group_data in normal_groups do append face_groups group_data[2]
+                )
+                #faceDirection:
+                (
+                    normal_groups = getSmartExplodePolyNormalGroups source_node angle_tolerance:normal_angle_tolerance
+
+
+                    if normal_groups.count == 1 then
+                    (
+                        face_direction_groups = getSmartExplodePolyFaceDirectionGroups source_node normal_groups[1][1]
+                        for group_data in face_direction_groups do append face_groups group_data[2]
+                    )
+                )
+                #position:
+                (
+                    normal_groups = getSmartExplodePolyNormalGroups source_node angle_tolerance:normal_angle_tolerance
+
+
+                    if normal_groups.count == 1 then
+                    (
+                        position_groups = getSmartExplodePolyPositionGroups source_node normal_groups[1][1] position_tolerance:position_tolerance
+                        for group_data in position_groups do append face_groups group_data[2]
+                    )
+                )
+                #elements:
+                (
+                    face_groups = getSmartExplodePolyElementGroups source_node
+                )
+            )
+
+
+            if face_groups.count > 1 then
+            (
+                result_data = detachSmartExplodePolyGroups source_node face_groups
+            )
+        )
+
+
+        result_data
+        -- return
+    )
+
+
+    /*
+    Appends one valid scene node to an output array only once.
+    This keeps untouched originals and newly detached walls together in the final selection.
+    */
+    function appendSmartExplodeOutputNode output_nodes scene_node =
+    (
+        if scene_node != undefined and isValidNode scene_node then
+        (
+            if findItem output_nodes scene_node == 0 then append output_nodes scene_node
+)
+
+
+        output_nodes
+        -- return
+    )
+
+
+    /*
+    Analyzes one object for exactly one Smart Explode stage using evaluated snapshot geometry.
+    The original scene node and modifier stack remain untouched during this check.
+    */
+    function analyzeSmartExplodeStage source_node operation_type normal_angle_tolerance:1.0 position_tolerance:1.0 =
+    (
+        result_data = #(false, false, 0)
+        analysis_mesh = undefined
+
+
+        if source_node != undefined and isValidNode source_node and superClassOf source_node == GeometryClass then
+        (
+            try
+            (
+                analysis_mesh = snapshotAsMesh source_node
+
+
+                if analysis_mesh != undefined and analysis_mesh.numfaces > 0 then
+                (
+                    case operation_type of
+                    (
+                        #normals:
+                        (
+                            normal_groups = getSmartExplodeMeshNormalGroups analysis_mesh source_node angle_tolerance:normal_angle_tolerance
+                            result_data = #(true, normal_groups.count > 1, normal_groups.count)
+                        )
+                        #faceDirection:
+                        (
+                            normal_groups = getSmartExplodeMeshNormalGroups analysis_mesh source_node angle_tolerance:normal_angle_tolerance
+
+
+                            if normal_groups.count == 1 then
+                            (
+                                face_direction_groups = getSmartExplodeMeshFaceDirectionGroups analysis_mesh source_node normal_groups[1][1]
+                                result_data = #(true, face_direction_groups.count > 1, face_direction_groups.count)
+                            )
+                        )
+                        #position:
+                        (
+                            normal_groups = getSmartExplodeMeshNormalGroups analysis_mesh source_node angle_tolerance:normal_angle_tolerance
+
+
+                            if normal_groups.count == 1 then
+                            (
+                                face_direction_groups = getSmartExplodeMeshFaceDirectionGroups analysis_mesh source_node normal_groups[1][1]
+
+
+                                if face_direction_groups.count == 1 then
+                                (
+                                    position_groups = getSmartExplodeMeshPositionGroups analysis_mesh source_node normal_groups[1][1] position_tolerance:position_tolerance
+                                    result_data = #(true, position_groups.count > 1, position_groups.count)
+                                )
+                            )
+                        )
+                        #elements:
+                        (
+                            element_groups = getSmartExplodeMeshElementGroups analysis_mesh
+                            result_data = #(true, element_groups.count > 1, element_groups.count)
+                        )
+                    )
+                )
+            )
+            catch
+            (
+                result_data = #(false, false, 0)
+            )
+        )
+
+
+        if analysis_mesh != undefined then
+        (
+            try
+            (
+                free analysis_mesh
+            )
+            catch
+            (
+            )
+        )
+
+
+        result_data
+        -- return
+    )
+
+
+    /*
+    Explodes the complete current object set into separate scene objects by canonical face-normal orientation.
+    This is mandatory Smart Explode step 1: each required normal group becomes its own object before step 2 can run.
+    */
+    function explodeSmartExplodeNodesByNormals input_nodes normal_angle_tolerance:1.0 position_tolerance:1.0 =
+    (
+        output_nodes = #()
+        split_count = 0
+        failed_count = 0
+        processed_count = 0
+
+
+        for source_node in input_nodes do
+        (
+            processed_count += 1
+
+
+            if source_node == undefined or not isValidNode source_node or superClassOf source_node != GeometryClass then
+            (
+                failed_count += 1
+            )
+            else
+            (
+                source_name = source_node.name
+                analysis_result = analyzeSmartExplodeStage source_node #normals normal_angle_tolerance:normal_angle_tolerance position_tolerance:position_tolerance
+
+
+                if not analysis_result[1] then
+                (
+                    failed_count += 1
+                    appendSmartExplodeOutputNode output_nodes source_node
+                    setStatus #error (source_name + ": NORMALS analysis failed.")
+                )
+                else if analysis_result[2] then
+                (
+                    expected_object_count = analysis_result[3]
+                    split_result = executeSmartExplodeNode source_node #normals normal_angle_tolerance:normal_angle_tolerance position_tolerance:position_tolerance
+
+
+                    if split_result[1] and split_result[2].count == expected_object_count then
+                    (
+                        split_count += 1
+
+
+                        for result_node in split_result[2] do
+                        (
+                            appendSmartExplodeOutputNode output_nodes result_node
+                        )
+                    )
+                    else
+                    (
+                        failed_count += 1
+
+
+                        if isValidNode source_node then
+                        (
+                            appendSmartExplodeOutputNode output_nodes source_node
+                        )
+
+
+                        setStatus #error (source_name + ": NORMALS must explode into separate objects, but the object split failed.")
+                    )
+                )
+                else
+                (
+                    appendSmartExplodeOutputNode output_nodes source_node
+                )
+            )
+        )
+
+
+        #(failed_count == 0, output_nodes, split_count, failed_count, processed_count)
+        -- return
+    )
+
+
+    /*
+    Runs one Smart Explode stage across the complete current object set.
+    Every input finishes this stage before any object advances to the next stage.
+    */
+    function processSmartExplodeStage input_nodes operation_type normal_angle_tolerance:1.0 position_tolerance:1.0 =
+    (
+        output_nodes = #()
+        split_count = 0
+        failed_count = 0
+        processed_count = 0
+
+
+        for source_node in input_nodes do
+        (
+            processed_count += 1
+
+
+            if source_node == undefined or not isValidNode source_node or superClassOf source_node != GeometryClass then
+            (
+                failed_count += 1
+            )
+            else
+            (
+                source_name = source_node.name
+                analysis_result = analyzeSmartExplodeStage source_node operation_type normal_angle_tolerance:normal_angle_tolerance position_tolerance:position_tolerance
+
+
+                if not analysis_result[1] then
+                (
+                    failed_count += 1
+                    appendSmartExplodeOutputNode output_nodes source_node
+                    setStatus #error (source_name + ": " + (operation_type as string) + " analysis failed.")
+                )
+                else if analysis_result[2] then
+                (
+                    split_result = executeSmartExplodeNode source_node operation_type normal_angle_tolerance:normal_angle_tolerance position_tolerance:position_tolerance
+
+
+                    if split_result[1] then
+                    (
+                        split_count += 1
+
+
+                        for result_node in split_result[2] do
+                        (
+                            appendSmartExplodeOutputNode output_nodes result_node
+                        )
+                    )
+                    else
+                    (
+                        failed_count += 1
+                        if isValidNode source_node then appendSmartExplodeOutputNode output_nodes source_node
+                        setStatus #error (source_name + ": confirmed " + (operation_type as string) + " split could not be completed.")
+                    )
+                )
+                else
+                (
+                    appendSmartExplodeOutputNode output_nodes source_node
+                )
+            )
+        )
+
+
+        #(failed_count == 0, output_nodes, split_count, failed_count, processed_count)
+        -- return
+    )
+
+
+    /*
+    Smart Explode Objects to Walls performs only the first required explode level for each selected object.
+    Viewport/UI refresh is batched so stable geometry logic runs without repeated scene redraws.
+    */
+    function smartExplodeObjectsToWalls normal_angle_tolerance:1.0 position_tolerance:undefined =
+    (
+        selected_nodes = selection as array
+        final_nodes = #()
+        failed_count = 0
+        split_count = 0
+        valid_count = 0
+
+
+        if position_tolerance == undefined then
+        (
+            position_tolerance = amax 0.000001 ((wallFixerGetDefaultWeldThreshold()) * 0.01)
+        )
+
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #error "Select at least one geometry object."
+            false
+        )
+        else
+        (
+            for source_index = 1 to selected_nodes.count do
+            (
+                source_node = selected_nodes[source_index]
+                setProgress (((source_index as float / selected_nodes.count) * 90.0) as integer)
+
+
+                if source_node == undefined or not isValidNode source_node or superClassOf source_node != GeometryClass then
+                (
+                    failed_count += 1
+                    format "ERROR: Invalid geometry in Smart Explode input at index:%\n" source_index
+                )
+                else
+                (
+                    source_name = source_node.name
+                    analysis_result = analyzeSmartExplodeNode source_node normal_angle_tolerance:normal_angle_tolerance position_tolerance:position_tolerance
+                    operation_type = analysis_result[1]
+
+
+                    if operation_type == #valid then
+                    (
+                        valid_count += 1
+                        appendSmartExplodeOutputNode final_nodes source_node
+                        format "SUCCESS: Object is already a single wall | %\n" source_name
+                    )
+                    else if (operation_type == #normals) or (operation_type == #faceDirection) or (operation_type == #position) or (operation_type == #elements) then
+                    (
+                        split_result = executeSmartExplodeNode source_node operation_type normal_angle_tolerance:normal_angle_tolerance position_tolerance:position_tolerance
+
+
+                        if split_result[1] then
+                        (
+                            split_count += 1
+
+
+                            for result_node in split_result[2] do
+                            (
+                                appendSmartExplodeOutputNode final_nodes result_node
+                            )
+
+
+                            case operation_type of
+                            (
+                                #normals:
+                                (
+                                    format "SUCCESS: Objects exploded to walls by normals | % | result objects:%\n" source_name split_result[2].count
+                                )
+                                #faceDirection:
+                                (
+                                    format "SUCCESS: Objects exploded to walls by face direction | % | result objects:%\n" source_name split_result[2].count
+                                )
+                                #position:
+                                (
+                                    format "SUCCESS: Objects exploded to walls by XY position | % | result objects:%\n" source_name split_result[2].count
+                                )
+                                #elements:
+                                (
+                                    format "SUCCESS: Objects exploded to elements | % | result objects:%\n" source_name split_result[2].count
+                                )
+                            )
+                        )
+                        else
+                        (
+                            failed_count += 1
+
+
+                            if isValidNode source_node then
+                            (
+                                appendSmartExplodeOutputNode final_nodes source_node
+                            )
+format "ERROR: % confirmed split could not be completed.\n" source_name
+                        )
+                    )
+                    else
+                    (
+                        failed_count += 1
+                        appendSmartExplodeOutputNode final_nodes source_node
+                        format "ERROR: % snapshot analysis failed.\n" source_name
+                    )
+                )
+            )
+
+
+            clearSelection()
+
+
+            if final_nodes.count > 0 then
+            (
+                select final_nodes
+            )
+
+
+            setProgress 100
+
+
+            if failed_count > 0 then
+            (
+                setStatus #error ("Explode to walls finished with " + (failed_count as string) + " failed object(s)."))
+            else if split_count > 0 then
+            (
+                setStatus #success ("Explode to walls complete: " + (final_nodes.count as string) + " object(s)")
+            )
+            else if selected_nodes.count == 1 then
+            (
+                setStatus #success "Object is already a single wall"
+            )
+            else
+            (
+                setStatus #success "Selected objects are already single walls"
+            )
+
+
+            format "Wall-Fixer Smart Explode ONE LEVEL: initial:% result:% splits:% valid:% failed:%\n" \
+                selected_nodes.count final_nodes.count split_count valid_count failed_count
+
+
+            failed_count == 0
+        )
+        -- return
+    )
+
+
+    /*
+    Collects every node that belongs to the current 3ds Max Isolate Selection set.
+    The list is captured before Smart Explode replaces any isolated source nodes.
+    */
+    function getSmartExplodeIsolatedNodes =
+    (
+        isolated_nodes = #()
+
+
+        try
+        (
+            if IsolateSelection.IsolateSelectionModeActive() then
+            (
+                for scene_node in objects do
+                (
+                    if isValidNode scene_node and IsolateSelection.IsNodeIsolated scene_node then
+                    (
+                        append isolated_nodes scene_node
+                    )
+                )
+            )
+        )
+        catch
+        (
+            isolated_nodes = #()
+        )
+
+
+        isolated_nodes
+        -- return
+    )
+
+
+    /*
+    Restores Isolate Selection after Smart Explode and includes all new result nodes.
+    The isolate set is rebuilt with redraw suppressed, then only the explode result remains selected.
+    */
+    function restoreSmartExplodeIsolateMode isolated_nodes result_nodes =
+    (
+        isolate_restore_success = true
+        isolate_nodes = #()
+
+
+        for scene_node in isolated_nodes do
+        (
+            if scene_node != undefined and isValidNode scene_node then
+            (
+                appendSmartExplodeOutputNode isolate_nodes scene_node
+            )
+        )
+
+
+        for result_node in result_nodes do
+        (
+            if result_node != undefined and isValidNode result_node then
+            (
+                appendSmartExplodeOutputNode isolate_nodes result_node
+            )
+        )
+
+
+        try
+        (
+            if IsolateSelection.IsolateSelectionModeActive() then
+            (
+                IsolateSelection.ExitIsolateSelectionMode()
+            )
+
+
+            clearSelection()
+
+
+            if isolate_nodes.count > 0 then
+            (
+                select isolate_nodes
+                IsolateSelection.EnterIsolateSelectionMode()
+            )
+
+
+            clearSelection()
+
+
+            if result_nodes.count > 0 then
+            (
+                select result_nodes
+            )
+        )
+        catch
+        (
+            isolate_restore_success = false
+        )
+
+
+        isolate_restore_success
+        -- return
+    )
+
+
+    /*
+    Runs one Smart Explode level from PRE-PROCESS step 2.
+    Snapshot analysis finds the first required level; newly created objects wait for the next command invocation.
+    */
+    function runExplodeObjectsToWalls =
+    (
+        wall_fixer_explode_wire_color_counter = 0
+        isolate_was_active = false
+        isolated_nodes = #()
+        result_nodes = #()
+        setProgress 0
+        setStatus #message "Analyzing selected objects for the first required wall split..."
+        completed = false
+
+
+        try
+        (
+            isolate_was_active = IsolateSelection.IsolateSelectionModeActive()
+
+
+            if isolate_was_active then
+            (
+                isolated_nodes = getSmartExplodeIsolatedNodes()
+            )
+        )
+        catch
+        (
+            isolate_was_active = false
+            isolated_nodes = #()
+        )
+
+
+        undo "Wall-Fixer - Smart Explode Objects to Walls" on
+        (
+            with redraw off
+            (
+                completed = smartExplodeObjectsToWalls normal_angle_tolerance:1.0
+                result_nodes = selection as array
+
+
+                if isolate_was_active then
+                (
+                    restoreSmartExplodeIsolateMode isolated_nodes result_nodes
+                )
+            )
+        )
+
+
+        redrawViews()
+        completed
+        -- return
+    )
+
+
+    /*
+    Reuses the existing straight two-visible-edge vertex finder.
+    Removal remains the native Vertex Remove RMB action on the workflow button.
+    */
+    function runFindTwoEdgeVerts =
+    (
+        setProgress 0
+        setStatus #message "Finding straight two-edge vertices..."
+        completed = WallFixer.debugFindTwoEdgeVerts angle_threshold:0.1
+        setProgress 100
+
+
+        if completed then
+        (
+            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Two-edge vertex check completed.")
+        )
+        else
+        (
+            setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No removable two-edge vertices were found.")
+        )
+
+
+        completed
+        -- return
+    )
+
+
+    /*
+    Runs the imported Straight Edge Fixer horizontal/vertical check or straighten action.
+    LMB checks and RMB straightens the currently selected candidate edges.
+    */
+    function runStraightEdgeDirection direction_type fix_selected:false =
+    (
+        saveStraightEdgeSettings()
+        setProgress 0
+        action_text = if fix_selected then "Straightening" else "Checking"
+        setStatus #message (action_text + " " + (direction_type as string) + " edges...")
+
+
+        if fix_selected then
+        (
+            completed = StraightEdgeFixer.straightenSelectedEdges \
+                direction_type \
+                WallFixerEdgeFixerRollout.level_tolerance_spinner.value \
+                WallFixerEdgeFixerRollout.edge_angle_spinner.value \
+                WallFixerEdgeFixerRollout.search_in_z_spinner.value
+        )
+        else
+        (
+            completed = StraightEdgeFixer.checkEdgeDirection \
+                direction_type \
+                WallFixerEdgeFixerRollout.level_tolerance_spinner.value \
+                WallFixerEdgeFixerRollout.edge_angle_spinner.value
+        )
+
+
+        setProgress 100
+
+
+        if completed then
+        (
+            setStatus #success (action_text + " " + (direction_type as string) + " edges completed.")
+        )
+        else
+        (
+            setStatus #warning (action_text + " " + (direction_type as string) + " edges did not produce a completed result.")
+        )
+
+
+        completed
+        -- return
+    )
+
+
+    /*
+    Runs the imported border-edge validation using the current Level Tolerance.
+    Invalid border edges remain selected for inspection or subsequent correction.
+    */
+    function runStraightBorderCheck =
+    (
+        saveStraightEdgeSettings()
+        setProgress 0
+        setStatus #message "Checking border edges..."
+        completed = StraightEdgeFixer.checkBorders WallFixerEdgeFixerRollout.level_tolerance_spinner.value
+        setProgress 100
+
+
+        if completed then
+        (
+            setStatus #success "Border edge check completed."
+        )
+        else
+        (
+            setStatus #warning "Border edge check did not produce a completed result."
+        )
+
+
+        completed
+-- return
+    )
+
+
+    /*
+    Runs the imported repeated-level detection/alignment tool with the integrated controls.
+    All geometry behavior remains in the separate Straight Edge support module.
+    */
+    function runStraightEdgeLevelFix =
+    (
+        saveStraightEdgeSettings()
+        setProgress 0
+        setStatus #message "Fixing edge Z levels..."
+
+
+        completed = StraightEdgeFixer.alignSelection \
+            level_tolerance:WallFixerEdgeFixerRollout.level_tolerance_spinner.value \
+            min_level_edges:WallFixerEdgeFixerRollout.min_level_edges_spinner.value \
+            search_in_z:WallFixerEdgeFixerRollout.search_in_z_spinner.value \
+            quiet_mode:WallFixerEdgeFixerRollout.straight_quiet_checkbox.checked
+
+
+        setProgress 100
+
+
+        if completed then
+        (
+            setStatus #success "Edge Z-level fixing completed."
+        )
+        else
+        (
+            setStatus #error "Edge Z-level fixing failed."
+        )
+
+
+        completed
+        -- return
+    )
+/*
+    Reuses the current Face Cleaner Fix N-gons operation before or after slicing.
+    Existing hidden slicer settings are preserved from the Wall-Fixer INI.
+    */
+    function runFixNgons workflow_stage:#preprocess =
+    (
+        saveUiSettings()
+        setProgress 0
+        setStatus #message (if workflow_stage == #postprocess then "Final Fix N-gons..." else "Fixing N-gons before slicing...")
+
+
+        completed = WallFixer.propagateSelectionJunctionCuts \
+            weld_vertices:WallFixerOptionsRollout.weld_checkbox.checked \
+            weld_threshold:WallFixerOptionsRollout.weld_threshold_spinner.value \
+            auto_smooth:WallFixerOptionsRollout.auto_smooth_checkbox.checked \
+            cut_mode:(getSliceCutMode()) \
+            slice_plane_mode:(getSlicePlaneMode()) \
+            angle_threshold:saved_angle_threshold \
+            planar_tolerance:saved_planar_tolerance
+
+
+        setProgress 100
+
+
+        if completed then
+        (
+            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Fix N-gons completed.")
+        )
+        else
+        (
+            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Fix N-gons failed.")
+        )
+
+
+        completed
+        -- return
+    )
+
+
+    /*
+    Runs the current fixed base-object batch slicer using the selected directional order.
+    Existing modifier separation and duplicate-prevention rules remain inside Wall-Fixer Core.
+    */
+    function runSliceSelectedWalls =
+    (
+        saveUiSettings()
+        setProgress 0
+        setStatus #message "Slicing selected walls..."
+
+
+        completed = WallFixer.debugSliceSelectedWalls \
+            cut_mode:(getSliceCutMode()) \
+            slice_plane_mode:(getSlicePlaneMode()) \
+            angle_threshold:saved_angle_threshold \
+            planar_tolerance:saved_planar_tolerance \
+            slice_precision:WallFixerOptionsRollout.slice_precision_spinner.value \
+            display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
+            double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
+            progress_callback:updateSliceProgress \
+            quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
+
+
+        if completed then
+        (
+            setProgress 100
+            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Slice selected walls completed.")
+        )
+        else
+        (
+            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Slice selected walls stopped.")
+        )
+
+
+        completed
+        -- return
+    )
+
+
+    /*
+    Reuses the current geometric redundant-loop cleanup operation.
+    It leaves no cleanup modifier behind when no valid redundant loop is found.
+    */
+    function runRedundantLoopCleanup =
+    (
+        setProgress 0
+        setStatus #message "Removing redundant loops and edges..."
+        completed = WallFixer.cleanupRedundantLoopsSelection angle_threshold:0.1 debug_output:true
+        setProgress 100
+
+
+        if completed then
+        (
+            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant-loop cleanup completed.")
+        )
+        else
+        (
+            setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No redundant loops were removed.")
+        )
+
+
+        completed
+        -- return
+    )
+
+
+    /*
+    Resizes only the workflow area when the main dialog height changes.
+    The dialog width remains locked by createDialog.
+    */
+    function updateVerticalLayout dialog_height =
+    (
+        target_height = dialog_height
+
+
+        if target_height < wall_fixer_min_dialog_height then
+        (
+            target_height = wall_fixer_min_dialog_height
+        )
+
+
+        workflow_height = target_height - 62
+        if workflow_height < 180 then workflow_height = 180
+        workflow_subrollout.height = workflow_height
+        -- return
+    )
+
+
+    on WallFixerRollout open do
+    (
+        WallFixerRollout.title = ("Wall-Fixer " + (WallFixerVersion as string))
+        max_background_color = colorMan.getColor #background
+        max_text_color = colorMan.getColor #text
+        color_class = dotNetClass "System.Drawing.Color"
+        background_color = color_class.FromArgb ((max_background_color.x * 255.0) as integer) ((max_background_color.y * 255.0) as integer) ((max_background_color.z * 255.0) as integer)
+        text_color = color_class.FromArgb ((max_text_color.x * 255.0) as integer) ((max_text_color.y * 255.0) as integer) ((max_text_color.z * 255.0) as integer)
+        border_style = (dotNetClass "System.Windows.Forms.BorderStyle").None
+        scroll_bars = (dotNetClass "System.Windows.Forms.RichTextBoxScrollBars").None
+        content_alignment_class = dotNetClass "System.Drawing.ContentAlignment"
+        font_style_class = dotNetClass "System.Drawing.FontStyle"
+
+
+        process_status_label.AutoSize = false
+        process_status_label.TextAlign = content_alignment_class.MiddleLeft
+        process_status_label.BackColor = background_color
+        process_status_label.ForeColor = text_color
+        process_status_label.Font = dotNetObject "System.Drawing.Font" process_status_label.Font font_style_class.Bold
+        process_status_label.Text = "READY"
+        process_status_label.Visible = true
+        workflow_progress.visible = false
+
+
+        for status_control in #(status_line_top, status_line_bottom) do
+        (
+            status_control.ReadOnly = true
+            status_control.Multiline = false
+            status_control.WordWrap = false
+            status_control.TabStop = false
+            status_control.BorderStyle = border_style
+            status_control.ScrollBars = scroll_bars
+            status_control.BackColor = background_color
+            status_control.ForeColor = text_color
+        )
+
+
+        renderStatusLine status_line_top status_texts[1]
+        renderStatusLine status_line_bottom status_texts[2]
+
+
+        current_dialog_size = getDialogSize WallFixerRollout
+        updateVerticalLayout current_dialog_size.y
+
+
+        addSubRollout workflow_subrollout WallFixerOptionsRollout rolledUp:false
+        addSubRollout workflow_subrollout WallFixerPreProcessRollout rolledUp:false
+
+
+        if wallFaceClassifierRollout != undefined then
+        (
+            addSubRollout workflow_subrollout wallFaceClassifierRollout rolledUp:false
+        )
+
+
+        addSubRollout workflow_subrollout WallFixerEdgeFixerRollout rolledUp:true
+        addSubRollout workflow_subrollout WallFixerSliceWallsRollout rolledUp:true
+        addSubRollout workflow_subrollout WallFixerPostProcessRollout rolledUp:true
+    )
+
+
+    on WallFixerRollout moved dialog_position do
+    (
+        wallFixerSaveDockState()
+    )
+
+
+    on WallFixerRollout resized dialog_size do
+    (
+        updateVerticalLayout dialog_size.y
+        wallFixerSaveDockState()
+    )
+
+
+    on WallFixerRollout close do
+    (
+        dialog_pos = undefined
+        dialog_size = undefined
+        current_dock_state = #cui_floatable
+
+
+        try
+        (
+            if WallFixerRollout.dialogBar then
+            (
+                current_dock_state = cui.getDockState WallFixerRollout
+            )
+        )
+        catch
+        (
+            current_dock_state = #cui_floatable
+        )
+
+
+        wallFixerSaveDockState()
+
+
+        if current_dock_state == #cui_floatable then
+        (
+            try
+            (
+                dialog_pos = getDialogPos WallFixerRollout
+                dialog_size = getDialogSize WallFixerRollout
+            )
+            catch
+            (
+                dialog_pos = undefined
+                dialog_size = undefined
+            )
+        )
+
+
+        saveUiSettings dialog_position:dialog_pos dialog_size:dialog_size
+        saveStraightEdgeSettings()
+
+
+        removeSubRollout workflow_subrollout WallFixerPostProcessRollout
+        removeSubRollout workflow_subrollout WallFixerSliceWallsRollout
+        removeSubRollout workflow_subrollout WallFixerEdgeFixerRollout
+
+
+        if wallFaceClassifierRollout != undefined then
+        (
+            try
+            (
+                removeSubRollout workflow_subrollout wallFaceClassifierRollout
+            )
+            catch
+            (
+            )
+        )
+
+
+        removeSubRollout workflow_subrollout WallFixerPreProcessRollout
+        removeSubRollout workflow_subrollout WallFixerOptionsRollout
+    )
+)
+
+
+WallFixerRollout.title = ("Wall-Fixer " + (WallFixerVersion as string))
+
+
+if saved_dialog_position == undefined then
+(
+    createDialog WallFixerRollout \
+        width:saved_dialog_size.x \
+        height:saved_dialog_size.y \
+        menu:wall_fixer_main_menu \
+        style:#(#style_titlebar, #style_sysmenu, #style_toolwindow, #style_resizing) \
+        lockWidth:true \
+        lockHeight:false
+)
+else
+(
+    createDialog WallFixerRollout \
+        width:saved_dialog_size.x \
+        height:saved_dialog_size.y \
+        pos:saved_dialog_position \
+        menu:wall_fixer_main_menu \
+        style:#(#style_titlebar, #style_sysmenu, #style_toolwindow, #style_resizing) \
+        lockWidth:true \
+        lockHeight:false
+)
+
+
+wallFixerRegisterDialogBar()
+wallFixerRestoreDockState saved_dock_state
