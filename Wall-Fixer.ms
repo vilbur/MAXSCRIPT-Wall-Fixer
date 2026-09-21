@@ -1,5 +1,5 @@
 /*
-Wall-Fixer Loader 0.22
+Wall-Fixer Loader 0.23
 Loads the fixed canonical component filenames from this folder.
 */
 
@@ -7,8 +7,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.22"
-global wall_fixer_loader_tool_version = 0.22
+global wall_fixer_loader_file_version = "0.23"
+global wall_fixer_loader_tool_version = 0.23
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -93,6 +93,7 @@ function testWallFixerLoader folder_path:undefined =
     pipeline_file = requireWallFixerComponent test_folder "Wall-Fixer-Pipeline.ms"
     core_file = requireWallFixerComponent test_folder "Wall-Fixer-Core.ms"
     straight_edge_file = requireWallFixerComponent test_folder "Straight-Edge-Fixer.ms"
+    inner_outer_file = requireWallFixerComponent test_folder "Face-Classifier\\Inner-Outer-Wall-Finder.ms"
     ui_file = requireWallFixerComponent test_folder "Wall-Fixer-UI.ms"
 
     format "\n============================================================\n"
@@ -101,10 +102,11 @@ function testWallFixerLoader folder_path:undefined =
     format "Pipeline:      %\n" pipeline_file
     format "Core:          %\n" core_file
     format "Straight Edge: %\n" straight_edge_file
+    format "Inner/Outer:   %\n" inner_outer_file
     format "UI:            %\n" ui_file
     format "============================================================\n"
 
-    #(pipeline_file, core_file, straight_edge_file, ui_file)
+    #(pipeline_file, core_file, straight_edge_file, inner_outer_file, ui_file)
     -- return
 )
 
@@ -112,12 +114,14 @@ script_folder = getFilenamePath (getSourceFileName())
 pipeline_file = requireWallFixerComponent script_folder "Wall-Fixer-Pipeline.ms"
 core_file = requireWallFixerComponent script_folder "Wall-Fixer-Core.ms"
 straight_edge_file = requireWallFixerComponent script_folder "Straight-Edge-Fixer.ms"
+inner_outer_file = requireWallFixerComponent script_folder "Face-Classifier\\Inner-Outer-Wall-Finder.ms"
 ui_file = requireWallFixerComponent script_folder "Wall-Fixer-UI.ms"
 
 format "Wall-Fixer loader %\n" wall_fixer_loader_file_version
 format "Pipeline: %\n" pipeline_file
 format "Core: %\n" core_file
 format "Straight Edge: %\n" straight_edge_file
+format "Inner/Outer: %\n" inner_outer_file
 format "UI: %\n" ui_file
 
 /*
@@ -125,7 +129,8 @@ Load dependency order:
 1. Wall-Fixer Pipeline
 2. Wall-Fixer Core
 3. Straight Edge Fixer logic
-4. Wall-Fixer UI
+4. Inner-Outer Wall Finder
+5. Wall-Fixer UI
 */
 fileIn pipeline_file
 fileIn core_file
@@ -139,4 +144,5 @@ catch
 (
 )
 
+fileIn inner_outer_file
 fileIn ui_file

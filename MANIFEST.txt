@@ -1,22 +1,30 @@
 Wall-Fixer canonical unversioned codebase
 
+SHARED PROJECT VERSION:
+  0.23
+
 RUN:
   Wall-Fixer.ms
 
 ACTIVE RUNTIME FILES:
-  Wall-Fixer.ms
-  Wall-Fixer-UI.ms                    (source content: 0.46)
-  WallMeshCleaner-Core.ms             (source content: 0.948)
-  WallMeshCleaner-Pipeline.ms         (source content: 0.930)
-  Straight-Edge-Fixer.ms              (source content: 0.11)
+  Wall-Fixer.ms                                      (file: 0.23, project: 0.23)
+  Wall-Fixer-UI.ms                                   (file: 0.23, project: 0.23)
+  Wall-Fixer-Core.ms                                 (file: 0.22, project: 0.22)
+  Wall-Fixer-Pipeline.ms                             (file: 0.22, project: 0.22)
+  Straight-Edge-Fixer.ms                             (file: 0.2, project: 0.2)
+  Face-Classifier/Inner-Outer-Wall-Finder.ms         (file: 0.22, project: 0.23)
 
-DEV:
-  Dev/Wall-Fixer-Face-Classifier.ms   (source content: 0.14)
+FACE CLASSIFIER DEVELOPMENT:
+  Face-Classifier/Wall-Fixer-Face-Classifier.ms
+  Face-Classifier/Wall-Fixer-Face-Classifier_0.20.ms
 
 TESTS:
-  Tests/Wall-Fixer-Loader-TEST.ms
-  Tests/Wall-Fixer-Weld-TEST.ms
+  Tests/Wall-Fixer-Loader_TEST_0.02.ms
+  Tests/Wall-Fixer-UI_TEST_0.02.ms
 
-RULE:
-  This baseline uses canonical unversioned filenames only.
-  Do not create _0.xx filename variants unless versioning is explicitly reintroduced.
+RULES:
+  This Drive folder is the canonical Wall-Fixer source of truth.
+  Runtime filenames stay unversioned.
+  On a code change, increment the modified file version and the shared project version by 0.01.
+  Unchanged files keep their existing file/project version values.
+  The highest loaded project/tool version wins and the UI displays that global version.

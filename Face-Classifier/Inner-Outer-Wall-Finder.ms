@@ -1,17 +1,62 @@
-/* Wall-Fixer Face Classifier 0.20
-   Classifies selected wall faces and marks horizontal faces by normal direction.
-   Material ID 1 = OUTER, ID 2 = INNER, ID 3 = UP, ID 4 = DOWN.
+/*
+Inner-Outer Wall Finder 0.22
+Classifies selected wall faces and marks horizontal faces by normal direction.
+Material ID 1 = OUTER, ID 2 = INNER, ID 3 = UP, ID 4 = DOWN.
 */
 
+global WallFixerVersion
+global WallFixerRollout
+global wall_fixer_version_system
+global wall_fixer_version_epoch
+global wall_fixer_inner_outer_file_version = "0.22"
+global wall_fixer_inner_outer_tool_version = 0.23
 global wallFaceClassifierRollout
 global wall_face_classifier_cache = #()
 global wall_face_classifier_last_nodes = #()
 
-if wallFaceClassifierRollout != undefined then
+/*
+Registers this file's shared Wall-Fixer tool version.
+Accepts legacy string or numeric global versions; the highest loaded version wins.
+*/
+if wall_fixer_version_system != 1 then
+(
+    wall_fixer_version_system = 1
+)
+
+if wall_fixer_version_epoch != 3 then
+(
+    wall_fixer_version_epoch = 3
+    WallFixerVersion = undefined
+)
+
+wall_fixer_inner_outer_current_tool_version_number = undefined
+
+if WallFixerVersion != undefined then
 (
     try
     (
-        destroyDialog wallFaceClassifierRollout
+        wall_fixer_inner_outer_current_tool_version_number = WallFixerVersion as float
+    )
+    catch
+    (
+        wall_fixer_inner_outer_current_tool_version_number = undefined
+    )
+)
+
+if wall_fixer_inner_outer_current_tool_version_number == undefined then
+(
+    WallFixerVersion = wall_fixer_inner_outer_tool_version
+)
+else if wall_fixer_inner_outer_tool_version > wall_fixer_inner_outer_current_tool_version_number then
+(
+    WallFixerVersion = wall_fixer_inner_outer_tool_version
+)
+
+if WallFixerRollout != undefined then
+(
+    try
+    (
+        WallFixerRollout.title = ("Wall-Fixer " + (WallFixerVersion as string))
     )
     catch
     (
@@ -1938,7 +1983,7 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
 
     if selected_nodes.count == 0 then
     (
-        messageBox "Select wall objects first, or run CLASSIFY once so the last object set can be restored." title:"Wall Face Classifier"
+        messageBox "Select wall objects first, or run CLASSIFY once so the last object set can be restored." title:"Inner-Outer Wall Finder"
         #() -- return
     )
     else
@@ -1995,7 +2040,7 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
 
         if valid_nodes.count == 0 or bbox_min == undefined then
         (
-            messageBox "No supported objects found. Use Editable Poly or an object with Edit Poly as the top modifier." title:"Wall Face Classifier"
+            messageBox "No supported objects found. Use Editable Poly or an object with Edit Poly as the top modifier." title:"Inner-Outer Wall Finder"
             #() -- return
         )
         else
@@ -2233,7 +2278,7 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
             subObjectLevel = 4
             redrawViews()
 
-            format "Wall Face Classifier 0.20: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
+            format "Inner-Outer Wall Finder 0.22: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
 
             #(valid_nodes.count, total_faces, outer_count, inner_count, up_count, down_count, selection_type, thickness_resolved, hierarchy_resolved, neighbor_resolved, fallback_resolved) -- return
         )
@@ -2781,21 +2826,27 @@ function testWallFaceSelectionRestore =
     #(object_result, face_result) -- return
 )
 
-rollout wallFaceClassifierRollout "Wall Face Classifier 0.20" width:350
+rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
 (
-    spinner spn_wall_thickness "Wall thickness:" range:[0.001, 1000000.0, (units.decodeValue "1m")] type:#worldunits fieldwidth:70 across:2 tooltip:"Maximum distance to search for the opposite wall. Default: 1 m."
-    label lbl_wall_units "units" width:52 offset:[8,2] align:#left tooltip:"Current display unit."
-    spinner spn_connection_threshold "Connect threshold:" range:[0.001, 1000000.0, ((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:70 across:2 tooltip:"Matches neighbor vertices; at least 2 must match. Default is 10% of Wall thickness, and changing Wall thickness resets this value."
-    label lbl_connect_units "units" width:52 offset:[8,2] align:#left tooltip:"Current display unit."
-    button btn_classify "INNER \\ OUTTER" width:102 height:32 across:3 tooltip:"LMB: Classify selected objects. If nothing is selected, restore the last classified object set. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = UP | Pastel Brown = DOWN."
-    button btn_explode "EXPLODE" width:102 height:32 tooltip:"LMB: Split each selected classified object into separate OUTER, INNER, UP, and DOWN objects."
-    button btn_reset "RESET" width:102 height:32 tooltip:"LMB: Reset face classification, clear FORCED OUTER/INNER hints, and clear cached class data."
-    button btn_select_outer "SELECT OUTER" width:155 height:24 across:2 tooltip:"LMB: Object mode selects objects containing OUTER faces. Face mode selects OUTER faces.\n\nRMB: FORCE selected faces or objects OUTER. Highest-priority classification seed."
-    button btn_select_inner "SELECT INNER" width:155 height:24 tooltip:"LMB: Object mode selects objects containing INNER faces. Face mode selects INNER faces.\n\nRMB: FORCE selected faces or objects INNER. Used as a classification seed."
-    button btn_select_up "SELECT UP" width:155 height:24 across:2 tooltip:"LMB: Object mode selects objects containing UP faces. Face mode selects UP faces."
-    button btn_select_down "SELECT DOWN" width:155 height:24 tooltip:"LMB: Object mode selects objects containing DOWN faces. Face mode selects DOWN faces."
-    label lbl_status "Ready" align:#left tooltip:"Classification counts and current selection."
-    button btn_test "Create test scene" width:140 height:24 tooltip:"Create simple wall geometry for testing."
+    spinner spn_wall_thickness "Wall thickness:" pos:[8,8] width:204 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:70 \
+        tooltip:"Maximum distance to search for the opposite wall. Default: 1 m."
+    label lbl_wall_units "units" pos:[218,12] width:50 height:18 align:#left tooltip:"Current display unit."
+
+    spinner spn_connection_threshold "Connect threshold:" pos:[8,34] width:204 height:20 range:[0.001,1000000.0,((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:70 \
+        tooltip:"Matches neighbor vertices; at least 2 must match. Default is 10% of Wall thickness, and changing Wall thickness resets this value."
+    label lbl_connect_units "units" pos:[218,38] width:50 height:18 align:#left tooltip:"Current display unit."
+
+    button btn_classify "INNER \\ OUTTER" pos:[8,60] width:82 height:32 tooltip:"LMB: Classify selected objects. If nothing is selected, restore the last classified object set. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = UP | Pastel Brown = DOWN."
+    button btn_explode "EXPLODE" pos:[97,60] width:82 height:32 tooltip:"LMB: Split each selected classified object into separate OUTER, INNER, UP, and DOWN objects."
+    button btn_reset "RESET" pos:[186,60] width:82 height:32 tooltip:"LMB: Reset face classification, clear FORCED OUTER/INNER hints, and clear cached class data."
+
+    button btn_select_outer "SELECT OUTER" pos:[8,98] width:127 height:24 tooltip:"LMB: Object mode selects objects containing OUTER faces. Face mode selects OUTER faces.\n\nRMB: FORCE selected faces or objects OUTER. Highest-priority classification seed."
+    button btn_select_inner "SELECT INNER" pos:[141,98] width:127 height:24 tooltip:"LMB: Object mode selects objects containing INNER faces. Face mode selects INNER faces.\n\nRMB: FORCE selected faces or objects INNER. Used as a classification seed."
+    button btn_select_up "SELECT UP" pos:[8,128] width:127 height:24 tooltip:"LMB: Object mode selects objects containing UP faces. Face mode selects UP faces."
+    button btn_select_down "SELECT DOWN" pos:[141,128] width:127 height:24 tooltip:"LMB: Object mode selects objects containing DOWN faces. Face mode selects DOWN faces."
+
+    label lbl_status "Ready" pos:[8,158] width:260 height:18 align:#left tooltip:"Classification counts and current selection."
+    button btn_test "Create test scene" pos:[8,180] width:130 height:24 tooltip:"Create simple wall geometry for testing."
 
     on wallFaceClassifierRollout open do
     (
@@ -2972,4 +3023,3 @@ rollout wallFaceClassifierRollout "Wall Face Classifier 0.20" width:350
     )
 )
 
-createDialog wallFaceClassifierRollout style:#(#style_titlebar, #style_sysmenu, #style_toolwindow)

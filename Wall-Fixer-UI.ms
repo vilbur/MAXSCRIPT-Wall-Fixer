@@ -1,5 +1,5 @@
 /*
-Wall-Fixer UI 0.22
+Wall-Fixer UI 0.23
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -7,8 +7,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_ui_file_version = "0.22"
-global wall_fixer_ui_tool_version = 0.22
+global wall_fixer_ui_file_version = "0.23"
+global wall_fixer_ui_tool_version = 0.23
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -66,6 +66,7 @@ global WallFixerPreProcessRollout
 global WallFixerEdgeFixerRollout
 global WallFixerSliceWallsRollout
 global WallFixerPostProcessRollout
+global wallFaceClassifierRollout
 global wall_fixer_weld_threshold_syncing = false
 global wall_fixer_explode_wire_color_counter = 0
 
@@ -883,27 +884,27 @@ rollout WallFixerOptionsRollout "Options" width:310 height:142
 
 /*
 PRE-PROCESS & FIX GEOMETRY contains preparation steps 1 through 5.
-Unavailable future tools are visible but disabled so existing functions are never misrepresented.
+Step 4 embeds the Inner-Outer Wall Finder while preserving the surrounding Wall-Fixer workflow.
 */
-rollout WallFixerPreProcessRollout "PRE-PROCESS & FIX GEOMETRY" width:310 height:206
+rollout WallFixerPreProcessRollout "PRE-PROCESS & FIX GEOMETRY" width:310 height:408
 (
-    button duplicate_verts_button "1. VERTEX CHECK / WELD" pos:[8,8] width:154 height:34 \
-        tooltip:"LMB: find unwelded/near-coincident vertices using the Weld threshold as the search distance. Open border edges are also selected when candidates are found.\n\nRMB: weld/fix duplicated vertices using the same Weld threshold."
-    label weld_threshold_label "Weld:" pos:[166,17] width:34 height:18 align:#right
-    spinner weld_threshold_spinner "" pos:[201,13] width:67 height:20 \
-        range:[0.000001,1000000.0,saved_weld_threshold] type:#worldUnits scale:0.1 \
-        tooltip:"Weld threshold and LMB search distance. Fresh default: 1 current display unit."
-    label weld_unit_label "" pos:[270,17] width:32 height:18 align:#left
-
-    button explode_walls_button "2. EXPLODE OBJECTS TO WALLS" pos:[8,48] width:294 height:34 \
-        tooltip:"1. NORMALS: Explode walls by normals\n\n2. FACE DIRECTION: Explode walls by face direction — detects front/backside normals\n\n3. XY POSITION: Explode walls by position\n\n4. ELEMENTS: Explode to elements"
-button planar_button "3. CHECK AND MAKE WALLS PLANAR" pos:[8,88] width:294 height:30 \
+    button planar_button "1. CHECK AND MAKE WALLS PLANAR" pos:[8,8] width:294 height:34 \
         tooltip:"LMB: check selected walls and select vertices outside the dominant wall plane. An existing top Edit Poly is reused; a NON PLANAR VERTS marker is added only when required.\n\nRMB: move only detected outlier vertices onto the dominant wall plane. Script selection markers are removed first, and the object is collapsed to Editable Poly only when the real stack requires repair."
 
-    button outer_walls_button "4. GET OUTTER WALLS" pos:[8,124] width:294 height:34 enabled:false \
-        tooltip:"Reserved for the new outer-wall detection and inner-wall layer separation tool."
+    button duplicate_verts_button "2. VERTEX CHECK / WELD" pos:[8,48] width:154 height:34 \
+        tooltip:"LMB: find unwelded/near-coincident vertices using the Weld threshold as the search distance. Open border edges are also selected when candidates are found.\n\nRMB: weld/fix duplicated vertices using the same Weld threshold."
+    label weld_threshold_label "Weld:" pos:[166,57] width:34 height:18 align:#right
+    spinner weld_threshold_spinner "" pos:[201,53] width:67 height:20 \
+        range:[0.000001,1000000.0,saved_weld_threshold] type:#worldUnits scale:0.1 \
+        tooltip:"Weld threshold and LMB search distance. Fresh default: 1 current display unit."
+    label weld_unit_label "" pos:[270,57] width:32 height:18 align:#left
 
-    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[8,164] width:294 height:34 \
+    button explode_walls_button "3. EXPLODE OBJECTS TO WALLS" pos:[8,88] width:294 height:30 \
+        tooltip:"1. NORMALS: Explode walls by normals\n\n2. FACE DIRECTION: Explode walls by face direction — detects front/backside normals\n\n3. XY POSITION: Explode walls by position\n\n4. ELEMENTS: Explode to elements"
+
+    subRollout outer_walls_subrollout "" pos:[8,124] width:294 height:236
+
+    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[8,366] width:294 height:34 \
         tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
 
     on WallFixerPreProcessRollout open do
@@ -912,6 +913,31 @@ button planar_button "3. CHECK AND MAKE WALLS PLANAR" pos:[8,88] width:294 heigh
         weld_threshold_spinner.value = saved_weld_threshold
         weld_unit_label.text = wallFixerGetDisplayUnitLabel()
         wall_fixer_weld_threshold_syncing = false
+
+        if wallFaceClassifierRollout != undefined then
+        (
+            try
+            (
+                addSubRollout outer_walls_subrollout wallFaceClassifierRollout rolledUp:false
+            )
+            catch
+            (
+            )
+        )
+    )
+
+    on WallFixerPreProcessRollout close do
+    (
+        if wallFaceClassifierRollout != undefined then
+        (
+            try
+            (
+                removeSubRollout outer_walls_subrollout wallFaceClassifierRollout
+            )
+            catch
+            (
+            )
+        )
     )
 
     on weld_threshold_spinner changed control_value do
@@ -1183,10 +1209,10 @@ Child rollouts contain controls only and call these centralized handlers.
 rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 (
     progressbar workflow_progress "" pos:[8,8] width:328 height:14 value:0 color:(color 0 180 0) orient:#horizontal
-    dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,6] width:328 height:18
-    dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[8,28] width:328 height:19
-    dotNetControl status_line_bottom "System.Windows.Forms.RichTextBox" pos:[8,48] width:328 height:19
-    subRollout workflow_subrollout "" pos:[8,74] width:328 height:666
+    dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,6] width:76 height:40
+    dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:19
+    dotNetControl status_line_bottom "System.Windows.Forms.RichTextBox" pos:[88,28] width:248 height:19
+    subRollout workflow_subrollout "" pos:[8,54] width:328 height:686
 
     local status_texts = #("Ready.", "")
     local last_progress_value = -1
@@ -1248,6 +1274,8 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
 
         workflow_progress.visible = false
+        status_line_top.Visible = true
+        status_line_bottom.Visible = true
         process_status_label.Text = result_text
         process_status_label.ForeColor = result_color
         process_status_label.Visible = true
@@ -1298,6 +1326,8 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
             if clamped_value < 100 then
             (
                 process_status_label.Visible = false
+                status_line_top.Visible = false
+                status_line_bottom.Visible = false
                 workflow_progress.visible = true
             )
 
@@ -4193,7 +4223,7 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
             target_height = wall_fixer_min_dialog_height
         )
 
-        workflow_height = target_height - 82
+        workflow_height = target_height - 62
         if workflow_height < 180 then workflow_height = 180
         workflow_subrollout.height = workflow_height
         -- return
@@ -4213,7 +4243,7 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
         font_style_class = dotNetClass "System.Drawing.FontStyle"
 
         process_status_label.AutoSize = false
-        process_status_label.TextAlign = content_alignment_class.MiddleCenter
+        process_status_label.TextAlign = content_alignment_class.MiddleLeft
         process_status_label.BackColor = background_color
         process_status_label.ForeColor = text_color
         process_status_label.Font = dotNetObject "System.Drawing.Font" process_status_label.Font font_style_class.Bold
