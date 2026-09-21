@@ -1,6 +1,6 @@
 ﻿/*
-Wall-Fixer Bundled Loader 0.30
-Project version 0.36.
+Wall-Fixer Bundled Loader 0.31
+Project version 0.37.
 
 
 This launcher contains the complete Wall-Fixer runtime snapshot.
@@ -12,8 +12,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.30"
-global wall_fixer_loader_tool_version = 0.36
+global wall_fixer_loader_file_version = "0.31"
+global wall_fixer_loader_tool_version = 0.37
 global wall_fixer_runtime_mode = #bundled
 
 
@@ -1899,7 +1899,7 @@ struct WMCWallSlicePipeline
 
 
 /*
-Wall-Fixer Core 0.22
+Wall-Fixer Core 0.23
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -1909,8 +1909,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.22"
-global wall_fixer_core_tool_version = 0.22
+global wall_fixer_core_file_version = "0.23"
+global wall_fixer_core_tool_version = 0.37
 
 
 /*
@@ -1976,7 +1976,7 @@ global WallFixer
 
 struct WallFixer_v
 (
-    version = "0.22",
+    version = "0.23",
     processed_slice_nodes = #(),
     processed_vertical_planes = #(),
     processed_horizontal_planes = #(),
@@ -4897,6 +4897,178 @@ struct WallFixer_v
         -- return
     ),
 
+
+    /*
+    Attaches all selected geometry into the first interactively selected target without welding.
+    A top Edit Poly modifier is preserved; Editable Poly targets use polyop.attach directly.
+    */
+    function attachSelectedObjects =
+    (
+        selected_nodes = getAttachAndWeldSelectionOrder()
+        geometry_nodes = #()
+        target_node = undefined
+        target_edit_poly = undefined
+        attached_count = 0
+        failed_count = 0
+
+        for node in selected_nodes do
+        (
+            if node != undefined and isValidNode node and superClassOf node == GeometryClass then
+            (
+                append geometry_nodes node
+            )
+        )
+
+        if geometry_nodes.count < 2 then
+        (
+            last_slice_report = "Attach: select at least two geometry objects."
+            if not batch_quiet then format "%\n" last_slice_report
+            return false
+        )
+
+        target_node = geometry_nodes[1]
+
+        if target_node.modifiers.count > 0 then
+        (
+            if classOf target_node.modifiers[1] == Edit_Poly then
+            (
+                target_edit_poly = target_node.modifiers[1]
+            )
+        )
+
+        if target_edit_poly == undefined and classOf target_node.baseObject != Editable_Poly then
+        (
+            try
+            (
+                convertToPoly target_node
+            )
+            catch
+            (
+            )
+        )
+
+        if target_edit_poly == undefined and classOf target_node.baseObject != Editable_Poly then
+        (
+            last_slice_report = "Attach: the target object could not be converted to Editable Poly."
+            if not batch_quiet then format "%\n" last_slice_report
+            return false
+        )
+
+        for source_index = 2 to geometry_nodes.count do
+        (
+            source_node = geometry_nodes[source_index]
+
+            if isValidNode source_node then
+            (
+                attach_succeeded = false
+
+                try
+                (
+                    if target_edit_poly != undefined then
+                    (
+                        target_edit_poly.Attach source_node editPolyNode:target_node
+                    )
+                    else
+                    (
+                        polyop.attach target_node source_node
+                    )
+
+                    attach_succeeded = not(isValidNode source_node)
+                )
+                catch
+                (
+                    attach_succeeded = false
+                )
+
+                if attach_succeeded then
+                (
+                    attached_count += 1
+                )
+                else
+                (
+                    failed_count += 1
+                )
+            )
+        )
+
+        if isValidNode target_node then
+        (
+            update target_node
+            select target_node
+        )
+
+        completeRedraw()
+
+        if failed_count > 0 then
+        (
+            last_slice_report = "Attach: attached " + (attached_count as string) + " object(s); " + (failed_count as string) + " object(s) failed."
+            if not batch_quiet then format "%\n" last_slice_report
+            false
+        )
+        else
+        (
+            last_slice_report = "Attach: attached " + (attached_count as string) + " object(s) into " + target_node.name + "."
+            if not batch_quiet then format "%\n" last_slice_report
+            true
+        )
+        -- return
+    ),
+
+    /*
+    Moves each selected node pivot to the center of its object using the native CenterPivot operation.
+    The current object geometry and modifier stack are preserved.
+    */
+    function centerSelectedPivots =
+    (
+        selected_nodes = selection as array
+        centered_count = 0
+        failed_count = 0
+
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Reset Pivot to Center: select at least one object."
+            if not batch_quiet then format "%\n" last_slice_report
+            return false
+        )
+
+        for node in selected_nodes do
+        (
+            if node != undefined and isValidNode node then
+            (
+                try
+                (
+                    CenterPivot node
+                    centered_count += 1
+                )
+                catch
+                (
+                    failed_count += 1
+                )
+            )
+        )
+
+        completeRedraw()
+
+        if centered_count == 0 then
+        (
+            last_slice_report = "Reset Pivot to Center: no selected pivots were changed."
+            if not batch_quiet then format "%\n" last_slice_report
+            false
+        )
+        else if failed_count > 0 then
+        (
+            last_slice_report = "Reset Pivot to Center: centered " + (centered_count as string) + " object(s); " + (failed_count as string) + " object(s) failed."
+            if not batch_quiet then format "%\n" last_slice_report
+            false
+        )
+        else
+        (
+            last_slice_report = "Reset Pivot to Center: centered " + (centered_count as string) + " object pivot(s)."
+            if not batch_quiet then format "%\n" last_slice_report
+            true
+        )
+        -- return
+    ),
 
     /*
     Attaches all selected geometry into the first interactively selected target and welds the result.
@@ -15874,7 +16046,7 @@ catch
 Bundled Wall-Fixer UI.
 */
 /*
-Wall-Fixer UI 0.27
+Wall-Fixer UI 0.28
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -15883,8 +16055,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_ui_file_version = "0.27"
-global wall_fixer_ui_tool_version = 0.31
+global wall_fixer_ui_file_version = "0.28"
+global wall_fixer_ui_tool_version = 0.37
 
 
 /*
@@ -15950,6 +16122,7 @@ global WallFixerPreProcessRollout
 global WallFixerEdgeFixerRollout
 global WallFixerSliceWallsRollout
 global WallFixerPostProcessRollout
+global WallFixerHelpersRollout
 global wallFaceClassifierRollout
 global wall_face_classifier_cache = #()
 global wall_face_classifier_last_nodes = #()
@@ -17220,6 +17393,29 @@ rollout WallFixerPostProcessRollout "POST-PROCESS" width:310 height:268
     )
 )
 
+
+/*
+HELPERS contains utility actions that are useful outside the numbered wall-fixing workflow.
+These actions operate on the current scene selection.
+*/
+rollout WallFixerHelpersRollout "HELPERS" width:310 height:48
+(
+    button attach_button "Attach" pos:[8,8] width:143 height:30 \
+        tooltip:"Attach all selected geometry into the first selected object."
+
+    button reset_pivot_button "Reset Pivot to Center" pos:[159,8] width:143 height:30 \
+        tooltip:"Move each selected object's pivot to the center of its geometry."
+
+    on attach_button pressed do
+    (
+        ::WallFixerRollout.runAttachSelectedObjects()
+    )
+
+    on reset_pivot_button pressed do
+    (
+        ::WallFixerRollout.runResetPivotToCenter()
+    )
+)
 
 /*
 Main Wall-Fixer dialog owns shared progress, two-line message history and function wrappers.
@@ -21638,6 +21834,66 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
+    Attaches the current geometry selection into the first selected target without welding.
+    The Core keeps a top Edit Poly target when available and otherwise uses Editable Poly.
+    */
+    function runAttachSelectedObjects =
+    (
+        setProgress 0
+        setStatus #message "Attaching selected objects..."
+        operation_success = false
+
+        undo "Wall-Fixer - Attach" on
+        (
+            operation_success = WallFixer.attachSelectedObjects()
+        )
+
+        setProgress 100
+
+        if operation_success then
+        (
+            setStatus #success WallFixer.last_slice_report
+        )
+        else
+        (
+            setStatus #warning WallFixer.last_slice_report
+        )
+
+        operation_success
+        -- return
+    )
+
+    /*
+    Centers the pivot of every selected scene node using MaxScript CenterPivot.
+    Geometry and modifier stacks remain unchanged.
+    */
+    function runResetPivotToCenter =
+    (
+        setProgress 0
+        setStatus #message "Resetting selected pivots to center..."
+        operation_success = false
+
+        undo "Wall-Fixer - Reset Pivot to Center" on
+        (
+            operation_success = WallFixer.centerSelectedPivots()
+        )
+
+        setProgress 100
+
+        if operation_success then
+        (
+            setStatus #success WallFixer.last_slice_report
+        )
+        else
+        (
+            setStatus #warning WallFixer.last_slice_report
+        )
+
+        operation_success
+        -- return
+    )
+
+    /*
     Persists all controls imported from Straight Edge Fixer.
     Geometry logic continues using its original settings store.
     */
@@ -24791,6 +25047,7 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
         addSubRollout workflow_subrollout WallFixerEdgeFixerRollout rolledUp:true
         addSubRollout workflow_subrollout WallFixerSliceWallsRollout rolledUp:true
         addSubRollout workflow_subrollout WallFixerPostProcessRollout rolledUp:true
+        addSubRollout workflow_subrollout WallFixerHelpersRollout rolledUp:true
     )
 
 
@@ -24849,6 +25106,7 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
         saveStraightEdgeSettings()
 
 
+        removeSubRollout workflow_subrollout WallFixerHelpersRollout
         removeSubRollout workflow_subrollout WallFixerPostProcessRollout
         removeSubRollout workflow_subrollout WallFixerSliceWallsRollout
         removeSubRollout workflow_subrollout WallFixerEdgeFixerRollout

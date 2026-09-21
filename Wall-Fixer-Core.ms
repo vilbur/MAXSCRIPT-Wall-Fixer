@@ -1,5 +1,5 @@
 /*
-Wall-Fixer Core 0.22
+Wall-Fixer Core 0.23
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.22"
-global wall_fixer_core_tool_version = 0.22
+global wall_fixer_core_file_version = "0.23"
+global wall_fixer_core_tool_version = 0.37
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -66,7 +66,7 @@ global WallFixer
 
 struct WallFixer_v
 (
-    version = "0.22",
+    version = "0.23",
     processed_slice_nodes = #(),
     processed_vertical_planes = #(),
     processed_horizontal_planes = #(),
@@ -2665,6 +2665,178 @@ struct WallFixer_v
     function getAttachAndWeldSelectionOrder =
     (
         updateAttachAndWeldSelectionOrder()
+        -- return
+    ),
+
+    /*
+    Attaches all selected geometry into the first interactively selected target without welding.
+    A top Edit Poly modifier is preserved; Editable Poly targets use polyop.attach directly.
+    */
+    function attachSelectedObjects =
+    (
+        selected_nodes = getAttachAndWeldSelectionOrder()
+        geometry_nodes = #()
+        target_node = undefined
+        target_edit_poly = undefined
+        attached_count = 0
+        failed_count = 0
+
+        for node in selected_nodes do
+        (
+            if node != undefined and isValidNode node and superClassOf node == GeometryClass then
+            (
+                append geometry_nodes node
+            )
+        )
+
+        if geometry_nodes.count < 2 then
+        (
+            last_slice_report = "Attach: select at least two geometry objects."
+            if not batch_quiet then format "%\n" last_slice_report
+            return false
+        )
+
+        target_node = geometry_nodes[1]
+
+        if target_node.modifiers.count > 0 then
+        (
+            if classOf target_node.modifiers[1] == Edit_Poly then
+            (
+                target_edit_poly = target_node.modifiers[1]
+            )
+        )
+
+        if target_edit_poly == undefined and classOf target_node.baseObject != Editable_Poly then
+        (
+            try
+            (
+                convertToPoly target_node
+            )
+            catch
+            (
+            )
+        )
+
+        if target_edit_poly == undefined and classOf target_node.baseObject != Editable_Poly then
+        (
+            last_slice_report = "Attach: the target object could not be converted to Editable Poly."
+            if not batch_quiet then format "%\n" last_slice_report
+            return false
+        )
+
+        for source_index = 2 to geometry_nodes.count do
+        (
+            source_node = geometry_nodes[source_index]
+
+            if isValidNode source_node then
+            (
+                attach_succeeded = false
+
+                try
+                (
+                    if target_edit_poly != undefined then
+                    (
+                        target_edit_poly.Attach source_node editPolyNode:target_node
+                    )
+                    else
+                    (
+                        polyop.attach target_node source_node
+                    )
+
+                    attach_succeeded = not(isValidNode source_node)
+                )
+                catch
+                (
+                    attach_succeeded = false
+                )
+
+                if attach_succeeded then
+                (
+                    attached_count += 1
+                )
+                else
+                (
+                    failed_count += 1
+                )
+            )
+        )
+
+        if isValidNode target_node then
+        (
+            update target_node
+            select target_node
+        )
+
+        completeRedraw()
+
+        if failed_count > 0 then
+        (
+            last_slice_report = "Attach: attached " + (attached_count as string) + " object(s); " + (failed_count as string) + " object(s) failed."
+            if not batch_quiet then format "%\n" last_slice_report
+            false
+        )
+        else
+        (
+            last_slice_report = "Attach: attached " + (attached_count as string) + " object(s) into " + target_node.name + "."
+            if not batch_quiet then format "%\n" last_slice_report
+            true
+        )
+        -- return
+    ),
+
+    /*
+    Moves each selected node pivot to the center of its object using the native CenterPivot operation.
+    The current object geometry and modifier stack are preserved.
+    */
+    function centerSelectedPivots =
+    (
+        selected_nodes = selection as array
+        centered_count = 0
+        failed_count = 0
+
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Reset Pivot to Center: select at least one object."
+            if not batch_quiet then format "%\n" last_slice_report
+            return false
+        )
+
+        for node in selected_nodes do
+        (
+            if node != undefined and isValidNode node then
+            (
+                try
+                (
+                    CenterPivot node
+                    centered_count += 1
+                )
+                catch
+                (
+                    failed_count += 1
+                )
+            )
+        )
+
+        completeRedraw()
+
+        if centered_count == 0 then
+        (
+            last_slice_report = "Reset Pivot to Center: no selected pivots were changed."
+            if not batch_quiet then format "%\n" last_slice_report
+            false
+        )
+        else if failed_count > 0 then
+        (
+            last_slice_report = "Reset Pivot to Center: centered " + (centered_count as string) + " object(s); " + (failed_count as string) + " object(s) failed."
+            if not batch_quiet then format "%\n" last_slice_report
+            false
+        )
+        else
+        (
+            last_slice_report = "Reset Pivot to Center: centered " + (centered_count as string) + " object pivot(s)."
+            if not batch_quiet then format "%\n" last_slice_report
+            true
+        )
         -- return
     ),
 

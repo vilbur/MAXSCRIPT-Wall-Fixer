@@ -4,7 +4,7 @@
 
 
 SHARED PROJECT VERSION:
-  0.36
+  0.37
 
 
 
@@ -16,14 +16,14 @@ RUN:
 
 
 LAUNCHER / DISTRIBUTION:
-  Wall-Fixer.ms                                      (file: 0.30, project: 0.36, bundled runtime)
+  Wall-Fixer.ms                                      (file: 0.31, project: 0.37, bundled runtime)
 
 
 
 
 DEVELOPMENT SOURCE FILES:
-  Wall-Fixer-UI.ms                                   (file: 0.27, project: 0.31; includes Get Outter Walls)
-  Wall-Fixer-Core.ms                                 (file: 0.22, project: 0.22)
+  Wall-Fixer-UI.ms                                   (file: 0.28, project: 0.37; includes Get Outter Walls and Helpers)
+  Wall-Fixer-Core.ms                                 (file: 0.23, project: 0.37)
   Wall-Fixer-Pipeline.ms                             (file: 0.22, project: 0.22)
   Straight-Edge-Fixer.ms                             (file: 0.2, project: 0.2)
 
