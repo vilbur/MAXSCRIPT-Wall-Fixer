@@ -1,5 +1,5 @@
 /*
-Wall-Fixer UI 0.28
+Wall-Fixer UI 0.29
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -7,8 +7,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_ui_file_version = "0.28"
-global wall_fixer_ui_tool_version = 0.37
+global wall_fixer_ui_file_version = "0.29"
+global wall_fixer_ui_tool_version = 0.38
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -1208,7 +1208,7 @@ Main Wall-Fixer dialog owns shared progress, two-line message history and functi
 Child rollouts contain controls only and call these centralized handlers.
 */
 /*
-Embedded Inner-Outer Wall Finder 0.28
+Embedded Inner-Outer Wall Finder 0.29
 Runtime classifier implementation is embedded here so Wall-Fixer does not depend on a separately synced classifier file.
 Material ID 1 = OUTER, ID 2 = INNER, ID 3 = UP, ID 4 = DOWN.
 */
@@ -2109,7 +2109,7 @@ function findWallFaceCacheIndex object_node =
 )
 
 /* Stores OUTER, INNER, UP, and DOWN face bitarrays for fast button selection.
-   Cache entries are rebuilt after classification or manual RMB marking.
+   Cache entries are rebuilt after classification or manual force marking.
 */
 function cacheWallFaceClasses object_node face_count outer_bits inner_bits up_bits down_bits =
 (
@@ -2241,7 +2241,7 @@ function getSourceFaceSelection object_node source_data =
 )
 
 /* Builds a bitarray containing every face of one supported polygon source.
-   Used when RMB marking is performed at object level.
+   Used when force marking is performed at object level.
 */
 function getAllSourceFaceBits object_node source_data =
 (
@@ -2306,7 +2306,7 @@ function wallFaceBitsFromUserPropString value_string face_count =
 )
 
 /* Returns the user-property name for one manual FORCED wall class.
-   Only OUTER and INNER can be forced by RMB.
+   Only OUTER and INNER can be forced by RMB or CTRL+RMB.
 */
 function getForcedWallFacePropertyName material_id =
 (
@@ -2344,7 +2344,7 @@ function getForcedWallFaceBits object_node source_data material_id =
 
 
 /* Returns true when one processed object already carries a manual FORCED wall type.
-   Non-seed forced objects are hard blockers for RMB auto-grow and are never overwritten or traversed.
+   Non-seed forced objects are hard blockers for CTRL+RMB auto-grow and are never overwritten or traversed.
 */
 function hasForcedWallFaceType object_node source_data =
 (
@@ -2390,7 +2390,7 @@ function setForcedWallFaceBits object_node material_id face_bits =
 )
 
 /* Adds a manual FORCED class and removes the same faces from the opposite forced class.
-   This allows RMB OUTER/INNER to replace a previous manual hint cleanly.
+   This allows RMB/CTRL+RMB OUTER/INNER to replace a previous manual hint cleanly.
 */
 function forceWallFaceClass object_node source_data material_id mark_bits =
 (
@@ -2564,7 +2564,7 @@ function ensureWallClassifierMaterial object_nodes =
 
 
 /* Returns true when a node already uses the classifier Multi/Sub material.
-   Used to preserve existing manual/classified face IDs during RMB marking.
+   Used to preserve existing manual/classified face IDs during force marking.
 */
 function hasWallClassifierMaterial object_node =
 (
@@ -2809,7 +2809,7 @@ function wallFaceGrowthElementsConnect element_a element_b connection_threshold 
     connection_result -- return
 )
 
-/* Captures RMB growth seeds before any manual class overwrite occurs.
+/* Captures CTRL+RMB growth seeds before any manual class overwrite occurs.
    Face mode uses selected non-cap faces; object mode uses every existing wall-side face so the forced object can grow from any side.
 */
 function getWallFaceGrowthSeedData material_id =
@@ -3005,7 +3005,7 @@ function growCachedWallFaceClass seed_data_array material_id connection_threshol
     #(growth_data_array.count, grown_face_count, processed_nodes.count) -- return
 )
 
-/* Tests the RMB neighbor seam filter without changing scene geometry.
+/* Tests the CTRL+RMB neighbor seam filter without changing scene geometry.
    A vertical shared seam must connect; a horizontal cap seam must not.
 */
 function testWallFaceGrowthSeamFilter connection_threshold:1.0 =
@@ -3017,13 +3017,13 @@ function testWallFaceGrowthSeamFilter connection_threshold:1.0 =
     local vertical_connects = wallFaceGrowthElementsConnect vertical_a vertical_b connection_threshold
     local horizontal_connects = wallFaceGrowthElementsConnect horizontal_a horizontal_b connection_threshold
 
-    format "RMB growth seam test | vertical: % | horizontal cap: % | passed: %\n" vertical_connects horizontal_connects (vertical_connects and not horizontal_connects)
+    format "CTRL+RMB growth seam test | vertical: % | horizontal cap: % | passed: %\n" vertical_connects horizontal_connects (vertical_connects and not horizontal_connects)
 
     #(vertical_connects, horizontal_connects, (vertical_connects and not horizontal_connects)) -- return
 )
 
 
-/* Reports whether selected processed objects are manual FORCE blockers for RMB auto-grow.
+/* Reports whether selected processed objects are manual FORCE blockers for CTRL+RMB auto-grow.
    Use after forcing OUTER/INNER to verify that the object will stop neighbor propagation.
 */
 function testWallFaceGrowthForcedBlockers =
@@ -3140,7 +3140,7 @@ function selectWallFacesByMaterialId material_id =
 )
 
 /* FORCES selected faces or selected-object wall-side faces as OUTER or INNER.
-   Object mode excludes UP/DOWN caps so horizontal barriers remain intact for later RMB growth.
+   Object mode excludes UP/DOWN caps so horizontal barriers remain intact for later CTRL+RMB growth.
 */
 function markSelectedWallFaces material_id =
 (
@@ -3958,7 +3958,7 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
             subObjectLevel = 4
             redrawViews()
 
-            format "Inner-Outer Wall Finder 0.28: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
+            format "Inner-Outer Wall Finder 0.29: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
 
             #(valid_nodes.count, total_faces, outer_count, inner_count, up_count, down_count, selection_type, thickness_resolved, hierarchy_resolved, neighbor_resolved, fallback_resolved) -- return
         )
@@ -4038,7 +4038,7 @@ function testWallFaceClassifierCache wall_thickness:(units.decodeValue "1m") con
     result_data -- return
 )
 
-/* Tests RMB-style manual marking without using the rollout event handler.
+/* Tests force-style manual marking without using the rollout event handler.
    Object-level test marks every face of a new Editable Poly box as INNER.
 */
 function testMarkSelectedWallFaces =
@@ -4595,6 +4595,19 @@ function testWallFaceAutoAnalyzeSelection wall_thickness:(units.decodeValue "1m"
     #(analyze_result[1], analyzed_count) -- return
 )
 
+/* Reports which force-assignment mode the current modifier state selects.
+   Hold CTRL while calling to verify that CTRL+RMB resolves to AUTO GROW mode.
+*/
+function testWallFaceForceModifier =
+(
+    local auto_grow = keyboard.controlPressed
+    local force_mode = if auto_grow then #forceAndAutoGrow else #forceOnly
+
+    format "Wall force modifier | CTRL: % | mode: %\n" auto_grow force_mode
+
+    force_mode -- return
+)
+
 rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
 (
     spinner spn_wall_thickness "Wall thickness:" pos:[8,8] width:204 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:70 \
@@ -4609,8 +4622,8 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
     button btn_explode "EXPLODE" pos:[97,60] width:82 height:32 tooltip:"LMB: Split each selected classified object into separate OUTER, INNER, UP, and DOWN objects."
     button btn_reset "RESET" pos:[186,60] width:82 height:32 tooltip:"LMB: Reset face classification, remove the classifier material, clear FORCED OUTER/INNER hints, and clear cached class data."
 
-    button btn_select_outer "SELECT OUTER" pos:[8,98] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing OUTER faces or face mode selects OUTER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces OUTER, then grow through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. Auto-grown walls are not marked FORCED. TOP/DOWN seams stop growth."
-    button btn_select_inner "SELECT INNER" pos:[141,98] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing INNER faces or face mode selects INNER faces.\n\nRMB: FORCE selected faces or objects INNER. Used as a classification seed."
+    button btn_select_outer "SELECT OUTER" pos:[8,98] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing OUTER faces or face mode selects OUTER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces OUTER without AUTO GROW.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. Auto-grown walls are not marked FORCED. TOP/DOWN seams stop growth."
+    button btn_select_inner "SELECT INNER" pos:[141,98] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing INNER faces or face mode selects INNER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces INNER without AUTO GROW.\n\nCTRL+RMB: FORCE INNER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. Auto-grown walls are not marked FORCED. TOP/DOWN seams stop growth."
     button btn_select_up "SELECT UP" pos:[8,128] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing UP faces or face mode selects UP faces."
     button btn_select_down "SELECT DOWN" pos:[141,128] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing DOWN faces or face mode selects DOWN faces."
 
@@ -4709,19 +4722,31 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
     (
         local result_data = #()
         local growth_result = #()
-        local seed_data_array = getWallFaceGrowthSeedData 1
+        local auto_grow = keyboard.controlPressed
 
-        undo "Force And Grow Wall Faces OUTER" on
+        if auto_grow then
         (
-            result_data = markSelectedWallFaces 1
-            growth_result = growCachedWallFaceClass seed_data_array 1 spn_connection_threshold.value
+            local seed_data_array = getWallFaceGrowthSeedData 1
+
+            undo "Force And Grow Wall Faces OUTER" on
+            (
+                result_data = markSelectedWallFaces 1
+                growth_result = growCachedWallFaceClass seed_data_array 1 spn_connection_threshold.value
+            )
+        )
+        else
+        (
+            undo "Force Wall Faces OUTER" on
+            (
+                result_data = markSelectedWallFaces 1
+            )
         )
 
         if result_data.count == 3 then
         (
-            if growth_result.count == 3 then
+            if auto_grow and growth_result.count == 3 then
             (
-                lbl_status.text = ("FORCED OUTER: " + result_data[2] as string + " faces | grew " + growth_result[2] as string + " faces on " + growth_result[1] as string + " cached walls")
+                lbl_status.text = ("FORCED OUTER + AUTO GROW: " + result_data[2] as string + " faces | grew " + growth_result[2] as string + " faces on " + growth_result[1] as string + " cached walls")
             )
             else
             (
@@ -4751,15 +4776,37 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
     on btn_select_inner rightclick do
     (
         local result_data = #()
+        local growth_result = #()
+        local auto_grow = keyboard.controlPressed
 
-        undo "Force Wall Faces INNER" on
+        if auto_grow then
         (
-            result_data = markSelectedWallFaces 2
+            local seed_data_array = getWallFaceGrowthSeedData 2
+
+            undo "Force And Grow Wall Faces INNER" on
+            (
+                result_data = markSelectedWallFaces 2
+                growth_result = growCachedWallFaceClass seed_data_array 2 spn_connection_threshold.value
+            )
+        )
+        else
+        (
+            undo "Force Wall Faces INNER" on
+            (
+                result_data = markSelectedWallFaces 2
+            )
         )
 
         if result_data.count == 3 then
         (
-            lbl_status.text = ("FORCED INNER: " + result_data[2] as string + " faces | " + result_data[3] as string)
+            if auto_grow and growth_result.count == 3 then
+            (
+                lbl_status.text = ("FORCED INNER + AUTO GROW: " + result_data[2] as string + " faces | grew " + growth_result[2] as string + " faces on " + growth_result[1] as string + " cached walls")
+            )
+            else
+            (
+                lbl_status.text = ("FORCED INNER: " + result_data[2] as string + " faces | " + result_data[3] as string)
+            )
         )
     )
 
