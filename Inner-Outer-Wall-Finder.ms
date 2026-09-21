@@ -1,5 +1,5 @@
 /*
-Inner-Outer Wall Finder 0.22
+Inner-Outer Wall Finder 0.24
 Classifies selected wall faces and marks horizontal faces by normal direction.
 Material ID 1 = OUTER, ID 2 = INNER, ID 3 = UP, ID 4 = DOWN.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_inner_outer_file_version = "0.22"
-global wall_fixer_inner_outer_tool_version = 0.23
+global wall_fixer_inner_outer_file_version = "0.24"
+global wall_fixer_inner_outer_tool_version = 0.26
 global wallFaceClassifierRollout
 global wall_face_classifier_cache = #()
 global wall_face_classifier_last_nodes = #()
@@ -887,7 +887,12 @@ function setSourceFaceSelection object_node source_data face_bits =
 (
     local source_type = source_data[1]
     local source_value = source_data[2]
-    local working_bits = copy face_bits
+    local working_bits = #{}
+
+    if face_bits != undefined then
+    (
+        working_bits = copy face_bits
+    )
 
     if source_type == #editPoly then
     (
@@ -1075,6 +1080,11 @@ function getSourceFaceSelection object_node source_data =
     else if source_type == #editablePoly then
     (
         face_bits = source_value.GetSelection #Face
+    )
+
+    if face_bits == undefined then
+    (
+        face_bits = #{}
     )
 
     copy face_bits -- return
@@ -1267,7 +1277,7 @@ function getDefaultWallConnectionThreshold wall_thickness =
     wall_thickness * 0.1 -- return
 )
 
-/* Resets classifier face Material IDs and clears all persistent FORCED hints on selected objects.
+/* Resets classifier face Material IDs, removes the classifier material, and clears persistent FORCED hints.
    Existing face selections are restored and cached classifier data is discarded.
 */
 function resetSelectedWallFaceClassification =
@@ -1307,6 +1317,14 @@ function resetSelectedWallFaceClassification =
             setForcedWallFaceBits object_node 1 #{}
             setForcedWallFaceBits object_node 2 #{}
             setSourceFaceSelection object_node source_data original_bits
+
+            if object_node.material != undefined then
+            (
+                if object_node.material.name == "WALL FACE CLASSIFIER" then
+                (
+                    object_node.material = undefined
+                )
+            )
 
             if cache_index > 0 then
             (
@@ -2278,7 +2296,7 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
             subObjectLevel = 4
             redrawViews()
 
-            format "Inner-Outer Wall Finder 0.22: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
+            format "Inner-Outer Wall Finder 0.24: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
 
             #(valid_nodes.count, total_faces, outer_count, inner_count, up_count, down_count, selection_type, thickness_resolved, hierarchy_resolved, neighbor_resolved, fallback_resolved) -- return
         )
@@ -2710,18 +2728,24 @@ function testWallFaceClassifierExplode wall_thickness:(units.decodeValue "1m") c
     result_data -- return
 )
 
-/* Tests RMB reset behavior on the current selected supported objects.
-   Verifies FORCED hints are empty and every reset face uses Material ID 1.
+/* Tests RESET on the current selected supported objects.
+   Verifies FORCED hints are empty, Material IDs are reset, and the classifier material is removed.
 */
 function testWallFaceClassifierReset =
 (
     local result_data = resetSelectedWallFaceClassification()
     local forced_face_count = 0
     local non_default_id_count = 0
+    local classifier_material_count = 0
 
     for object_node in selection where superclassof object_node == GeometryClass do
     (
         local source_data = getFaceGeometrySource object_node
+
+        if hasWallClassifierMaterial object_node then
+        (
+            classifier_material_count += 1
+        )
 
         if source_data != undefined then
         (
@@ -2741,8 +2765,8 @@ function testWallFaceClassifierReset =
         )
     )
 
-    format "RESET objects: % | faces: % | forced faces left: % | non-default Material IDs: %\n" result_data[1] result_data[2] forced_face_count non_default_id_count
-    #(result_data[1], result_data[2], forced_face_count, non_default_id_count) -- return
+    format "RESET objects: % | faces: % | forced faces left: % | non-default Material IDs: % | classifier materials left: %\n" result_data[1] result_data[2] forced_face_count non_default_id_count classifier_material_count
+    #(result_data[1], result_data[2], forced_face_count, non_default_id_count, classifier_material_count) -- return
 )
 
 /* Tests the two-shared-vertex rule used by FORCED hierarchy propagation.
@@ -2826,6 +2850,78 @@ function testWallFaceSelectionRestore =
     #(object_result, face_result) -- return
 )
 
+
+/* Classifies only currently selected supported objects that have no classifier result yet.
+   Existing analyzed objects are left untouched, then the original object selection is restored.
+*/
+function analyzeUnclassifiedSelectedWallObjects wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1) =
+(
+    local original_nodes = for object_node in selection where isValidNode object_node collect object_node
+    local original_subobject_level = subObjectLevel
+    local unanalyzed_nodes = #()
+    local classify_result = #()
+
+    for object_node in original_nodes do
+    (
+        local source_data = getFaceGeometrySource object_node
+
+        if source_data != undefined then
+        (
+            if not hasWallClassifierMaterial object_node then
+            (
+                append unanalyzed_nodes object_node
+            )
+        )
+    )
+
+    if unanalyzed_nodes.count > 0 then
+    (
+        select unanalyzed_nodes
+        max modify mode
+        subObjectLevel = 0
+
+        classify_result = classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:wall_thickness connection_threshold:connection_threshold
+
+        if original_nodes.count > 0 then
+        (
+            select original_nodes
+            max modify mode
+
+            try
+            (
+                subObjectLevel = original_subobject_level
+            )
+            catch
+            (
+            )
+        )
+    )
+
+    #(unanalyzed_nodes.count, classify_result) -- return
+)
+
+/* Tests automatic analysis used by SELECT OUTER/INNER/UP/DOWN.
+   New test objects must be classified automatically before class selection runs.
+*/
+function testWallFaceAutoAnalyzeSelection wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1) =
+(
+    local test_nodes = createWallFaceClassifierTestScene()
+    local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:wall_thickness connection_threshold:connection_threshold
+    local analyzed_count = 0
+
+    for object_node in test_nodes do
+    (
+        if hasWallClassifierMaterial object_node then
+        (
+            analyzed_count += 1
+        )
+    )
+
+    format "Auto-analyze test | requested: % | analyzed objects: %\n" analyze_result[1] analyzed_count
+
+    #(analyze_result[1], analyzed_count) -- return
+)
+
 rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
 (
     spinner spn_wall_thickness "Wall thickness:" pos:[8,8] width:204 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:70 \
@@ -2838,12 +2934,12 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
 
     button btn_classify "INNER \\ OUTTER" pos:[8,60] width:82 height:32 tooltip:"LMB: Classify selected objects. If nothing is selected, restore the last classified object set. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = UP | Pastel Brown = DOWN."
     button btn_explode "EXPLODE" pos:[97,60] width:82 height:32 tooltip:"LMB: Split each selected classified object into separate OUTER, INNER, UP, and DOWN objects."
-    button btn_reset "RESET" pos:[186,60] width:82 height:32 tooltip:"LMB: Reset face classification, clear FORCED OUTER/INNER hints, and clear cached class data."
+    button btn_reset "RESET" pos:[186,60] width:82 height:32 tooltip:"LMB: Reset face classification, remove the classifier material, clear FORCED OUTER/INNER hints, and clear cached class data."
 
-    button btn_select_outer "SELECT OUTER" pos:[8,98] width:127 height:24 tooltip:"LMB: Object mode selects objects containing OUTER faces. Face mode selects OUTER faces.\n\nRMB: FORCE selected faces or objects OUTER. Highest-priority classification seed."
-    button btn_select_inner "SELECT INNER" pos:[141,98] width:127 height:24 tooltip:"LMB: Object mode selects objects containing INNER faces. Face mode selects INNER faces.\n\nRMB: FORCE selected faces or objects INNER. Used as a classification seed."
-    button btn_select_up "SELECT UP" pos:[8,128] width:127 height:24 tooltip:"LMB: Object mode selects objects containing UP faces. Face mode selects UP faces."
-    button btn_select_down "SELECT DOWN" pos:[141,128] width:127 height:24 tooltip:"LMB: Object mode selects objects containing DOWN faces. Face mode selects DOWN faces."
+    button btn_select_outer "SELECT OUTER" pos:[8,98] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing OUTER faces or face mode selects OUTER faces.\n\nRMB: FORCE selected faces or objects OUTER. Highest-priority classification seed."
+    button btn_select_inner "SELECT INNER" pos:[141,98] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing INNER faces or face mode selects INNER faces.\n\nRMB: FORCE selected faces or objects INNER. Used as a classification seed."
+    button btn_select_up "SELECT UP" pos:[8,128] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing UP faces or face mode selects UP faces."
+    button btn_select_down "SELECT DOWN" pos:[141,128] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing DOWN faces or face mode selects DOWN faces."
 
     label lbl_status "Ready" pos:[8,158] width:260 height:18 align:#left tooltip:"Classification counts and current selection."
     button btn_test "Create test scene" pos:[8,180] width:130 height:24 tooltip:"Create simple wall geometry for testing."
@@ -2914,12 +3010,13 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
 
         if result_data.count == 2 then
         (
-            lbl_status.text = ("RESET: " + result_data[1] as string + " objects | " + result_data[2] as string + " face IDs | FORCED data cleared")
+            lbl_status.text = ("RESET: " + result_data[1] as string + " objects | " + result_data[2] as string + " face IDs | material + FORCED data cleared")
         )
     )
 
     on btn_select_outer pressed do
     (
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
         local result_data = selectWallFacesByMaterialId 1
 
         if result_data.count == 3 then
@@ -2952,6 +3049,7 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
 
     on btn_select_inner pressed do
     (
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
         local result_data = selectWallFacesByMaterialId 2
 
         if result_data.count == 3 then
@@ -2984,6 +3082,7 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
 
     on btn_select_up pressed do
     (
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
         local result_data = selectWallFacesByMaterialId 3
 
         if result_data.count == 3 then
@@ -3001,6 +3100,7 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
 
     on btn_select_down pressed do
     (
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
         local result_data = selectWallFacesByMaterialId 4
 
         if result_data.count == 3 then

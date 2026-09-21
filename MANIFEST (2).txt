@@ -1,18 +1,18 @@
 Wall-Fixer canonical unversioned codebase
 
 SHARED PROJECT VERSION:
-  0.23
+  0.26
 
 RUN:
   Wall-Fixer.ms
 
 ACTIVE RUNTIME FILES:
-  Wall-Fixer.ms                                      (file: 0.23, project: 0.23)
-  Wall-Fixer-UI.ms                                   (file: 0.23, project: 0.23)
+  Wall-Fixer.ms                                      (file: 0.24, project: 0.26)
+  Wall-Fixer-UI.ms                                   (file: 0.24, project: 0.24)
   Wall-Fixer-Core.ms                                 (file: 0.22, project: 0.22)
   Wall-Fixer-Pipeline.ms                             (file: 0.22, project: 0.22)
   Straight-Edge-Fixer.ms                             (file: 0.2, project: 0.2)
-  Face-Classifier/Inner-Outer-Wall-Finder.ms         (file: 0.22, project: 0.23)
+  Inner-Outer-Wall-Finder.ms                         (file: 0.24, project: 0.26)
 
 FACE CLASSIFIER DEVELOPMENT:
   Face-Classifier/Wall-Fixer-Face-Classifier.ms

@@ -1,5 +1,5 @@
 /*
-Wall-Fixer UI 0.23
+Wall-Fixer UI 0.24
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -7,8 +7,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_ui_file_version = "0.23"
-global wall_fixer_ui_tool_version = 0.23
+global wall_fixer_ui_file_version = "0.24"
+global wall_fixer_ui_tool_version = 0.24
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -883,10 +883,10 @@ rollout WallFixerOptionsRollout "Options" width:310 height:142
 )
 
 /*
-PRE-PROCESS & FIX GEOMETRY contains preparation steps 1 through 5.
-Step 4 embeds the Inner-Outer Wall Finder while preserving the surrounding Wall-Fixer workflow.
+PRE-PROCESS & FIX GEOMETRY contains preparation steps 1 through 3.
+Step 4 is exposed as its own top-level Get Outter Walls rollout.
 */
-rollout WallFixerPreProcessRollout "PRE-PROCESS & FIX GEOMETRY" width:310 height:408
+rollout WallFixerPreProcessRollout "PRE-PROCESS & FIX GEOMETRY" width:310 height:126
 (
     button planar_button "1. CHECK AND MAKE WALLS PLANAR" pos:[8,8] width:294 height:34 \
         tooltip:"LMB: check selected walls and select vertices outside the dominant wall plane. An existing top Edit Poly is reused; a NON PLANAR VERTS marker is added only when required.\n\nRMB: move only detected outlier vertices onto the dominant wall plane. Script selection markers are removed first, and the object is collapsed to Editable Poly only when the real stack requires repair."
@@ -902,10 +902,6 @@ rollout WallFixerPreProcessRollout "PRE-PROCESS & FIX GEOMETRY" width:310 height
     button explode_walls_button "3. EXPLODE OBJECTS TO WALLS" pos:[8,88] width:294 height:30 \
         tooltip:"1. NORMALS: Explode walls by normals\n\n2. FACE DIRECTION: Explode walls by face direction — detects front/backside normals\n\n3. XY POSITION: Explode walls by position\n\n4. ELEMENTS: Explode to elements"
 
-    subRollout outer_walls_subrollout "" pos:[8,124] width:294 height:236
-
-    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[8,366] width:294 height:34 \
-        tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
 
     on WallFixerPreProcessRollout open do
     (
@@ -914,30 +910,6 @@ rollout WallFixerPreProcessRollout "PRE-PROCESS & FIX GEOMETRY" width:310 height
         weld_unit_label.text = wallFixerGetDisplayUnitLabel()
         wall_fixer_weld_threshold_syncing = false
 
-        if wallFaceClassifierRollout != undefined then
-        (
-            try
-            (
-                addSubRollout outer_walls_subrollout wallFaceClassifierRollout rolledUp:false
-            )
-            catch
-            (
-            )
-        )
-    )
-
-    on WallFixerPreProcessRollout close do
-    (
-        if wallFaceClassifierRollout != undefined then
-        (
-            try
-            (
-                removeSubRollout outer_walls_subrollout wallFaceClassifierRollout
-            )
-            catch
-            (
-            )
-        )
     )
 
     on weld_threshold_spinner changed control_value do
@@ -986,68 +958,60 @@ rollout WallFixerPreProcessRollout "PRE-PROCESS & FIX GEOMETRY" width:310 height
     (
         ::WallFixerRollout.runPlanarWalls fix_vertices:true
     )
-
-    on two_edge_verts_button pressed do
-    (
-        ::WallFixerRollout.runFindTwoEdgeVerts()
-    )
-
-    on two_edge_verts_button rightclick do
-    (
-        macros.run "Ribbon - Modeling" "VertexRemove"
-        ::WallFixerRollout.setStatus #success "Vertex Remove command executed on the current selection."
-    )
 )
 
 /*
-EDGE FIXER contains geometry-fix workflow steps 6 through 8.
+EDGE FIXER contains geometry-fix workflow steps 5 through 8.
 The Straight Edge Fixer controls and callbacks are inherited without changing their geometry logic.
 */
-rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:352
+rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:392
 (
-    groupBox edge_z_group "6. EDGE Z-LEVEL FIXING AND BORDER EDGES CHECK" pos:[8,8] width:294 height:248
+    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[8,8] width:294 height:34 \
+        tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
 
-    label level_settings_label "LEVEL SETTINGS" pos:[18,28] width:104 height:18
-    label level_tolerance_label "Level Tol:" pos:[18,52] width:58 height:18
-    spinner level_tolerance_spinner "" pos:[76,49] width:72 height:20 \
+    groupBox edge_z_group "6. EDGE Z-LEVEL FIXING AND BORDER EDGES CHECK" pos:[8,48] width:294 height:248
+
+    label level_settings_label "LEVEL SETTINGS" pos:[18,68] width:104 height:18
+    label level_tolerance_label "Level Tol:" pos:[18,92] width:58 height:18
+    spinner level_tolerance_spinner "" pos:[76,89] width:72 height:20 \
         range:[0.000001,1000000.0,0.01] type:#worldUnits scale:0.001 \
         tooltip:"Maximum world-axis deviation used for level detection and direction checks."
 
-    label min_edges_label "Min Edges:" pos:[158,52] width:60 height:18
-    spinner min_level_edges_spinner "" pos:[220,49] width:62 height:20 \
+    label min_edges_label "Min Edges:" pos:[158,92] width:60 height:18
+    spinner min_level_edges_spinner "" pos:[220,89] width:62 height:20 \
         range:[1,100000,3] type:#integer scale:1 \
         tooltip:"Minimum horizontal edge count needed to define a valid Z level."
 
-    label search_z_label "Search Z:" pos:[18,78] width:58 height:18
-    spinner search_in_z_spinner "" pos:[76,75] width:72 height:20 \
+    label search_z_label "Search Z:" pos:[18,118] width:58 height:18
+    spinner search_in_z_spinner "" pos:[76,115] width:72 height:20 \
         range:[0.0,1000000.0,10.0] type:#worldUnits scale:0.1 \
         tooltip:"Maximum world-Z distance from a detected level."
 
-    checkbox straight_quiet_checkbox "Quiet" pos:[158,77] width:58 height:18 checked:false \
+    checkbox straight_quiet_checkbox "Quiet" pos:[158,117] width:58 height:18 checked:false \
         tooltip:"Suppress the Straight Edge Fixer final report dialog."
 
-    label edge_checks_label "EDGE CHECKS" pos:[18,106] width:82 height:18
-    label edge_angle_label "Angle:" pos:[158,106] width:42 height:18
-    spinner edge_angle_spinner "" pos:[202,103] width:80 height:20 \
+    label edge_checks_label "EDGE CHECKS" pos:[18,146] width:82 height:18
+    label edge_angle_label "Angle:" pos:[158,146] width:42 height:18
+    spinner edge_angle_spinner "" pos:[202,143] width:80 height:20 \
         range:[0.0,45.0,45.0] type:#float scale:1.0 \
         tooltip:"Candidate direction angle threshold in degrees."
 
-    button check_horizontal_button "CHECK HORIZONTAL" pos:[18,130] width:127 height:34 \
+    button check_horizontal_button "CHECK HORIZONTAL" pos:[18,170] width:127 height:34 \
         tooltip:"LMB: select visible near-horizontal error edges.\n\nRMB: straighten currently selected near-horizontal edges."
-    button check_vertical_button "CHECK VERTICAL" pos:[155,130] width:127 height:34 \
+    button check_vertical_button "CHECK VERTICAL" pos:[155,170] width:127 height:34 \
         tooltip:"LMB: select visible near-vertical error edges.\n\nRMB: straighten currently selected near-vertical edges."
 
-    button border_check_button "BORDER CHECK" pos:[18,170] width:264 height:30 \
+    button border_check_button "BORDER CHECK" pos:[18,210] width:264 height:30 \
         tooltip:"Select visible border edges with unwelded/overlapping local-Z seams, reflex corners above 180 degrees or 360-degree backtracking borders."
 
-    button straight_edge_fixer_button "STRAIGHT EDGE FIXER" pos:[18,206] width:264 height:36 \
+    button straight_edge_fixer_button "STRAIGHT EDGE FIXER" pos:[18,246] width:264 height:36 \
         tooltip:"Detect repeated horizontal edge levels and align nearby horizontal edges to TOP, BOTTOM or CENTER target Z."
 
-    button fix_ngons_button "7. FIX N-GONS" pos:[8,266] width:294 height:34 \
+    button fix_ngons_button "7. FIX N-GONS" pos:[8,306] width:294 height:34 \
         tooltip:"Run the current Wall-Fixer Fix N-gons function before slicing."
 
-    groupBox check_result_group "8. CHECK RESULT" pos:[8,306] width:294 height:38
-    label check_result_label "Manual viewport check of geometry fixes." pos:[18,322] width:274 height:18
+    groupBox check_result_group "8. CHECK RESULT" pos:[8,346] width:294 height:38
+    label check_result_label "Manual viewport check of geometry fixes." pos:[18,362] width:274 height:18
 
     on WallFixerEdgeFixerRollout open do
     (
@@ -1112,6 +1076,17 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:352
     on straight_edge_fixer_button pressed do
     (
         ::WallFixerRollout.runStraightEdgeLevelFix()
+    )
+
+    on two_edge_verts_button pressed do
+    (
+        ::WallFixerRollout.runFindTwoEdgeVerts()
+    )
+
+    on two_edge_verts_button rightclick do
+    (
+        macros.run "Ribbon - Modeling" "VertexRemove"
+        ::WallFixerRollout.setStatus #success "Vertex Remove command executed on the current selection."
     )
 
     on fix_ngons_button pressed do
@@ -4271,6 +4246,12 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
 
         addSubRollout workflow_subrollout WallFixerOptionsRollout rolledUp:false
         addSubRollout workflow_subrollout WallFixerPreProcessRollout rolledUp:false
+
+        if wallFaceClassifierRollout != undefined then
+        (
+            addSubRollout workflow_subrollout wallFaceClassifierRollout rolledUp:false
+        )
+
         addSubRollout workflow_subrollout WallFixerEdgeFixerRollout rolledUp:true
         addSubRollout workflow_subrollout WallFixerSliceWallsRollout rolledUp:true
         addSubRollout workflow_subrollout WallFixerPostProcessRollout rolledUp:true
@@ -4327,6 +4308,18 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
         removeSubRollout workflow_subrollout WallFixerPostProcessRollout
         removeSubRollout workflow_subrollout WallFixerSliceWallsRollout
         removeSubRollout workflow_subrollout WallFixerEdgeFixerRollout
+
+        if wallFaceClassifierRollout != undefined then
+        (
+            try
+            (
+                removeSubRollout workflow_subrollout wallFaceClassifierRollout
+            )
+            catch
+            (
+            )
+        )
+
         removeSubRollout workflow_subrollout WallFixerPreProcessRollout
         removeSubRollout workflow_subrollout WallFixerOptionsRollout
     )
