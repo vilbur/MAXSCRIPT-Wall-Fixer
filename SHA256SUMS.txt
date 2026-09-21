@@ -1,0 +1,9 @@
+00e4ade638bb35db16d1d94fc18c8c6c32e3b08870e2f3ca044ab584bca23963  ./Dev/Wall-Fixer-Face-Classifier.ms
+81ffd90cb3be028150948bb84e406243dbe64be04c4a5aa4c19913744dd4f2f5  ./MANIFEST.txt
+8f0826fe7eae33d7ae4ba12d06b81c99548a2ffb2e10ac967d27dee79e1ed19c  ./Straight-Edge-Fixer.ms
+6c526c9898a0e2d958beefc30e6738c981f1109fed6ee3aa9266da07a27479a8  ./Tests/Wall-Fixer-Loader-TEST.ms
+dfc82d83f670f1569cf0a199b0e400926d86f992c38deeca25854047c84bd678  ./Tests/Wall-Fixer-Weld-TEST.ms
+9e7d5defc3f8d810bdcd6240a0041a59b9c9027c01ad58a1f41285b26b67d129  ./Wall-Fixer-UI.ms
+80f8563fc905b4ce8acb7389bbc2bc4dd0a1f2c4f78e70bdf6c3391393f452fc  ./Wall-Fixer.ms
+31d7b1fb9b1322429785f2b33e54ea8e81036e2aac7680ed2b6e04355c7d8975  ./WallMeshCleaner-Core.ms
+0b77930fd4141ae0460ded4d251a695ae8ad41c1d6ba67947a7b5b2e5851c038  ./WallMeshCleaner-Pipeline.ms

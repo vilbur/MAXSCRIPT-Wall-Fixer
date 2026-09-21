@@ -1,0 +1,22 @@
+Wall-Fixer canonical unversioned codebase
+
+RUN:
+  Wall-Fixer.ms
+
+ACTIVE RUNTIME FILES:
+  Wall-Fixer.ms
+  Wall-Fixer-UI.ms                    (source content: 0.46)
+  WallMeshCleaner-Core.ms             (source content: 0.948)
+  WallMeshCleaner-Pipeline.ms         (source content: 0.930)
+  Straight-Edge-Fixer.ms              (source content: 0.11)
+
+DEV:
+  Dev/Wall-Fixer-Face-Classifier.ms   (source content: 0.14)
+
+TESTS:
+  Tests/Wall-Fixer-Loader-TEST.ms
+  Tests/Wall-Fixer-Weld-TEST.ms
+
+RULE:
+  This baseline uses canonical unversioned filenames only.
+  Do not create _0.xx filename variants unless versioning is explicitly reintroduced.

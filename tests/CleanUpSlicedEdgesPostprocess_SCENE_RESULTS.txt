@@ -1,2 +1,0 @@
-PASS: removed:3 baseVerts:18 evaluatedBefore:33 evaluatedAfter:30 visibleBefore:40 visibleAfter:37
-ALL TESTS PASSED
