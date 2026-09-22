@@ -1,3 +1,9 @@
+﻿2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: converted GET OUTER WALLS `INNER \\ OUTTER` classify control to the shared dark WinForms button style and set its text to the classifier OUTER green (RGB 60,200,80), preserving its LMB classify behavior and tooltip; project version 0.964.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: GET OUTER WALLS class-row text colors now match the classifier material IDs exactly: OUTER RGB 60/200/80, INNER 255/140/0, TOP 155/205/235, and BOTTOM 190/155/120; dark .NET button styling is preserved; project version 0.963.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: removed the obsolete SLICE WALLS Vertical/Horizontal radiobutton and persisted `SliceDirection` state. The main `9. SLICE WALLS` action now routes LMB directly to `#horizontal` and RMB directly to `#vertical`; a bold visible guide and matching tooltip show `LMB: SLICE HORIZONTAL` / `RMB: SLICE VERTICAL`. The old RMB both-modes runner was removed, while the existing `H \\ V` modifier-activation and `Select` controls remain unchanged. Fix N-gons now uses neutral `#all` direction instead of inheriting a Slice Walls UI mode. Added `testSliceWallMouseRouting`; project version 0.962.
+
 2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: applied the shared dark `.NET` button template to the GET OUTER WALLS class buttons and EDGE FIXER direction buttons so their background, border, hover/down states, and bold font match the other dark WinForms controls while preserving their orange/light-blue text colors; project version 0.961.
 
 2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added a distinct `FAILED` completed-status label for non-critical operation failures; safe-to-continue failures now use FAILED, prerequisites/partial outcomes remain WARNING, and hard failures remain ERROR; project version 0.960.

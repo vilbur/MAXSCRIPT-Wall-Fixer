@@ -1,5 +1,5 @@
-/*
-Wall-Fixer UI 0.920
+﻿/*
+Wall-Fixer UI 0.922
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.921"
-global wall_fixer_ui_tool_version = 0.961
+global wall_fixer_ui_file_version = "0.925"
+global wall_fixer_ui_tool_version = 0.965
 
 
 /*
@@ -739,7 +739,6 @@ saved_weld_threshold = wallFixerReadIniFloat "Controls" "WeldThreshold" (wallFix
 saved_display_hidden_edges = wallFixerReadIniBool "Controls" "DisplayHiddenEdges" (WallFixer.readIniBool "DisplayHiddenEdges" false)
 saved_double_side = wallFixerReadIniBool "Controls" "DoubleSide" (WallFixer.readIniBool "DoubleSide" true)
 saved_auto_smooth = wallFixerReadIniBool "Controls" "AutoSmooth" (WallFixer.readIniBool "AutoSmooth" false)
-saved_cut_mode_index = WallFixer.readIniInt "CutMode" 1
 saved_angle_threshold = WallFixer.readIniFloat "AngleThreshold" 5.0
 saved_planar_tolerance = WallFixer.readIniFloat "PlanarTolerance" 1.0
 saved_slice_plane_mode_index = WallFixer.readIniInt "SlicePlaneMode" 2
@@ -750,11 +749,6 @@ saved_double_face_threshold = WallFixer.readIniFloat "DoubleFaceThreshold" 100.0
 saved_slice_precision = wallFixerReadIniFloat "Controls" "SlicePrecision" (WallFixer.readIniFloat "SlicePrecision" 0.01)
 saved_quiet_batch = WallFixer.readIniBool "QuietBatch" false
 saved_dialog_position = WallFixer.loadDialogPosition()
-saved_slice_direction_index = if saved_cut_mode_index == 2 then 2 else 1
-
-
-saved_slice_direction_index = wallFixerReadIniInt "Controls" "SliceDirection" saved_slice_direction_index
-if saved_slice_direction_index < 1 or saved_slice_direction_index > 2 then saved_slice_direction_index = 1
 saved_quiet_batch = wallFixerReadIniBool "Controls" "SliceQuiet" saved_quiet_batch
 saved_dialog_position = wallFixerLoadDialogPosition saved_dialog_position
 saved_dialog_size = wallFixerLoadDialogSize wall_fixer_default_dialog_size
@@ -1388,11 +1382,11 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:82
 EDGE FIXER contains geometry-fix workflow step 6.
 Straight Edge Fixer tuning controls are kept in the OPTIONS subrollout at the bottom.
 */
-rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:192
+rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:140
 (
     local direction_button_tooltip
 
-    groupBox edge_z_group "6. EDGE ROW FIXING AND BORDER EDGES CHECK" pos:[4,8] width:302 height:150
+    groupBox edge_z_group "6. EDGE ROW FIXING AND BORDER EDGES CHECK" pos:[4,8] width:302 height:98
 
 
     dotNetControl check_vertical_button "System.Windows.Forms.Button" pos:[8,30] width:112 height:34
@@ -1411,11 +1405,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:192
         tooltip:"Select visible border edges with unwelded/overlapping local-Z seams, reflex corners above 180 degrees or 360-degree backtracking borders."
 
 
-    button straight_edge_fixer_button "STRAIGHT EDGE FIXER" pos:[18,106] width:264 height:36 \
-        tooltip:"Detect repeated horizontal edge rows and align nearby horizontal edges to TOP, BOTTOM or CENTER target Z."
-
-
-    subRollout edge_fixer_options_subrollout "" pos:[0,164] width:310 height:wall_fixer_closed_rollout_height
+    subRollout edge_fixer_options_subrollout "" pos:[0,112] width:310 height:wall_fixer_closed_rollout_height
 
 
     /*
@@ -1425,7 +1415,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:192
     function setOptionsLayout options_open =
     (
         edge_fixer_options_subrollout.height = if options_open then (88 + wall_fixer_closed_rollout_height) else wall_fixer_closed_rollout_height
-        WallFixerEdgeFixerRollout.height = if options_open then (256 + wall_fixer_closed_rollout_height) else 192
+        WallFixerEdgeFixerRollout.height = if options_open then (204 + wall_fixer_closed_rollout_height) else 140
         -- return
     )
 
@@ -1560,12 +1550,6 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:192
     )
 
 
-    on straight_edge_fixer_button pressed do
-    (
-        ::WallFixerRollout.runStraightEdgeLevelFix()
-    )
-
-
     on WallFixerEdgeFixerRollout close do
     (
         try
@@ -1580,7 +1564,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:192
 
 
 /*
-SLICE WALLS exposes only the requested Vertical/Horizontal choice and the inherited batch slicer.
+SLICE WALLS routes direction directly from the main action mouse event.
 Advanced slicer values continue to come from the existing Wall-Fixer INI settings.
 */
 rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
@@ -1588,9 +1572,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
     local numbered_button_tooltip
 
 
-    radiobuttons slice_direction_radio "" pos:[8,8] width:178 height:20 \
-        labels:#("Vertical", "Horizontal") default:saved_slice_direction_index columns:2 align:#left \
-        tooltip:"Choose which directional pass runs first. Existing directional modifier separation is preserved."
+    dotNetControl slice_event_label "System.Windows.Forms.Label" pos:[8,4] width:220 height:34
 
 
     checkbox quiet_checkbox "Quiet" pos:[236,10] width:62 height:18 checked:saved_quiet_batch \
@@ -1616,19 +1598,27 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
         )
 
 
+        label_color_class = dotNetClass "System.Drawing.Color"
+        label_font_style_class = dotNetClass "System.Drawing.FontStyle"
+
+        slice_event_label.Text = "LMB: SLICE HORIZONTAL\r\nRMB: SLICE VERTICAL"
+        slice_event_label.Font = dotNetObject \
+            "System.Drawing.Font" \
+            "Segoe UI" \
+            9.0 \
+            label_font_style_class.Bold
+        slice_event_label.ForeColor = label_color_class.FromArgb 220 220 220
+        slice_event_label.BackColor = label_color_class.FromArgb 68 68 68
+        slice_event_label.TextAlign = (dotNetClass "System.Drawing.ContentAlignment").MiddleLeft
+
+
         wallFixerSetupNumberedDarkButton \
             slice_selected_walls_button \
             "9. SLICE WALLS" \
             numbered_button_tooltip \
-            "LMB: Slice selected walls using the active Vertical/Horizontal mode.\n\nRMB: Run both modes; active mode first, then the other mode."
+            "LMB: SLICE HORIZONTAL\n\nRMB: SLICE VERTICAL"
 
         slice_selected_walls_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
-    )
-
-
-    on slice_direction_radio changed state do
-    (
-        ::WallFixerRollout.saveUiSettings()
     )
 
 
@@ -1643,13 +1633,11 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
         mouse_button = wallFixerGetDotNetMouseButton event_args
 
 
-        if mouse_button == "Left" then
+        slice_mode = wallFixerGetSliceActionMode mouse_button
+
+        if slice_mode != undefined then
         (
-            ::WallFixerRollout.runSliceSelectedWalls()
-        )
-        else if mouse_button == "Right" then
-        (
-            ::WallFixerRollout.runSliceSelectedWallsBothModes()
+            ::WallFixerRollout.runSliceSelectedWalls slice_mode
         )
     )
 
@@ -7549,20 +7537,20 @@ function testEdgeFixerOptionsLayout =
 (
     local slot_control = WallFixerEdgeFixerRollout.edge_fixer_options_subrollout
     local original_rollout_height = WallFixerEdgeFixerRollout.height
-    local width_ok = ((slot_control.pos == [0,208]) and (slot_control.width == WallFixerEdgeFixerRollout.width))
+    local width_ok = ((slot_control.pos == [0,112]) and (slot_control.width == WallFixerEdgeFixerRollout.width))
     local collapsed_ok = false
     local expanded_ok = false
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout false
-    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 192) and (slot_control.height == wall_fixer_closed_rollout_height) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]))
+    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 140) and (slot_control.height == wall_fixer_closed_rollout_height) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]))
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout true
-    expanded_ok = ((WallFixerEdgeFixerRollout.height == (256 + wall_fixer_closed_rollout_height)) and (slot_control.height == (88 + wall_fixer_closed_rollout_height)) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]))
+    expanded_ok = ((WallFixerEdgeFixerRollout.height == (204 + wall_fixer_closed_rollout_height)) and (slot_control.height == (88 + wall_fixer_closed_rollout_height)) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]))
 
 
-    WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 192)
+    WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 140)
 
 
     local test_passed = width_ok and collapsed_ok and expanded_ok
@@ -7577,6 +7565,33 @@ function testEdgeFixerOptionsLayout =
 Verifies full-row parent controls and parent group boxes use 4px side padding.
 The test checks width equals parent rollout width minus 8 and left position equals 4.
 */
+/*
+Returns the Slice Walls cut mode for the main action mouse button.
+*/
+function wallFixerGetSliceActionMode mouse_button =
+(
+    case mouse_button of
+    (
+        "Left": #horizontal
+        "Right": #vertical
+        default: undefined
+    )
+    -- return
+)
+
+
+/*
+Tests direct Slice Walls LMB/RMB direction routing.
+*/
+function testSliceWallMouseRouting =
+(
+    wallFixerGetSliceActionMode "Left" == #horizontal and
+    wallFixerGetSliceActionMode "Right" == #vertical and
+    wallFixerGetSliceActionMode "Middle" == undefined
+    -- return
+)
+
+
 /*
 Tests Wall-Fixer slice-modifier name classification without changing scene geometry.
 Current directional names and the legacy combined name must classify as sliced.
@@ -8035,8 +8050,7 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
 (
     local class_button_tooltip
 
-    button btn_classify "INNER \\ OUTTER" pos:[4,8] width:98 height:32 \
-        tooltip:"LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. GROUND PIVOT forces the active origin to world Z = 0. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
+    dotNetControl btn_classify "System.Windows.Forms.Button" pos:[4,8] width:98 height:32
 
 
     button btn_explode "EXPLODE" pos:[106,8] width:98 height:32 \
@@ -8124,9 +8138,20 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
             class_button_tooltip = dotNetObject "System.Windows.Forms.ToolTip"
         )
 
-        light_blue = (dotNetClass "System.Drawing.Color").FromArgb 150 210 255
+        color_class = dotNetClass "System.Drawing.Color"
+        setupDarkButton btn_classify
+        btn_classify.Text = "INNER \\ OUTTER"
+        btn_classify.ForeColor = color_class.FromArgb 60 200 80
+        class_button_tooltip.SetToolTip btn_classify "LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. GROUND PIVOT forces the active origin to world Z = 0. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
+
         class_buttons = #(btn_select_outer, btn_select_inner, btn_select_up, btn_select_down)
         class_texts = #("OUTER", "INNER", "TOP", "BOTTOM")
+        class_colors = #(
+            color_class.FromArgb 60 200 80,
+            color_class.FromArgb 255 140 0,
+            color_class.FromArgb 155 205 235,
+            color_class.FromArgb 190 155 120
+        )
         class_tooltips = #(
             "LMB: Analyze selected objects first if needed, then select OUTER.\n\nRMB: FORCE OUTER.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW.",
             "LMB: Analyze selected objects first if needed, then select INNER.\n\nRMB: FORCE INNER.\n\nCTRL+RMB: FORCE INNER, then AUTO GROW.",
@@ -8138,13 +8163,9 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
         (
             setupDarkButton class_buttons[class_index]
             class_buttons[class_index].Text = class_texts[class_index]
-            class_buttons[class_index].ForeColor = light_blue
+            class_buttons[class_index].ForeColor = class_colors[class_index]
             class_button_tooltip.SetToolTip class_buttons[class_index] class_tooltips[class_index]
         )
-
-        class_orange = (dotNetClass "System.Drawing.Color").Orange
-        btn_select_outer.ForeColor = class_orange
-        btn_select_inner.ForeColor = class_orange
 
         try
         (
@@ -8179,8 +8200,9 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
     )
 
 
-    on btn_classify pressed do
+    on btn_classify MouseUp sender event_args do
     (
+        if wallFixerGetDotNetMouseButton event_args != "Left" then return false
         local result_data = #()
         local wall_thickness_value = wallFaceClassifierOptionsRollout.spn_wall_thickness.value
         local connection_threshold_value = wallFaceClassifierOptionsRollout.spn_connection_threshold.value
@@ -8506,24 +8528,6 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Returns the current inherited slicing direction requested by the new UI.
-    Vertical and Horizontal preserve the current two-modifier directional behavior.
-    */
-    function getSliceCutMode =
-    (
-        if WallFixerSliceWallsRollout.slice_direction_radio.state == 2 then
-        (
-            #horizontal
-        )
-        else
-        (
-            #vertical
-        )
-        -- return
-    )
-
-
-    /*
     Returns the inherited slice-plane definition mode from the existing INI setting.
     Edge Direction remains the default when no legacy setting is present.
     */
@@ -8547,7 +8551,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
     */
     function saveUiSettings dialog_position:undefined dialog_size:undefined =
     (
-        cut_mode_index = if WallFixerSliceWallsRollout.slice_direction_radio.state == 2 then 2 else 3
+        cut_mode_index = 1
 
 
         setIniSetting wall_fixer_ui_ini_path "Controls" "WeldVertices" (if WallFixerOptionsRollout.weld_checkbox.checked then "1" else "0")
@@ -8556,7 +8560,6 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         setIniSetting wall_fixer_ui_ini_path "Controls" "DoubleSide" (if WallFixerOptionsRollout.double_side_checkbutton.checked then "1" else "0")
         setIniSetting wall_fixer_ui_ini_path "Controls" "AutoSmooth" (if WallFixerOptionsRollout.auto_smooth_checkbox.checked then "1" else "0")
         setIniSetting wall_fixer_ui_ini_path "Controls" "SlicePrecision" (WallFixerOptionsRollout.slice_precision_spinner.value as string)
-        setIniSetting wall_fixer_ui_ini_path "Controls" "SliceDirection" (WallFixerSliceWallsRollout.slice_direction_radio.state as string)
         setIniSetting wall_fixer_ui_ini_path "Controls" "SliceQuiet" (if WallFixerSliceWallsRollout.quiet_checkbox.checked then "1" else "0")
         setIniSetting wall_fixer_ui_ini_path "Rollouts" "Options" (if WallFixerOptionsRollout.open then "0" else "1")
         setIniSetting wall_fixer_ui_ini_path "Rollouts" "PreProcess" (if WallFixerPreProcessRollout.open then "0" else "1")
@@ -12227,7 +12230,7 @@ result_groups
             weld_vertices:WallFixerOptionsRollout.weld_checkbox.checked \
             weld_threshold:WallFixerOptionsRollout.weld_threshold_spinner.value \
             auto_smooth:WallFixerOptionsRollout.auto_smooth_checkbox.checked \
-            cut_mode:(getSliceCutMode()) \
+            cut_mode:#all \
             slice_plane_mode:(getSlicePlaneMode()) \
             angle_threshold:saved_angle_threshold \
             planar_tolerance:saved_planar_tolerance
@@ -12399,18 +12402,18 @@ result_groups
 
 
     /*
-    Runs the current fixed base-object batch slicer using the selected directional order.
-    Existing modifier separation and duplicate-prevention rules remain inside Wall-Fixer Core.
+    Runs one explicit Slice Walls direction from the main action mouse event.
+    LMB supplies Horizontal; RMB supplies Vertical.
     */
-    function runSliceSelectedWalls =
+    function runSliceSelectedWalls cut_mode =
     (
         saveUiSettings()
         setProgress 0
-        setStatus #message "Slicing selected walls..."
+        setStatus #message ("Slicing selected walls: " + (cut_mode as string) + "...")
 
 
         completed = WallFixer.debugSliceSelectedWalls \
-            cut_mode:(getSliceCutMode()) \
+            cut_mode:cut_mode \
             slice_plane_mode:(getSlicePlaneMode()) \
             angle_threshold:saved_angle_threshold \
             planar_tolerance:saved_planar_tolerance \
@@ -12433,75 +12436,6 @@ result_groups
         else
         (
             setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Slice selected walls stopped.")
-        )
-
-
-        completed
-        -- return
-    )
-
-
-    /*
-    Runs both directional slice modes without changing the visible radio-button selection.
-    The currently active mode runs first, followed by the opposite mode.
-    */
-    function runSliceSelectedWallsBothModes =
-    (
-        saveUiSettings()
-        setProgress 0
-
-
-        first_mode = getSliceCutMode()
-        second_mode = if first_mode == #vertical then #horizontal else #vertical
-
-
-        setStatus #message (("Slicing selected walls: " + (first_mode as string)) + "...")
-        first_completed = WallFixer.debugSliceSelectedWalls \
-            cut_mode:first_mode \
-            slice_plane_mode:(getSlicePlaneMode()) \
-            angle_threshold:saved_angle_threshold \
-            planar_tolerance:saved_planar_tolerance \
-            slice_precision:WallFixerOptionsRollout.slice_precision_spinner.value \
-            display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
-            double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
-            progress_callback:updateSliceProgress \
-            quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
-
-
-        first_report = WallFixer.last_slice_report
-        first_elapsed_ms = WallFixer.last_slice_elapsed_ms
-
-
-        setProgress 0
-        setStatus #message (("Slicing selected walls: " + (second_mode as string)) + "...")
-        second_completed = WallFixer.debugSliceSelectedWalls \
-            cut_mode:second_mode \
-            slice_plane_mode:(getSlicePlaneMode()) \
-            angle_threshold:saved_angle_threshold \
-            planar_tolerance:saved_planar_tolerance \
-            slice_precision:WallFixerOptionsRollout.slice_precision_spinner.value \
-            display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
-            double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
-            progress_callback:updateSliceProgress \
-            quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
-
-
-        second_report = WallFixer.last_slice_report
-        second_elapsed_ms = WallFixer.last_slice_elapsed_ms
-        completed = first_completed and second_completed
-
-
-        if completed then
-        (
-            cleanupRedundantVerticesAfterGeometryChange (selection as array)
-            setProgress 100
-            elapsed_seconds = ((first_elapsed_ms + second_elapsed_ms) as float) / 1000.0
-            setStatus #success ("Slice selected walls completed in both modes in " + (elapsed_seconds as string) + " s.")
-        )
-        else
-        (
-            failure_report = if not first_completed and first_report != "" then first_report else second_report
-            setStatus #error (if failure_report != "" then failure_report else "Slice selected walls stopped before both modes completed.")
         )
 
 

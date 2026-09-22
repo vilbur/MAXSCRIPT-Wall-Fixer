@@ -1,6 +1,6 @@
-## NEXT
+﻿## NEXT
 
-
+UI: remove button "STRAIGHT EDGE FIXER".
 
 ## IN PROGRESS
 
@@ -8,6 +8,10 @@
 
 
 ## DONE TODAY
+
+0.964 UI: INNER / OUTTER button: make the button font/text color green.
+
+0.963 UI: OUTTER / INNER / TOP / BOTTOM row: make each button font/text color match its corresponding Wall Material ID color.
 
 0.961 UI: .NET controls: keep the background color dark grey, matching the other .NET buttons.
 
