@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.28"
-global wall_fixer_core_tool_version = 0.78
+global wall_fixer_core_file_version = "0.34"
+global wall_fixer_core_tool_version = 0.90
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -66,7 +66,7 @@ global WallFixer
 
 struct WallFixer_v
 (
-    version = "0.26",
+    version = "0.29",
     processed_slice_nodes = #(),
     processed_vertical_planes = #(),
     processed_horizontal_planes = #(),
@@ -77,6 +77,10 @@ struct WallFixer_v
     last_slice_error = undefined,
     last_slice_count = 0,
     last_slice_report = "",
+    last_slice_elapsed_ms = 0,
+    last_slice_processed_objects = 0,
+    last_slice_processed_vertices = 0,
+    slice_stats_csv_path = ((getDir #plugcfg) + "\\Wall-Fixer-Slice-Stats.csv"),
     batch_quiet = false,
     attach_weld_selection_order = #(),
     last_debug_slice_node = undefined,
@@ -3553,6 +3557,124 @@ struct WallFixer_v
         -- return
     ),
 
+
+    /*
+    Splits one selected geometry object at exactly one selected edge and explodes the resulting elements.
+    Supports a top Edit Poly modifier and an Editable Poly base object; success requires exactly two resulting objects.
+    */
+    function splitSelectedEdgeToObjects =
+    (
+        selected_nodes = selection as array
+
+        if selected_nodes.count != 1 then
+        (
+            last_slice_report = "Split: select exactly one geometry object with exactly one edge selected."
+            return false
+        )
+
+        node = selected_nodes[1]
+        if not (isValidNode node) or superClassOf node != GeometryClass then
+        (
+            last_slice_report = "Split: the selected item is not a supported geometry object."
+            return false
+        )
+
+        selected_edges = #{}
+        top_edit_poly = undefined
+
+        if node.modifiers.count > 0 and classOf node.modifiers[1] == Edit_Poly then
+        (
+            top_edit_poly = node.modifiers[1]
+            try
+            (
+                selected_edges = top_edit_poly.GetSelection #Edge node:node
+            )
+            catch
+            (
+                selected_edges = #{}
+            )
+        )
+        else if classOf node.baseObject == Editable_Poly then
+        (
+            selected_edges = polyop.getEdgeSelection node.baseObject
+        )
+        else
+        (
+            last_slice_report = "Split: use an Editable Poly object or an object with a top Edit Poly modifier."
+            return false
+        )
+
+        if selected_edges.numberSet != 1 then
+        (
+            last_slice_report = "Split: select exactly one edge."
+            return false
+        )
+
+        split_ok = false
+
+        if top_edit_poly != undefined then
+        (
+            try
+            (
+                top_edit_poly.SetPrimaryNode node
+                top_edit_poly.SetEPolySelLevel #Edge
+                top_edit_poly.SetSelection #Edge #{} node:node
+                top_edit_poly.Select #Edge selected_edges node:node
+
+                if (top_edit_poly.GetSelection #Edge node:node) != selected_edges then
+                (
+                    throw "Selected edge could not be restored on the top Edit Poly modifier."
+                )
+
+                top_edit_poly.SetOperation #SplitEdges
+                top_edit_poly.Commit()
+                update node
+                convertToPoly node
+                split_ok = (classOf node.baseObject == Editable_Poly)
+            )
+            catch
+            (
+                split_ok = false
+            )
+        )
+        else
+        (
+            try
+            (
+                polyop.splitEdges node.baseObject selected_edges
+                update node
+                split_ok = true
+            )
+            catch
+            (
+                split_ok = false
+            )
+        )
+
+        if not split_ok then
+        (
+            last_slice_report = "Split failed while separating the selected edge."
+            return false
+        )
+
+        result_nodes = explodeNodeByElements node
+        removeRedundantVerticesFromNodes result_nodes
+
+        if result_nodes.count != 2 then
+        (
+            select result_nodes
+            completeRedraw()
+            last_slice_report = "Split completed, but the selected edge did not produce exactly 2 objects. Result objects: " + (result_nodes.count as string)
+            return false
+        )
+
+        select result_nodes
+        completeRedraw()
+        last_slice_report = "Split complete. Created 2 objects from the selected edge."
+        true
+        -- return
+    ),
+
     /*
     Prepares selected geometry as individual planar wall objects.
     One instanced Smooth modifier auto-smooths the selection, hard smoothing boundaries become elements, then elements become objects with smoothing groups cleared.
@@ -4929,10 +5051,11 @@ struct WallFixer_v
             )
         )
 
-        for vertex_index = 1 to current_vertex_count do
+        local first_new_vertex_index = last_debug_slice_original_vertices.count + 1
+
+        if first_new_vertex_index <= current_vertex_count then
         (
-            local existed_before_slice = vertex_index <= last_debug_slice_original_vertices.count and last_debug_slice_original_vertices[vertex_index]
-            if not existed_before_slice then
+            for vertex_index = first_new_vertex_index to current_vertex_count do
             (
                 local vertex_position = undefined
                 local incident_edge_count = 0
@@ -5797,67 +5920,67 @@ struct WallFixer_v
     ),
 
     /*
+    Returns the exact directional pass list requested by Slice Selected Walls.
+    Directional modes contain only the selected direction; All remains one mixed pass.
+    */
+    function getBaseSlicePassKinds cut_mode =
+    (
+        case cut_mode of
+        (
+            #horizontal: #(#horizontal)
+            #vertical: #(#vertical)
+            default: #(#all)
+        )
+        -- return
+    ),
+
+    /*
     Builds ordered slicing passes and assigns one Edit Poly modifier name to each pass.
-    All mode uses one mixed queue; directional modes run the selected direction first and the opposite direction second.
+    Directional modes build exactly one pass; All mode builds one mixed queue.
     */
     function buildBaseSlicePassQueue node cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 =
     (
         local slice_passes = #()
+        local requested_pass_kinds = getBaseSlicePassKinds cut_mode
 
-        case cut_mode of
+        for pass_kind in requested_pass_kinds do
         (
-            #horizontal:
+            local pass_tasks = buildBaseSliceTaskQueue \
+                node \
+                cut_mode:pass_kind \
+                slice_plane_mode:slice_plane_mode \
+                angle_threshold:angle_threshold \
+                planar_tolerance:planar_tolerance
+
+            local modifier_name = case pass_kind of
             (
-                local horizontal_tasks = buildBaseSliceTaskQueue \
-                    node \
-                    cut_mode:#horizontal \
-                    slice_plane_mode:slice_plane_mode \
-                    angle_threshold:angle_threshold \
-                    planar_tolerance:planar_tolerance
-
-                local vertical_tasks = buildBaseSliceTaskQueue \
-                    node \
-                    cut_mode:#vertical \
-                    slice_plane_mode:slice_plane_mode \
-                    angle_threshold:angle_threshold \
-                    planar_tolerance:planar_tolerance
-
-                append slice_passes #(#horizontal, "SLICE HORIZONTAL", horizontal_tasks)
-                append slice_passes #(#vertical, "SLICE VERTICAL", vertical_tasks)
+                #horizontal: "SLICE HORIZONTAL"
+                #vertical: "SLICE VERTICAL"
+                default: "SLICE ALL"
             )
-            #vertical:
-            (
-                local vertical_tasks = buildBaseSliceTaskQueue \
-                    node \
-                    cut_mode:#vertical \
-                    slice_plane_mode:slice_plane_mode \
-                    angle_threshold:angle_threshold \
-                    planar_tolerance:planar_tolerance
 
-                local horizontal_tasks = buildBaseSliceTaskQueue \
-                    node \
-                    cut_mode:#horizontal \
-                    slice_plane_mode:slice_plane_mode \
-                    angle_threshold:angle_threshold \
-                    planar_tolerance:planar_tolerance
-
-                append slice_passes #(#vertical, "SLICE VERTICAL", vertical_tasks)
-                append slice_passes #(#horizontal, "SLICE HORIZONTAL", horizontal_tasks)
-            )
-            default:
-            (
-                local all_tasks = buildBaseSliceTaskQueue \
-                    node \
-                    cut_mode:#all \
-                    slice_plane_mode:slice_plane_mode \
-                    angle_threshold:angle_threshold \
-                    planar_tolerance:planar_tolerance
-
-                append slice_passes #(#all, "SLICE ALL", all_tasks)
-            )
+            append slice_passes #(pass_kind, modifier_name, pass_tasks)
         )
 
         slice_passes
+        -- return
+    ),
+
+    /*
+    Tests that directional Slice Selected Walls modes resolve to one pass only.
+    */
+    function testSliceDirectionalPassKinds =
+    (
+        vertical_passes = getBaseSlicePassKinds #vertical
+        horizontal_passes = getBaseSlicePassKinds #horizontal
+        all_passes = getBaseSlicePassKinds #all
+
+        test_passed = true
+        test_passed = test_passed and vertical_passes.count == 1 and vertical_passes[1] == #vertical
+        test_passed = test_passed and horizontal_passes.count == 1 and horizontal_passes[1] == #horizontal
+        test_passed = test_passed and all_passes.count == 1 and all_passes[1] == #all
+
+        test_passed
         -- return
     ),
 
@@ -5911,7 +6034,7 @@ struct WallFixer_v
     Executes one fixed base-object slice-task queue inside one named slicing Edit Poly modifier.
     Each call owns exactly one pass; cleanup never controls or regenerates the fixed base-object task queue.
     */
-    function executeBaseSliceTaskQueue node slice_tasks modifier_name:"SLICE ALL" angle_threshold:5.0 planar_tolerance:1.0 precision_threshold:0.01 task_index_offset:0 total_task_count:undefined progress_callback:undefined =
+    function executeBaseSliceTaskQueue node slice_tasks modifier_name:"SLICE ALL" angle_threshold:5.0 planar_tolerance:1.0 precision_threshold:0.01 task_index_offset:0 total_task_count:undefined progress_callback:undefined object_index:0 object_total:0 object_name:"" vertex_count:0 =
     (
         local success_count = 0
         local no_change_count = 0
@@ -5982,7 +6105,7 @@ modifier.split = false
 
                 if progress_callback != undefined then
                 (
-                    try(progress_callback display_task_index queue_total)catch()
+                    try(progress_callback display_task_index queue_total object_index object_total object_name vertex_count)catch()
                 )
 
                 if slice_result == undefined then
@@ -6104,6 +6227,60 @@ modifier.split = false
     ),
 
     /*
+    Returns the current evaluated vertex count for one valid geometry node.
+    Snapshot evaluation keeps modifier stacks intact and does not modify scene topology.
+    */
+    function getEvaluatedVertexCount node =
+    (
+        if node == undefined or not(isValidNode node) then return 0
+        evaluated_mesh = undefined
+        vertex_count = 0
+        try
+        (
+            evaluated_mesh = snapshotAsMesh node
+            vertex_count = evaluated_mesh.numVerts
+        )
+        catch
+        (
+            vertex_count = 0
+        )
+        if evaluated_mesh != undefined then delete evaluated_mesh
+        vertex_count
+        -- return
+    ),
+
+    /*
+    Appends one successful Slice Selected Walls run to the persistent CSV statistics log.
+    The file is created with a header on first use and then appended without rewriting prior runs.
+    */
+    function appendSliceStatsCsv cut_mode processed_objects processed_vertices elapsed_ms =
+    (
+        stats_stream = undefined
+        stats_success = true
+        try
+        (
+            if not doesFileExist slice_stats_csv_path then
+            (
+                stats_stream = createFile slice_stats_csv_path
+                format "timestamp_ms,cut_mode,elapsed_ms,processed_objects,processed_vertices\n" to:stats_stream
+                close stats_stream
+                stats_stream = undefined
+            )
+            stats_stream = openFile slice_stats_csv_path mode:"a"
+            format "%,%,%,%,%\n" (timeStamp()) (cut_mode as string) elapsed_ms processed_objects processed_vertices to:stats_stream
+            close stats_stream
+            stats_stream = undefined
+        )
+        catch
+        (
+            if stats_stream != undefined then try(close stats_stream)catch()
+            stats_success = false
+        )
+        stats_success
+        -- return
+    ),
+
+    /*
     Runs a fixed base-object candidate queue on all selected walls.
     The queue is captured once from Reset Slicing and executed entirely in one Wall topology cleanup Edit Poly.
     */
@@ -6114,7 +6291,11 @@ modifier.split = false
         local original_panel_mode = undefined
         local original_current_object = undefined
         local original_subobject_level = subObjectLevel
+        local restrict_to_selected_vertices = (original_subobject_level != undefined and original_subobject_level > 0)
+        local selected_vertex_filters = #()
+        local final_sliced_node = undefined
         local processed_count = 0
+        local processed_vertex_count = 0
 
         try
         (
@@ -6136,9 +6317,23 @@ modifier.split = false
                 original_current_object = undefined
             )
         )
+
+        if restrict_to_selected_vertices then
+        (
+            for node in selected_nodes do
+            (
+                local selection_data = getActiveMakeOneSliceVertexSelection node
+                local mapped_vertices = if selection_data != undefined and selection_data.count >= 1 then copy selection_data[1] else #{}
+                append selected_vertex_filters #(node, mapped_vertices)
+            )
+        )
+
         local skipped_count = all_selected_nodes.count - selected_nodes.count
         last_slice_report = ""
         last_slice_error = undefined
+        last_slice_elapsed_ms = 0
+        last_slice_processed_objects = 0
+        last_slice_processed_vertices = 0
 
         if all_selected_nodes.count == 0 then
         (
@@ -6172,6 +6367,7 @@ modifier.split = false
             (
                 local node_ok = true
                 local node_error = undefined
+                local current_vertex_count = 0
 
                 if node == undefined or not(isValidNode node) then
                 (
@@ -6180,6 +6376,9 @@ modifier.split = false
                 )
                 else
                 (
+                    current_vertex_count = getEvaluatedVertexCount node
+                    processed_vertex_count += current_vertex_count
+
                     /* Every batch starts from the same unchanged base object.
                        Remove only prior slicing modifiers so the requested modifier layout is deterministic. */
                     if not(::WallFixer.removeWallFixerSliceModifiers node) then
@@ -6200,6 +6399,23 @@ modifier.split = false
                         (
                             node_error = node.name + ": base-object planar-region analysis failed before fixed base-object queue. " + (last_slice_error as string)
                             node_ok = false
+                        )
+                        else if restrict_to_selected_vertices then
+                        (
+                            local selected_source_vertices = #{}
+
+                            for filter_item in selected_vertex_filters do
+                            (
+                                if filter_item[1] == node then
+                                (
+                                    selected_source_vertices = copy filter_item[2]
+                                    exit
+                                )
+                            )
+
+                            setResetInnerVertSelection node selected_source_vertices
+
+                            if not batch_quiet then format "Wall-Fixer Slice Selected Walls Vertex Filter: node:% selectedBaseVerts:%\n" node.name selected_source_vertices
                         )
                     )
 
@@ -6223,7 +6439,7 @@ modifier.split = false
 
                     if node_ok and progress_callback != undefined then
                     (
-                        try(progress_callback 0 total_task_count)catch()
+                        try(progress_callback 0 total_task_count (processed_count + 1) selected_nodes.count node.name current_vertex_count)catch()
                     )
 
                     if node_ok and total_task_count == 0 then
@@ -6252,7 +6468,11 @@ modifier.split = false
                                 precision_threshold:slice_precision \
                                 task_index_offset:task_index_offset \
                                 total_task_count:total_task_count \
-                                progress_callback:progress_callback
+                                progress_callback:progress_callback \
+                                object_index:(processed_count + 1) \
+                                object_total:selected_nodes.count \
+                                object_name:node.name \
+                                vertex_count:current_vertex_count
 
                             if not queue_result[1] then
                             (
@@ -6271,6 +6491,11 @@ modifier.split = false
                             task_index_offset += pass_tasks.count
                         )
 
+                        if node_ok and total_sliced_count > 0 and final_sliced_node == undefined then
+                        (
+                            final_sliced_node = node
+                        )
+
                         if node_ok and not batch_quiet then
                         (
                             format "Wall-Fixer Slice Selected Walls Queue Result: node:% passes:% tasks:% sliced:% noChange:%\n" \
@@ -6281,7 +6506,7 @@ modifier.split = false
 
                 if node_ok then
                 (
-                    local modifier_report = if cut_mode == #all then "SLICE ALL" else if cut_mode == #horizontal then "SLICE HORIZONTAL -> SLICE VERTICAL" else "SLICE VERTICAL -> SLICE HORIZONTAL"
+                    local modifier_report = if cut_mode == #all then "SLICE ALL" else if cut_mode == #horizontal then "SLICE HORIZONTAL" else "SLICE VERTICAL"
                     automation_report += node.name + ": fixed base-object slice queue complete in " + modifier_report + ".\n"
                 )
                 else
@@ -6303,7 +6528,28 @@ modifier.split = false
 
         select all_selected_nodes
 
-        if original_panel_mode == #modify then
+        if final_sliced_node != undefined and all_selected_nodes.count == 1 and isValidNode final_sliced_node and final_sliced_node.modifiers.count > 0 then
+        (
+            local top_modifier = final_sliced_node.modifiers[1]
+
+            if classOf top_modifier == Edit_Poly then
+            (
+                select final_sliced_node
+                max modify mode
+
+                try
+                (
+                    top_modifier.SetPrimaryNode final_sliced_node
+                    modPanel.setCurrentObject top_modifier
+                    top_modifier.SetEPolySelLevel #Edge
+                    subObjectLevel = 2
+                )
+                catch
+                (
+                )
+            )
+        )
+        else if original_panel_mode == #modify then
         (
             max modify mode
 
@@ -6338,12 +6584,34 @@ modifier.split = false
             max create mode
         )
 
+        last_slice_processed_objects = processed_count
+        last_slice_processed_vertices = processed_vertex_count
+
         completeRedraw()
         last_slice_report = automation_report
 
         all_ok
         -- return
     ),
+
+    /*
+    Tests whether Slice Selected Walls should restrict source vertices while any subobject level is active.
+    */
+    function testSliceSelectedVertexMode =
+    (
+        object_mode = undefined
+        vertex_mode = 1
+        edge_mode = 2
+
+        test_passed = true
+        test_passed = test_passed and not (object_mode != undefined and object_mode > 0)
+        test_passed = test_passed and (vertex_mode > 0)
+        test_passed = test_passed and (edge_mode > 0)
+
+        test_passed
+        -- return
+    ),
+
 
     /*
     Tests the slice Modify-context helper's non-scene guard path.
@@ -6366,6 +6634,7 @@ modifier.split = false
         local previous_batch_quiet = batch_quiet
         local completed = false
         local batch_failure = undefined
+        local batch_start_ms = timeStamp()
 
         batch_quiet = quiet
 
@@ -6387,6 +6656,15 @@ modifier.split = false
         )
 
         batch_quiet = previous_batch_quiet
+        last_slice_elapsed_ms = (timeStamp()) - batch_start_ms
+
+        if completed then
+        (
+            elapsed_seconds = (last_slice_elapsed_ms as float) / 1000.0
+            stats_text = "SLICE STATS: " + (elapsed_seconds as string) + " s; objects: " + (last_slice_processed_objects as string) + "; vertices: " + (last_slice_processed_vertices as string) + "."
+            if last_slice_report == "" then last_slice_report = stats_text else last_slice_report += stats_text
+            appendSliceStatsCsv cut_mode last_slice_processed_objects last_slice_processed_vertices last_slice_elapsed_ms
+        )
 
         if batch_failure != undefined then
         (
@@ -6411,6 +6689,55 @@ modifier.split = false
     ),
 
     /*
+    Returns true when one live Edit Poly vertex touches any border edge.
+    Only incident edges of the requested vertex are inspected.
+    */
+    function isDebugModifierBorderVertex node modifier vertex_index =
+    (
+        if node == undefined or not(isValidNode node) or modifier == undefined then return false
+        if vertex_index < 1 then return false
+
+        incident_edge_count = 0
+        try
+        (
+            incident_edge_count = modifier.GetVertexEdgeCount vertex_index node:node
+        )
+        catch
+        (
+            incident_edge_count = 0
+        )
+
+        for edge_slot = 1 to incident_edge_count do
+        (
+            edge_index = undefined
+            face_a = undefined
+            face_b = undefined
+
+            try
+            (
+                edge_index = modifier.GetVertexEdge vertex_index edge_slot node:node
+                if edge_index != undefined and edge_index > 0 then
+                (
+                    face_a = modifier.GetEdgeFace edge_index 1 node:node
+                    face_b = modifier.GetEdgeFace edge_index 2 node:node
+                )
+            )
+            catch
+            (
+                edge_index = undefined
+            )
+
+            if edge_index != undefined and face_a != undefined and face_b != undefined then
+            (
+                if ((face_a == 0) != (face_b == 0)) then return true
+            )
+        )
+
+        false
+        -- return
+    ),
+
+    /*
     Returns redundant edges from the last Make 1 Slice.
     The kept chain starts immediately at either defining border-edge vertex and stops when it first reaches another border vertex.
     */
@@ -6426,36 +6753,53 @@ modifier.split = false
         local vertex_count = modifier.GetNumVertices node:node
         local usable_new_edges = #{}
         local border_vertices = #{}
-        local vertex_new_edges = for vertex_index = 1 to vertex_count collect #{}
+        local new_edge_data = #()
+        local touched_vertices = #{}
 
-        -- Ignore border edges even if Edit Poly reports them as newly created by Slice.
-        for edge_index = 1 to edge_count do
+        -- Inspect only edges reported by the slice as newly appended.
+        for edge_index in last_debug_slice_new_edges do
         (
-            local edge_a = modifier.GetEdgeVertex edge_index 1 node:node
-            local edge_b = modifier.GetEdgeVertex edge_index 2 node:node
-            local face_a = modifier.GetEdgeFace edge_index 1 node:node
-            local face_b = modifier.GetEdgeFace edge_index 2 node:node
-            local is_border_edge = false
-
-            if edge_a != undefined and edge_b != undefined and face_a != undefined and face_b != undefined then
+            if edge_index >= 1 and edge_index <= edge_count then
             (
-                is_border_edge = (face_a == 0) != (face_b == 0)
+                local edge_a = undefined
+                local edge_b = undefined
+                local face_a = undefined
+                local face_b = undefined
 
-                if is_border_edge then
+                try
                 (
-                    if edge_a > 0 then border_vertices[edge_a] = true
-                    if edge_b > 0 then border_vertices[edge_b] = true
+                    edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+                    edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+                    face_a = modifier.GetEdgeFace edge_index 1 node:node
+                    face_b = modifier.GetEdgeFace edge_index 2 node:node
+                )
+                catch
+                (
+                    edge_a = undefined
+                    edge_b = undefined
                 )
 
-                if edge_index <= last_debug_slice_new_edges.count and last_debug_slice_new_edges[edge_index] and not is_border_edge then
+                if edge_a != undefined and edge_b != undefined and face_a != undefined and face_b != undefined then
                 (
-                    if edge_a >= 1 and edge_a <= vertex_count and edge_b >= 1 and edge_b <= vertex_count then
+                    local is_border_edge = (face_a == 0) != (face_b == 0)
+
+                    if not is_border_edge and edge_a >= 1 and edge_a <= vertex_count and edge_b >= 1 and edge_b <= vertex_count then
                     (
                         usable_new_edges[edge_index] = true
-                        vertex_new_edges[edge_a][edge_index] = true
-                        vertex_new_edges[edge_b][edge_index] = true
+                        touched_vertices[edge_a] = true
+                        touched_vertices[edge_b] = true
+                        append new_edge_data #(edge_index, edge_a, edge_b)
                     )
                 )
+            )
+        )
+
+        -- Border status is needed only for vertices touched by the new slice edges.
+        for vertex_index in touched_vertices do
+        (
+            if isDebugModifierBorderVertex node modifier vertex_index then
+            (
+                border_vertices[vertex_index] = true
             )
         )
 
@@ -6469,7 +6813,14 @@ modifier.split = false
         (
             if start_vertex >= 1 and start_vertex <= vertex_count then
             (
-                if vertex_new_edges[start_vertex].numberSet > 0 then
+                local touches_new_edge = false
+
+                for edge_data in new_edge_data while not touches_new_edge do
+                (
+                    touches_new_edge = (edge_data[2] == start_vertex or edge_data[3] == start_vertex)
+                )
+
+                if touches_new_edge then
                 (
                     if not(start_vertex <= visited_vertices.count and visited_vertices[start_vertex]) then
                     (
@@ -6488,15 +6839,18 @@ modifier.split = false
             local current_vertex = queue_vertices[queue_index]
             queue_index += 1
 
-            for edge_index in vertex_new_edges[current_vertex] do
+            for edge_data in new_edge_data do
             (
+                local edge_index = edge_data[1]
+                local edge_a = edge_data[2]
+                local edge_b = edge_data[3]
+                local touches_current = (edge_a == current_vertex or edge_b == current_vertex)
                 local already_kept = edge_index <= kept_edges.count and kept_edges[edge_index]
-                if not already_kept then
+
+                if touches_current and not already_kept then
                 (
                     kept_edges[edge_index] = true
 
-                    local edge_a = modifier.GetEdgeVertex edge_index 1 node:node
-                    local edge_b = modifier.GetEdgeVertex edge_index 2 node:node
                     local other_vertex = if edge_a == current_vertex then edge_b else edge_a
                     local other_is_border = other_vertex <= border_vertices.count and border_vertices[other_vertex]
                     local other_is_start = other_vertex <= last_debug_slice_start_vertices.count and last_debug_slice_start_vertices[other_vertex]
@@ -6517,6 +6871,19 @@ modifier.split = false
 
         local removable_edges = usable_new_edges - kept_edges
         #(removable_edges, kept_edges, usable_new_edges, border_vertices, copy last_debug_slice_start_vertices)
+        -- return
+    ),
+
+    /*
+    Tests the appended vertex-index range used by Slice Precision.
+    */
+    function testSliceAppendedVertexRange =
+    (
+        old_vertices = #{}
+        for vertex_index = 1 to 10 do old_vertices[vertex_index] = true
+
+        first_new_vertex_index = old_vertices.count + 1
+        first_new_vertex_index == 11
         -- return
     ),
 

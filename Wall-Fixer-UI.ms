@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer UI 0.66
+Wall-Fixer UI 0.72
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.66"
-global wall_fixer_ui_tool_version = 0.77
+global wall_fixer_ui_file_version = "0.76"
+global wall_fixer_ui_tool_version = 0.91
 
 
 /*
@@ -689,6 +689,15 @@ if saved_slice_direction_index < 1 or saved_slice_direction_index > 2 then saved
 saved_quiet_batch = wallFixerReadIniBool "Controls" "SliceQuiet" saved_quiet_batch
 saved_dialog_position = wallFixerLoadDialogPosition saved_dialog_position
 saved_dialog_size = wallFixerLoadDialogSize wall_fixer_default_dialog_size
+saved_options_rolled_up = wallFixerReadIniBool "Rollouts" "Options" false
+saved_preprocess_rolled_up = wallFixerReadIniBool "Rollouts" "PreProcess" false
+saved_outer_walls_rolled_up = wallFixerReadIniBool "Rollouts" "GetOuterWalls" false
+saved_edge_fixer_rolled_up = wallFixerReadIniBool "Rollouts" "EdgeFixer" true
+saved_slice_walls_rolled_up = wallFixerReadIniBool "Rollouts" "SliceWalls" true
+saved_postprocess_rolled_up = wallFixerReadIniBool "Rollouts" "PostProcess" true
+saved_helpers_rolled_up = wallFixerReadIniBool "Rollouts" "Helpers" true
+saved_edge_options_rolled_up = wallFixerReadIniBool "Rollouts" "EdgeFixerOptions" true
+saved_outer_options_rolled_up = wallFixerReadIniBool "Rollouts" "GetOuterWallsOptions" true
 
 
 /*
@@ -1106,7 +1115,7 @@ rollout WallFixerOptionsRollout "Options" width:310 height:142
 PRE-PROCESS & FIX GEOMETRY contains preparation steps 1 through 3.
 Step 4 is exposed as its own top-level Get Outter Walls rollout.
 */
-rollout WallFixerPreProcessRollout "PRE-PROCESS & FIX GEOMETRY" width:310 height:126
+rollout WallFixerPreProcessRollout "1 PRE-PROCESS & FIX GEOMETRY" width:310 height:126
 (
     button planar_button "1. CHECK AND MAKE WALLS PLANAR" pos:[4,8] width:302 height:34 \
         tooltip:"LMB: check selected walls and select vertices outside the dominant wall plane. An existing top Edit Poly is reused; a NON PLANAR VERTS marker is added only when required.\n\nRMB: move only detected outlier vertices onto the dominant wall plane. Script selection markers are removed first, and the object is collapsed to Editable Poly only when the real stack requires repair."
@@ -1291,7 +1300,7 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:112
 EDGE FIXER contains geometry-fix workflow step 6 and its result check.
 Straight Edge Fixer tuning controls are kept in the OPTIONS subrollout at the bottom.
 */
-rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:236
+rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
 (
     groupBox edge_z_group "6. EDGE Z-LEVEL FIXING AND BORDER EDGES CHECK" pos:[4,8] width:302 height:150
 
@@ -1333,8 +1342,8 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:236
     (
         try
         (
-            addSubRollout edge_fixer_options_subrollout WallFixerEdgeFixerOptionsRollout rolledUp:true
-            setOptionsLayout false
+            addSubRollout edge_fixer_options_subrollout WallFixerEdgeFixerOptionsRollout rolledUp:saved_edge_options_rolled_up
+            setOptionsLayout (not saved_edge_options_rolled_up)
         )
         catch
         (
@@ -1395,7 +1404,7 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:236
 SLICE WALLS exposes only the requested Vertical/Horizontal choice and the inherited batch slicer.
 Advanced slicer values continue to come from the existing Wall-Fixer INI settings.
 */
-rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
+rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
 (
     radiobuttons slice_direction_radio "" pos:[8,8] width:178 height:20 \
         labels:#("Vertical", "Horizontal") default:saved_slice_direction_index columns:2 align:#left \
@@ -1406,16 +1415,16 @@ rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
         tooltip:"Suppress verbose Listener output during the inherited batch slicing operation."
 
 
-    button slice_selected_walls_button "9. SLICE SELECTED WALLS" pos:[4,42] width:226 height:38 \
+    button slice_selected_walls_button "9. SLICE WALLS" pos:[4,42] width:150 height:38 \
         tooltip:"LMB: Slice selected walls using the active Vertical/Horizontal mode.\n\nRMB: Run both modes; active mode first, then the other mode."
+
+
+    button slice_modifier_button "H \\ V" pos:[158,42] width:72 height:38 \
+        tooltip:"LMB: Activate SLICE HORIZONTAL.\n\nRMB: Activate SLICE VERTICAL.\n\nCTRL+LMB: Activate SLICE HORIZONTAL and enter Edge level 2.\n\nCTRL+RMB: Activate SLICE VERTICAL and enter Edge level 2."
 
 
     button select_slice_state_button "Select" pos:[234,42] width:72 height:38 \
         tooltip:"LMB: Filter only SLICED objects. If nothing is selected, use all visible geometry.\n\nRMB: Filter only UNSLICED objects. If nothing is selected, use all visible geometry."
-
-
-    groupBox slice_check_result_group "CHECK RESULT" pos:[4,84] width:302 height:40
-    label slice_check_result_label "Manual viewport check after slicing." pos:[18,101] width:274 height:18
 
 
     on slice_direction_radio changed state do
@@ -1442,6 +1451,18 @@ rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
     )
 
 
+    on slice_modifier_button pressed do
+    (
+        ::WallFixerRollout.activateSliceWallModifier "SLICE HORIZONTAL" enter_edge_level:keyboard.controlPressed
+    )
+
+
+    on slice_modifier_button rightclick do
+    (
+        ::WallFixerRollout.activateSliceWallModifier "SLICE VERTICAL" enter_edge_level:keyboard.controlPressed
+    )
+
+
     on select_slice_state_button pressed do
     (
         ::WallFixerRollout.selectSliceWallObjects sliced_state:true
@@ -1459,7 +1480,7 @@ rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
 POST-PROCESS exposes current cleanup tools and reserves the new missing-loop/corner-completion actions.
 The two wall-completion buttons remain disabled until their detailed behavior is implemented.
 */
-rollout WallFixerPostProcessRollout "POST-PROCESS" width:310 height:308
+rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:308
 (
     button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[4,8] width:302 height:34 \
         tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
@@ -1535,7 +1556,7 @@ rollout WallFixerPostProcessRollout "POST-PROCESS" width:310 height:308
 HELPERS contains utility actions that are useful outside the numbered wall-fixing workflow.
 These actions operate on the current scene selection.
 */
-rollout WallFixerHelpersRollout "HELPERS" width:310 height:84
+rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
 (
     button attach_button "Attach" pos:[8,8] width:143 height:30 \
         tooltip:"LMB: Attach all selected geometry into the first selected object.\n\nRMB: Attach selection, center the merged pivot, weld all vertices using Wall-Fixer > Options > Weld Threshold, then quadrify when the merged object has at most 12 triangular faces."
@@ -1545,8 +1566,15 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:84
         tooltip:"Move each selected object's pivot to the center of its geometry."
 
 
-    button print_objs_button "Print Objs" pos:[8,44] width:294 height:30 \
+    button align_camera_button "Align Camera" pos:[8,44] width:143 height:30 \
+        tooltip:"LMB: Align the active viewport perpendicular to selected wall faces, switch to orthographic User view, and zoom to the selection."
+
+
+    button print_objs_button "Print Objs" pos:[159,44] width:143 height:30 \
         tooltip:"Clear the Listener and print detailed diagnostics for the selected objects."
+
+    button split_button "Split" pos:[8,80] width:143 height:30 \
+        tooltip:"LMB: Split the selected object by exactly one selected edge and explode the result into 2 objects."
 
 
     on attach_button pressed do
@@ -1567,9 +1595,21 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:84
     )
 
 
+    on align_camera_button pressed do
+    (
+        ::WallFixerRollout.runAlignCameraToWallFaces()
+    )
+
+
     on print_objs_button pressed do
     (
         ::WallFixerRollout.runPrintSelectedObjects()
+    )
+
+
+    on split_button pressed do
+    (
+        ::WallFixerRollout.runSplitSelectedEdge()
     )
 )
 
@@ -2835,6 +2875,202 @@ function getSourceFaceSelection object_node source_data =
 
 
     copy face_bits -- return
+)
+
+
+/* Collects the average world-space normal and center of the currently selected wall faces.
+   Supports Editable Poly and a top Edit Poly modifier without changing topology or selection.
+*/
+function getSelectedWallFaceAlignmentData =
+(
+    selected_nodes = selection as array
+    reference_normal = undefined
+    normal_sum = [0.0, 0.0, 0.0]
+    center_sum = [0.0, 0.0, 0.0]
+    valid_face_count = 0
+
+
+    if subObjectLevel != 4 then
+    (
+        undefined
+    )
+    else
+    (
+        for object_node in selected_nodes do
+        (
+            if object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass then
+            (
+                source_data = getFaceGeometrySource object_node
+
+
+                if source_data != undefined then
+                (
+                    selected_face_bits = getSourceFaceSelection object_node source_data
+
+
+                    for face_index in selected_face_bits do
+                    (
+                        face_degree = getSourceFaceDegree object_node source_data face_index
+                        face_vertices = #()
+
+
+                        if face_degree >= 3 then
+                        (
+                            for corner_index = 1 to face_degree do
+                            (
+                                vertex_index = getSourceFaceVertex object_node source_data face_index corner_index
+
+
+                                if vertex_index > 0 then
+                                (
+                                    append face_vertices (getSourceVertexWorld object_node source_data vertex_index)
+                                )
+                            )
+                        )
+
+
+                        if face_vertices.count >= 3 then
+                        (
+                            face_normal = calculatePolygonNormal face_vertices
+
+
+                            if (length face_normal) > 0.0000001 then
+                            (
+                                if reference_normal == undefined then
+                                (
+                                    reference_normal = face_normal
+                                )
+                                else if (dot face_normal reference_normal) < 0.0 then
+                                (
+                                    face_normal *= -1.0
+                                )
+
+
+                                normal_sum += face_normal
+                                center_sum += calculatePolygonCenter face_vertices
+                                valid_face_count += 1
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+
+        if valid_face_count > 0 and (length normal_sum) > 0.0000001 then
+        (
+            #((center_sum / valid_face_count), (normalize normal_sum), valid_face_count)
+        )
+        else
+        (
+            undefined
+        )
+    )
+    -- return
+)
+
+
+/* Aligns the active viewport perpendicular to selected wall faces through a temporary orthographic camera.
+   The camera view is converted to an orthographic User view, deleted, then Zoom Extents Selected frames the selection.
+*/
+function alignViewportToSelectedWallFaces =
+(
+    alignment_data = getSelectedWallFaceAlignmentData()
+    temp_camera = undefined
+    operation_success = false
+    original_selection = selection as array
+
+
+    if alignment_data == undefined then
+    (
+        WallFixer.last_slice_report = "Align Camera: select one or more wall faces in Face sub-object mode."
+    )
+    else
+    (
+        face_center = alignment_data[1]
+        face_normal = alignment_data[2]
+        face_count = alignment_data[3]
+        reference_up = [0.0, 0.0, 1.0]
+
+
+        if abs (dot face_normal reference_up) > 0.999 then
+        (
+            reference_up = [0.0, 1.0, 0.0]
+        )
+
+
+        right_axis = cross reference_up face_normal
+
+
+        if (length right_axis) > 0.0000001 then
+        (
+            right_axis = normalize right_axis
+            up_axis = normalize (cross face_normal right_axis)
+            camera_position = face_center + (face_normal * 1000.0)
+            camera_tm = matrix3 right_axis up_axis face_normal camera_position
+
+
+            try
+            (
+                with undo off
+                (
+                    temp_camera = freeCamera()
+                    temp_camera.orthoProjection = true
+                    temp_camera.transform = camera_tm
+                    viewport.setCamera temp_camera
+
+
+                    user_view_set = viewport.setType #view_iso_user
+
+
+                    if user_view_set then
+                    (
+                        if isValidNode temp_camera then
+                        (
+                            delete temp_camera
+                            temp_camera = undefined
+                        )
+
+
+                        select original_selection
+                        max zoomext sel
+                        completeRedraw()
+                        operation_success = true
+                    )
+                )
+            )
+            catch
+            (
+                operation_success = false
+            )
+        )
+
+
+        if temp_camera != undefined and isValidNode temp_camera then
+        (
+            try
+            (
+                with undo off delete temp_camera
+            )
+            catch
+            (
+            )
+        )
+
+
+        if operation_success then
+        (
+            WallFixer.last_slice_report = "Align Camera: User view aligned to " + (face_count as string) + " selected wall face(s) and zoomed to selection."
+        )
+        else
+        (
+            WallFixer.last_slice_report = "Align Camera: could not align the active viewport."
+        )
+    )
+
+
+    operation_success
+    -- return
 )
 
 
@@ -6915,6 +7151,22 @@ function testSliceWallModifierNameClassification =
 )
 
 
+/*
+Tests rollout-state INI conversion where open rollout means rolledUp = false.
+*/
+function testRolloutOpenPersistence =
+(
+    open_state = true
+    closed_state = false
+
+    open_ini = if open_state then "0" else "1"
+    closed_ini = if closed_state then "0" else "1"
+
+    (open_ini == "0") and (closed_ini == "1")
+    -- return
+)
+
+
 function testParentControlWidths =
 (
     local width_ok = true
@@ -6926,7 +7178,6 @@ function testParentControlWidths =
     width_ok = width_ok and (WallFixerEdgeFixerRollout.edge_z_group.pos.x == 4) and (WallFixerEdgeFixerRollout.edge_z_group.width == (WallFixerEdgeFixerRollout.width - 8))
     width_ok = width_ok and (WallFixerEdgeFixerRollout.check_result_group.pos.x == 4) and (WallFixerEdgeFixerRollout.check_result_group.width == (WallFixerEdgeFixerRollout.width - 8))
     width_ok = width_ok and (WallFixerSliceWallsRollout.slice_selected_walls_button.pos.x == 4) and (WallFixerSliceWallsRollout.slice_selected_walls_button.width == (WallFixerSliceWallsRollout.width - 8))
-    width_ok = width_ok and (WallFixerSliceWallsRollout.slice_check_result_group.pos.x == 4) and (WallFixerSliceWallsRollout.slice_check_result_group.width == (WallFixerSliceWallsRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.two_edge_verts_button.pos.x == 4) and (WallFixerPostProcessRollout.two_edge_verts_button.width == (WallFixerPostProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.duplicated_vertices_button.pos.x == 4) and (WallFixerPostProcessRollout.duplicated_vertices_button.width == (WallFixerPostProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.redundant_loops_button.pos.x == 4) and (WallFixerPostProcessRollout.redundant_loops_button.width == (WallFixerPostProcessRollout.width - 8))
@@ -7259,7 +7510,7 @@ function createWallFaceClassLayersFromCurrent =
 )
 
 
-rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
+rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
 (
     button btn_classify "INNER \\ OUTTER" pos:[4,8] width:98 height:32 \
         tooltip:"LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. GROUND PIVOT forces the active origin to world Z = 0. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
@@ -7347,8 +7598,8 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
     (
         try
         (
-            addSubRollout wall_face_options_subrollout wallFaceClassifierOptionsRollout rolledUp:true
-            setOptionsLayout false
+            addSubRollout wall_face_options_subrollout wallFaceClassifierOptionsRollout rolledUp:saved_outer_options_rolled_up
+            setOptionsLayout (not saved_outer_options_rolled_up)
         )
         catch
         (
@@ -7538,6 +7789,7 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
 rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 (
     progressbar workflow_progress "" pos:[8,8] width:328 height:14 value:0 color:(color 0 180 0) orient:#horizontal
+    dotNetControl progress_count_label "System.Windows.Forms.Label" pos:[8,8] width:328 height:14
     dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,6] width:76 height:40
     dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:19
     dotNetControl status_line_bottom "System.Windows.Forms.RichTextBox" pos:[88,28] width:248 height:19
@@ -7609,6 +7861,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
         workflow_progress.visible = false
+        progress_count_label.Visible = false
         status_line_top.Visible = true
         status_line_bottom.Visible = true
         process_status_label.Text = result_text
@@ -7660,22 +7913,20 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         if clamped_value > 100 then clamped_value = 100
 
 
+        if clamped_value < 100 then
+        (
+            process_status_label.Visible = false
+            status_line_top.Visible = false
+            status_line_bottom.Visible = false
+            workflow_progress.visible = true
+            progress_count_label.Visible = true
+            try(progress_count_label.BringToFront())catch()
+        )
+
         if clamped_value != last_progress_value then
         (
             last_progress_value = clamped_value
-
-
-            if clamped_value < 100 then
-            (
-                process_status_label.Visible = false
-                status_line_top.Visible = false
-                status_line_bottom.Visible = false
-                workflow_progress.visible = true
-            )
-
-
             workflow_progress.value = clamped_value
-
 
             try
             (
@@ -7693,18 +7944,27 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
     Receives the existing batch slicer's processed/total object counts.
     It updates both the green progress bar and the shared plain status line.
     */
-    function updateSliceProgress processed_count total_count =(
+    function updateSliceProgress processed_count total_count object_index:0 object_total:0 object_name:"" vertex_count:0 =
+    (
         progress_percent = 0
-
 
         if total_count > 0 then
         (
             progress_percent = ((100.0 * processed_count) / total_count) as integer
         )
 
-
         setProgress progress_percent
-        setStatus #message ((processed_count as string) + "/" + (total_count as string) + " tasks")
+
+        if object_total > 0 then
+        (
+            progress_count_label.Text = ((object_index as string) + " \\ " + (object_total as string) + "  |  " + object_name + "  |  " + (vertex_count as string) + " verts")
+        )
+        else
+        (
+            progress_count_label.Text = ((processed_count as string) + " \\ " + (total_count as string))
+        )
+
+        try(progress_count_label.BringToFront())catch()
         -- return
     )
 
@@ -7762,6 +8022,15 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         setIniSetting wall_fixer_ui_ini_path "Controls" "SlicePrecision" (WallFixerOptionsRollout.slice_precision_spinner.value as string)
         setIniSetting wall_fixer_ui_ini_path "Controls" "SliceDirection" (WallFixerSliceWallsRollout.slice_direction_radio.state as string)
         setIniSetting wall_fixer_ui_ini_path "Controls" "SliceQuiet" (if WallFixerSliceWallsRollout.quiet_checkbox.checked then "1" else "0")
+        setIniSetting wall_fixer_ui_ini_path "Rollouts" "Options" (if WallFixerOptionsRollout.open then "0" else "1")
+        setIniSetting wall_fixer_ui_ini_path "Rollouts" "PreProcess" (if WallFixerPreProcessRollout.open then "0" else "1")
+        if wallFaceClassifierRollout != undefined then setIniSetting wall_fixer_ui_ini_path "Rollouts" "GetOuterWalls" (if wallFaceClassifierRollout.open then "0" else "1")
+        setIniSetting wall_fixer_ui_ini_path "Rollouts" "EdgeFixer" (if WallFixerEdgeFixerRollout.open then "0" else "1")
+        setIniSetting wall_fixer_ui_ini_path "Rollouts" "SliceWalls" (if WallFixerSliceWallsRollout.open then "0" else "1")
+        setIniSetting wall_fixer_ui_ini_path "Rollouts" "PostProcess" (if WallFixerPostProcessRollout.open then "0" else "1")
+        setIniSetting wall_fixer_ui_ini_path "Rollouts" "Helpers" (if WallFixerHelpersRollout.open then "0" else "1")
+        setIniSetting wall_fixer_ui_ini_path "Rollouts" "EdgeFixerOptions" (if WallFixerEdgeFixerOptionsRollout.open then "0" else "1")
+        setIniSetting wall_fixer_ui_ini_path "Rollouts" "GetOuterWallsOptions" (if wallFaceClassifierOptionsRollout.open then "0" else "1")
 
 
         if dialog_position != undefined then
@@ -7917,6 +8186,33 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
+    Aligns the active viewport perpendicular to selected wall faces and frames the selection.
+    A temporary orthographic camera transfers the face orientation into the final User view.
+    */
+    function runAlignCameraToWallFaces =
+    (
+        setProgress 0
+        setStatus #message "Aligning User view to selected wall faces..."
+        operation_success = alignViewportToSelectedWallFaces()
+        setProgress 100
+
+
+        if operation_success then
+        (
+            setStatus #success WallFixer.last_slice_report
+        )
+        else
+        (
+            setStatus #warning WallFixer.last_slice_report
+        )
+
+
+        operation_success
+        -- return
+    )
+
+
+    /*
     Centers the pivot of every selected scene node using MaxScript CenterPivot.
     Geometry and modifier stacks remain unchanged.
     */
@@ -7933,6 +8229,51 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
 
 
+        setProgress 100
+
+
+        if operation_success then
+        (
+            setStatus #success WallFixer.last_slice_report
+        )
+        else
+        (
+            setStatus #warning WallFixer.last_slice_report
+        )
+
+
+        operation_success
+        -- return
+    )
+
+
+
+    /*
+    Splits the current object by its single selected edge and explodes the result into two objects.
+    Reports unsupported selections or splits that do not produce exactly two elements.
+    */
+    function runSplitSelectedEdge =
+    (
+        setProgress 0
+        setStatus #message "Splitting selected edge..."
+        operation_success = false
+
+
+        try
+        (
+            undo "Wall-Fixer - Split Selected Edge" on
+            (
+                operation_success = WallFixer.splitSelectedEdgeToObjects()
+            )
+        )
+        catch
+        (
+            operation_success = false
+            WallFixer.last_slice_report = "Split failed: " + (getCurrentException() as string)
+        )
+
+
+        if operation_success then cleanupRedundantVerticesAfterGeometryChange (selection as array)
         setProgress 100
 
 
@@ -11133,6 +11474,57 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
     )
 
 
+
+    /*
+    Activates one named Wall-Fixer slice modifier on the first selected object.
+    CTRL variants also enter Edge sub-object level 2 after activating the modifier.
+    */
+    function activateSliceWallModifier modifier_name enter_edge_level:false =
+    (
+        if selection.count == 0 then
+        (
+            setStatus #warning "H \\ V: select an object with a Slice modifier."
+            return false
+        )
+
+        object_node = selection[1]
+        target_modifier = undefined
+        requested_name = toUpper (modifier_name as string)
+
+        for modifier in object_node.modifiers while target_modifier == undefined do
+        (
+            if (toUpper (modifier.name as string)) == requested_name then target_modifier = modifier
+        )
+
+        if target_modifier == undefined then
+        (
+            setStatus #warning ("H \\ V: modifier not found: " + modifier_name)
+            return false
+        )
+
+        try
+        (
+            select object_node
+            max modify mode
+            modPanel.setCurrentObject target_modifier
+
+            if enter_edge_level then
+            (
+                if classOf target_modifier == Edit_Poly then target_modifier.SetEPolySelLevel #Edge
+                subObjectLevel = 2
+            )
+
+            setStatus #success (modifier_name + (if enter_edge_level then " | Edge level 2" else " activated"))
+            true
+        )
+        catch
+        (
+            setStatus #error ("H \\ V failed: " + (getCurrentException() as string))
+            false
+        )
+        -- return
+    )
+
     /*
     Returns true when a modifier name belongs to a Wall-Fixer slicing pass.
     Supports both current directional modifiers and the legacy combined slice modifier.
@@ -11400,6 +11792,12 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
 
         process_status_label.AutoSize = false
         process_status_label.TextAlign = content_alignment_class.MiddleLeft
+        progress_count_label.AutoSize = false
+        progress_count_label.TextAlign = content_alignment_class.MiddleCenter
+        progress_count_label.BackColor = (dotNetClass "System.Drawing.Color").Transparent
+        progress_count_label.ForeColor = text_color
+        progress_count_label.Text = ""
+        progress_count_label.Visible = false
         process_status_label.BackColor = background_color
         process_status_label.ForeColor = text_color
         process_status_label.Font = dotNetObject "System.Drawing.Font" process_status_label.Font font_style_class.Bold
@@ -11429,20 +11827,20 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
         updateVerticalLayout current_dialog_size.y
 
 
-        addSubRollout workflow_subrollout WallFixerOptionsRollout rolledUp:false
-        addSubRollout workflow_subrollout WallFixerPreProcessRollout rolledUp:false
+        addSubRollout workflow_subrollout WallFixerOptionsRollout rolledUp:saved_options_rolled_up
+        addSubRollout workflow_subrollout WallFixerPreProcessRollout rolledUp:saved_preprocess_rolled_up
 
 
         if wallFaceClassifierRollout != undefined then
         (
-            addSubRollout workflow_subrollout wallFaceClassifierRollout rolledUp:false
+            addSubRollout workflow_subrollout wallFaceClassifierRollout rolledUp:saved_outer_walls_rolled_up
         )
 
 
-        addSubRollout workflow_subrollout WallFixerEdgeFixerRollout rolledUp:true
-        addSubRollout workflow_subrollout WallFixerSliceWallsRollout rolledUp:true
-        addSubRollout workflow_subrollout WallFixerPostProcessRollout rolledUp:true
-        addSubRollout workflow_subrollout WallFixerHelpersRollout rolledUp:true
+        addSubRollout workflow_subrollout WallFixerEdgeFixerRollout rolledUp:saved_edge_fixer_rolled_up
+        addSubRollout workflow_subrollout WallFixerSliceWallsRollout rolledUp:saved_slice_walls_rolled_up
+        addSubRollout workflow_subrollout WallFixerPostProcessRollout rolledUp:saved_postprocess_rolled_up
+        addSubRollout workflow_subrollout WallFixerHelpersRollout rolledUp:saved_helpers_rolled_up
     )
 
 

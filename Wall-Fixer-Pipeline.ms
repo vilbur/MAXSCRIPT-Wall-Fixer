@@ -1,5 +1,5 @@
-/*
-Wall-Fixer Pipeline 0.22
+﻿/*
+Wall-Fixer Pipeline 0.23
 Native Edit Poly topology snapshot and wall slicing pipeline.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_pipeline_file_version = "0.22"
-global wall_fixer_pipeline_tool_version = 0.22
+global wall_fixer_pipeline_file_version = "0.23"
+global wall_fixer_pipeline_tool_version = 0.83
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -1018,6 +1018,61 @@ struct WMCWallSlicePipeline
         -- return
     ),
     /*
+    Returns live topology indices appended after a known pre-operation maximum index.
+    Slice-created topology is appended by Edit Poly, so this avoids rediscovering new items geometrically.
+    */
+    function getAppendedValidIndices original_max_index valid_items =
+    (
+        result = #{}
+        if valid_items == undefined then return result
+
+        first_new_index = amax 1 (original_max_index + 1)
+        last_index = valid_items.count
+
+        if first_new_index <= last_index then
+        (
+            for item_index = first_new_index to last_index do
+            (
+                if valid_items[item_index] then result[item_index] = true
+            )
+        )
+
+        result
+        -- return
+    ),
+
+    /*
+    Returns newly appended non-border edges after one Edit Poly slice.
+    Only the appended index range is inspected.
+    */
+    function findAppendedNewEdges original_edge_max_index =
+    (
+        t = refreshTopology()
+        result = getAppendedValidIndices original_edge_max_index t.validEdges
+        result = result - t.border
+        result
+        -- return
+    ),
+
+    /*
+    Tests appended-index topology detection without requiring scene geometry.
+    */
+    function testAppendedTopologyIndexSelection =
+    (
+        valid_items = #{}
+        expected = #{}
+
+        for item_index = 1 to 8 do valid_items[item_index] = true
+        valid_items[6] = false
+        expected[5] = true
+        expected[7] = true
+        expected[8] = true
+
+        (getAppendedValidIndices 4 valid_items) == expected
+        -- return
+    ),
+
+    /*
     Finds the current vertex index matching a preserved corner position.
     The nearest evaluated vertex is returned so topology refreshes do not invalidate stored indices.
     */
@@ -1283,6 +1338,7 @@ struct WMCWallSlicePipeline
 
         local original_vertex_count = t.validVertices.numberSet
         local original_edge_count = t.validEdges.numberSet
+        local original_edge_max_index = t.validEdges.count
         local original_face_count = t.validFaces.numberSet
         local original_vertices = copy t.validVertices
         local original_points = for vertex_index in t.validVertices collect t.points[vertex_index]
@@ -1337,7 +1393,7 @@ struct WMCWallSlicePipeline
 
         local topology_changed = (t.validVertices.numberSet != original_vertex_count or t.validEdges.numberSet != original_edge_count or t.validFaces.numberSet != original_face_count)
 
-        local new_edges = findNewEdges original_segments
+        local new_edges = findAppendedNewEdges original_edge_max_index
         if topology_changed and new_edges.numberSet == 0 then
         (
             /* Geometric before/after matching can be over-tolerant at large world coordinates.

@@ -1,4 +1,28 @@
-﻿# Changes
+# Changes
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added Slice Walls `H \ V` button between the main Slice and Select controls; LMB/RMB activate `SLICE HORIZONTAL` / `SLICE VERTICAL`, and CTRL variants also enter Edge sub-object level 2; project version 0.91.
+
+2026-09-22 — `Wall-Fixer-Core.ms`, `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added HELPERS `Split`; LMB requires one selected geometry object and one selected edge, supports Editable Poly and top Edit Poly, splits the edge, explodes disconnected elements, cleans redundant vertices, and succeeds when exactly two objects result; project version 0.90.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added sequential main pipeline rollout prefixes: `1 PRE-PROCESS & FIX GEOMETRY`, `2 GET OUTER WALLS`, `3 EDGE FIXER`, `4 SLICE WALLS`, and `5 POST-PROCESS`; `Options` and `HELPERS` remain unnumbered; project version 0.89.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: renamed the Slice Walls main action from `9. SLICE SELECTED WALLS` to `9. SLICE WALLS`; project version 0.88.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added HELPERS `Align Camera`; LMB reads selected Editable Poly/top Edit Poly wall faces, builds an averaged world-space face normal, transfers that orientation through a temporary orthographic camera into User view, deletes the camera, and Zoom Extents Selected frames the selection; project version 0.87.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: fixed rollout-state persistence crash triggered by `SLICE SELECTED WALLS`; replaced invalid rollout `.rolledUp` reads with native rollout `.open` and invert the value when storing the existing `1 = rolled up` INI format; added `testRolloutOpenPersistence`; project version 0.85.
+
+2026-09-22 — `Wall-Fixer-Core.ms`, `Wall-Fixer.ms`: fixed `SLICE SELECTED WALLS` LMB directional dispatch; Vertical now builds only the `SLICE VERTICAL` pass, Horizontal builds only the `SLICE HORIZONTAL` pass, while `#all` remains a single mixed pass and the UI RMB both-modes action remains separate; added `testSliceDirectionalPassKinds`; project version 0.84.
+
+2026-09-22 — `Wall-Fixer-Pipeline.ms`, `Wall-Fixer-Core.ms`, `Wall-Fixer.ms`: optimized large `SLICE SELECTED WALLS` batches by treating Edit Poly slice-created topology as appended indices; new edges are detected from the appended edge range instead of comparing every current edge against every pre-slice edge, Slice Precision inspects only appended vertex IDs, and sliced-edge cleanup inspects only newly reported edges plus their touched vertices; geometric re-resolution remains for topology-changing cleanup operations; added appended-index tests; project version 0.83.
+
+2026-09-22 — `Wall-Fixer-Core.ms`, `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added a progress-bar overlay showing object progress as `x \ n` plus current object name and vertex count; Core now supplies object context alongside task progress, and running/idle visibility is synchronized so the progress area replaces the idle status area only while work is active; project version 0.82.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: rollout rolled-up/expanded states are now persisted in `Wall-Fixer.ini` and restored for all parent workflow rollouts plus nested EDGE FIXER / GET OUTER WALLS Options rollouts; project version 0.81.
+
+2026-09-22 — `Wall-Fixer-Core.ms`, `Wall-Fixer.ms`: successful `SLICE SELECTED WALLS` runs now record elapsed processing time, processed object count, and total processed source-vertex count in the success report and append each successful run to `Wall-Fixer-Slice-Stats.csv` in the 3ds Max plugcfg folder; project version 0.80.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: removed `SLICE WALLS > CHECK RESULT` and compacted the Slice Walls rollout; updated the parent-width layout test; project version 0.79.
 
 2026-09-22 — `Wall-Fixer-Core.ms`, `Wall-Fixer.ms`: optimized `SLICE SELECTED WALLS` command-panel handling; Edit Poly Modify context is activated only when the required node/modifier is not already active, repeated per-task Modify-panel refreshes were removed, the batch no longer switches to Create mode after every processed object, and the original command-panel mode/subobject level is restored once after the batch; added `testSliceModifyContextGuards`; project version 0.78.
 
@@ -40,3 +64,8 @@
 2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: uppercased `GET OUTER WALLS` rollout title; project version 0.51.
 
 - 2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: EDGE FIXER `OPTIONS` now mirrors Get Outer Walls rolled-state behavior; EDGE FIXER, Get Outer Walls, and main workflow subrollout slots use the full parent width; EDGE FIXER full-row controls retain 4 px side padding when OPTIONS is toggled. Project version 0.57.
+## 2026-09-22
+- `Wall-Fixer-UI.ms`: fixed the stray comma after `testRolloutOpenPersistence`, which caused an init-time MAXScript parser error.
+- `Wall-Fixer.ms`: applied the same fix to the bundled UI snapshot; bumped bundled loader/UI project registration to 0.86.
+- Verified the standalone UI has no other function-ending `),` parser pattern at top level.
+
