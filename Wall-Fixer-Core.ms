@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.23"
-global wall_fixer_core_tool_version = 0.37
+global wall_fixer_core_file_version = "0.24"
+global wall_fixer_core_tool_version = 0.54
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -2943,6 +2943,86 @@ struct WallFixer_v
             if not batch_quiet then format "%\n" last_slice_report
             true
         )
+        -- return
+    ),
+
+
+    /*
+    Runs the Helpers Attach RMB workflow on the current geometry selection.
+    The merged target is welded at 0.0, centered, and quadrified only when its triangle count is within the supplied limit.
+    */
+    function attachCenterWeldQuadrifySelection triangle_limit:12 =
+    (
+        local attach_success = attachAndWeldSelection 0.0
+        local target_node = if selection.count == 1 then selection[1] else undefined
+        local pivot_success = false
+        local triangle_count = 0
+        local quadrify_attempted = false
+        local quadrify_success = true
+        local face_count = 0
+
+
+        if target_node == undefined or not(isValidNode target_node) or classOf target_node.baseObject != Editable_Poly then
+        (
+            last_slice_report = "Attach RMB: merged Editable Poly target was not available."
+            if not batch_quiet then format "%\n" last_slice_report
+            return false
+        )
+
+
+        try
+        (
+            CenterPivot target_node
+            pivot_success = true
+        )
+        catch
+        (
+            pivot_success = false
+        )
+
+
+        face_count = polyOp.getNumFaces target_node
+
+        for face_index = 1 to face_count do
+        (
+            if polyOp.getFaceDeg target_node face_index == 3 then
+            (
+                triangle_count += 1
+            )
+        )
+
+
+        if triangle_count <= triangle_limit then
+        (
+            quadrify_attempted = true
+
+            try
+            (
+                select target_node
+                max modify mode
+                subObjectLevel = 0
+                quadrify_success = PolyToolsModeling.Quadrify false false
+            )
+            catch
+            (
+                quadrify_success = false
+            )
+        )
+
+
+        update target_node
+        select target_node
+        completeRedraw()
+
+
+        last_slice_report = "Attach RMB: attached selection, centered pivot, welded all vertices at 0.0; triangles: " + \
+            (triangle_count as string) + "; quadrify: " + \
+            (if quadrify_attempted then (if quadrify_success then "applied" else "failed") else "skipped (> " + (triangle_limit as string) + ")") + "."
+
+        if not batch_quiet then format "%\n" last_slice_report
+
+
+        attach_success and pivot_success and quadrify_success
         -- return
     ),
 

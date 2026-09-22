@@ -1,4 +1,4 @@
-﻿/*
+/*
 Wall-Fixer UI 0.41
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.41"
-global wall_fixer_ui_tool_version = 0.50
+global wall_fixer_ui_file_version = "0.45"
+global wall_fixer_ui_tool_version = 0.54
 
 
 /*
@@ -1086,7 +1086,7 @@ Step 4 is exposed as its own top-level Get Outter Walls rollout.
 */
 rollout WallFixerPreProcessRollout "PRE-PROCESS & FIX GEOMETRY" width:310 height:126
 (
-    button planar_button "1. CHECK AND MAKE WALLS PLANAR" pos:[8,8] width:294 height:34 \
+    button planar_button "1. CHECK AND MAKE WALLS PLANAR" pos:[4,8] width:302 height:34 \
         tooltip:"LMB: check selected walls and select vertices outside the dominant wall plane. An existing top Edit Poly is reused; a NON PLANAR VERTS marker is added only when required.\n\nRMB: move only detected outlier vertices onto the dominant wall plane. Script selection markers are removed first, and the object is collapsed to Editable Poly only when the real stack requires repair."
 
 
@@ -1099,7 +1099,7 @@ rollout WallFixerPreProcessRollout "PRE-PROCESS & FIX GEOMETRY" width:310 height
     label weld_unit_label "" pos:[270,57] width:32 height:18 align:#left
 
 
-    button explode_walls_button "3. EXPLODE OBJECTS TO WALLS" pos:[8,88] width:294 height:30 \
+    button explode_walls_button "3. EXPLODE OBJECTS TO WALLS" pos:[4,88] width:302 height:30 \
         tooltip:"1. NORMALS: Explode walls by normals\n\n2. FACE DIRECTION: Explode walls by face direction — detects front/backside normals\n\n3. XY POSITION: Explode walls by position\n\n4. ELEMENTS: Explode to elements"
 
 
@@ -1271,10 +1271,10 @@ The Straight Edge Fixer action callbacks are inherited without changing their ge
 */
 rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:350
 (
-    subRollout edge_fixer_options_subrollout "" pos:[0,48] width:310 height:24
+    subRollout edge_fixer_options_subrollout "" pos:[0,48] width:302 height:24
 
 
-    groupBox edge_z_group "6. EDGE Z-LEVEL FIXING AND BORDER EDGES CHECK" pos:[8,78] width:294 height:150
+    groupBox edge_z_group "6. EDGE Z-LEVEL FIXING AND BORDER EDGES CHECK" pos:[4,78] width:302 height:150
 
 
     button check_horizontal_button "CHECK HORIZONTAL" pos:[18,100] width:127 height:34 \
@@ -1291,15 +1291,15 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:350
         tooltip:"Detect repeated horizontal edge levels and align nearby horizontal edges to TOP, BOTTOM or CENTER target Z."
 
 
-    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[8,224] width:294 height:34 \
+    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[4,224] width:302 height:34 \
         tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
 
 
-    button fix_ngons_button "7. FIX N-GONS" pos:[8,264] width:294 height:34 \
+    button fix_ngons_button "7. FIX N-GONS" pos:[4,264] width:302 height:34 \
         tooltip:"Run the current Wall-Fixer Fix N-gons function before slicing."
 
 
-    groupBox check_result_group "8. CHECK RESULT" pos:[8,304] width:294 height:38
+    groupBox check_result_group "8. CHECK RESULT" pos:[4,304] width:302 height:38
     label check_result_label "Manual viewport check of geometry fixes." pos:[18,320] width:274 height:18
 
 
@@ -1423,11 +1423,11 @@ rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
         tooltip:"Suppress verbose Listener output during the inherited batch slicing operation."
 
 
-    button slice_selected_walls_button "9. SLICE SELECTED WALLS" pos:[8,42] width:294 height:38 \
+    button slice_selected_walls_button "9. SLICE SELECTED WALLS" pos:[4,42] width:302 height:38 \
         tooltip:"Reuse the current directional slicing system. Vertical and Horizontal remain separate Edit Poly modifiers and duplicate slice modifiers are prevented."
 
 
-    groupBox slice_check_result_group "CHECK RESULT" pos:[8,84] width:294 height:40
+    groupBox slice_check_result_group "CHECK RESULT" pos:[4,84] width:302 height:40
     label slice_check_result_label "Manual viewport check after slicing." pos:[18,101] width:274 height:18
 
 
@@ -1456,23 +1456,23 @@ The two wall-completion buttons remain disabled until their detailed behavior is
 */
 rollout WallFixerPostProcessRollout "POST-PROCESS" width:310 height:268
 (
-    button duplicated_vertices_button "10. DUPLICATED VERTICES" pos:[8,8] width:294 height:34 \
+    button duplicated_vertices_button "10. DUPLICATED VERTICES" pos:[4,8] width:302 height:34 \
         tooltip:"LMB: select duplicate-position vertices at 0.01 tolerance.\n\nRMB: run the current duplicate-vertex fix at 0.01 tolerance."
 
 
-    button redundant_loops_button "11. REMOVE REDUNDANT LOOPS AND EDGES" pos:[8,48] width:294 height:34 \
+    button redundant_loops_button "11. REMOVE REDUNDANT LOOPS AND EDGES" pos:[4,48] width:302 height:34 \
         tooltip:"Reuse the current Redundant Loop Cleanup operation."
 
 
-    button repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" pos:[8,88] width:294 height:34 enabled:false \
+    button repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" pos:[4,88] width:302 height:34 enabled:false \
         tooltip:"Reserved for the new missing-loop completion tool."
 
 
-    button post_fix_ngons_button "13. FIX N-GONS" pos:[8,128] width:294 height:34 \
+    button post_fix_ngons_button "13. FIX N-GONS" pos:[4,128] width:302 height:34 \
         tooltip:"Run the current Wall-Fixer Fix N-gons function again after slicing cleanup."
 
 
-    groupBox walls_completion_group "WALLS COMPLETION" pos:[8,170] width:294 height:90
+    groupBox walls_completion_group "WALLS COMPLETION" pos:[4,170] width:302 height:90
 
 
     button attach_walls_button "14. ATTACH WALLS TO OBJECTS" pos:[18,190] width:264 height:28 enabled:false \
@@ -1515,7 +1515,7 @@ These actions operate on the current scene selection.
 rollout WallFixerHelpersRollout "HELPERS" width:310 height:48
 (
     button attach_button "Attach" pos:[8,8] width:143 height:30 \
-        tooltip:"Attach all selected geometry into the first selected object."
+        tooltip:"LMB: Attach all selected geometry into the first selected object.\n\nRMB: Attach selection, center the merged pivot, weld all vertices at 0.0, then quadrify when the merged object has at most 12 triangular faces."
 
 
     button reset_pivot_button "Reset Pivot to Center" pos:[159,8] width:143 height:30 \
@@ -1525,6 +1525,12 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:48
     on attach_button pressed do
     (
         ::WallFixerRollout.runAttachSelectedObjects()
+    )
+
+
+    on attach_button rightclick do
+    (
+        ::WallFixerRollout.runAttachSelectedObjectsRmb()
     )
 
 
@@ -5846,14 +5852,14 @@ function testWallFaceForceModifier =
 
 /*
 Verifies compact/expanded Get Outer Walls OPTIONS sizing without changing the final layout.
-The test checks full-width slot sizing plus collapsed and expanded heights.
+The test checks parent-width-minus-8 slot sizing plus collapsed and expanded heights.
 */
 function testWallFaceOptionsLayout =
 (
     local slot_control = wallFaceClassifierRollout.wall_face_options_subrollout
     local original_rollout_height = wallFaceClassifierRollout.height
     local original_slot_height = slot_control.height
-    local width_ok = slot_control.width == wallFaceClassifierRollout.width
+    local width_ok = slot_control.width == (wallFaceClassifierRollout.width - 8)
     local collapsed_ok = false
     local expanded_ok = false
 
@@ -5880,13 +5886,13 @@ function testWallFaceOptionsLayout =
 
 /*
 Verifies compact/expanded EDGE FIXER OPTIONS sizing without changing the final layout.
-The test checks full-width slot sizing, control shifting and parent rollout height.
+The test checks parent-width-minus-8 slot sizing, control shifting and parent rollout height.
 */
 function testEdgeFixerOptionsLayout =
 (
     local slot_control = WallFixerEdgeFixerRollout.edge_fixer_options_subrollout
     local original_rollout_height = WallFixerEdgeFixerRollout.height
-    local width_ok = slot_control.width == WallFixerEdgeFixerRollout.width
+    local width_ok = slot_control.width == (WallFixerEdgeFixerRollout.width - 8)
     local collapsed_ok = false
     local expanded_ok = false
 
@@ -5907,6 +5913,37 @@ function testEdgeFixerOptionsLayout =
 
 
     test_passed -- return
+)
+
+
+/*
+Verifies full-row parent controls and parent group boxes use 4px side padding.
+The test checks width equals parent rollout width minus 8 and left position equals 4.
+*/
+function testParentControlWidths =
+(
+    local width_ok = true
+
+
+    width_ok = width_ok and (WallFixerPreProcessRollout.planar_button.pos.x == 4) and (WallFixerPreProcessRollout.planar_button.width == (WallFixerPreProcessRollout.width - 8))
+    width_ok = width_ok and (WallFixerPreProcessRollout.explode_walls_button.pos.x == 4) and (WallFixerPreProcessRollout.explode_walls_button.width == (WallFixerPreProcessRollout.width - 8))
+    width_ok = width_ok and (WallFixerEdgeFixerRollout.edge_z_group.pos.x == 4) and (WallFixerEdgeFixerRollout.edge_z_group.width == (WallFixerEdgeFixerRollout.width - 8))
+    width_ok = width_ok and (WallFixerEdgeFixerRollout.two_edge_verts_button.pos.x == 4) and (WallFixerEdgeFixerRollout.two_edge_verts_button.width == (WallFixerEdgeFixerRollout.width - 8))
+    width_ok = width_ok and (WallFixerEdgeFixerRollout.fix_ngons_button.pos.x == 4) and (WallFixerEdgeFixerRollout.fix_ngons_button.width == (WallFixerEdgeFixerRollout.width - 8))
+    width_ok = width_ok and (WallFixerEdgeFixerRollout.check_result_group.pos.x == 4) and (WallFixerEdgeFixerRollout.check_result_group.width == (WallFixerEdgeFixerRollout.width - 8))
+    width_ok = width_ok and (WallFixerSliceWallsRollout.slice_selected_walls_button.pos.x == 4) and (WallFixerSliceWallsRollout.slice_selected_walls_button.width == (WallFixerSliceWallsRollout.width - 8))
+    width_ok = width_ok and (WallFixerSliceWallsRollout.slice_check_result_group.pos.x == 4) and (WallFixerSliceWallsRollout.slice_check_result_group.width == (WallFixerSliceWallsRollout.width - 8))
+    width_ok = width_ok and (WallFixerPostProcessRollout.duplicated_vertices_button.pos.x == 4) and (WallFixerPostProcessRollout.duplicated_vertices_button.width == (WallFixerPostProcessRollout.width - 8))
+    width_ok = width_ok and (WallFixerPostProcessRollout.redundant_loops_button.pos.x == 4) and (WallFixerPostProcessRollout.redundant_loops_button.width == (WallFixerPostProcessRollout.width - 8))
+    width_ok = width_ok and (WallFixerPostProcessRollout.repair_missing_loops_button.pos.x == 4) and (WallFixerPostProcessRollout.repair_missing_loops_button.width == (WallFixerPostProcessRollout.width - 8))
+    width_ok = width_ok and (WallFixerPostProcessRollout.post_fix_ngons_button.pos.x == 4) and (WallFixerPostProcessRollout.post_fix_ngons_button.width == (WallFixerPostProcessRollout.width - 8))
+    width_ok = width_ok and (WallFixerPostProcessRollout.walls_completion_group.pos.x == 4) and (WallFixerPostProcessRollout.walls_completion_group.width == (WallFixerPostProcessRollout.width - 8))
+
+
+    format "Parent control width test | result:%\n" width_ok
+
+
+    width_ok -- return
 )
 
 
@@ -6066,7 +6103,7 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:252 height:138
 )
 
 
-rollout wallFaceClassifierRollout "Get Outer Walls" width:276 height:110
+rollout wallFaceClassifierRollout "GET OUTER WALLS" width:276 height:110
 (
     button btn_classify "INNER \\ OUTTER" pos:[8,8] width:128 height:32 \
         tooltip:"LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
@@ -6082,7 +6119,7 @@ rollout wallFaceClassifierRollout "Get Outer Walls" width:276 height:110
     button btn_select_down "BOTTOM" pos:[203,46] width:65 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing BOTTOM faces or face mode selects BOTTOM faces."
 
 
-    subRollout wall_face_options_subrollout "" pos:[0,78] width:276 height:24
+    subRollout wall_face_options_subrollout "" pos:[0,78] width:268 height:24
 
 
     /*
@@ -6339,7 +6376,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
     dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,6] width:76 height:40
     dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:19
     dotNetControl status_line_bottom "System.Windows.Forms.RichTextBox" pos:[88,28] width:248 height:19
-    subRollout workflow_subrollout "" pos:[0,54] width:344 height:686
+    subRollout workflow_subrollout "" pos:[0,54] width:336 height:686
 
 
     local status_texts = #("Ready.", "")
@@ -6635,6 +6672,42 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         undo "Wall-Fixer - Attach" on
         (
             operation_success = WallFixer.attachSelectedObjects()
+        )
+
+
+        setProgress 100
+
+
+        if operation_success then
+        (
+            setStatus #success WallFixer.last_slice_report
+        )
+        else
+        (
+            setStatus #warning WallFixer.last_slice_report
+        )
+
+
+        operation_success
+        -- return
+    )
+
+
+
+    /*
+    Runs the Helpers Attach RMB workflow: attach, center pivot, weld at 0.0 and conditionally quadrify.
+    Quadrify is attempted only when the merged target contains at most 12 triangular faces.
+    */
+    function runAttachSelectedObjectsRmb =
+    (
+        setProgress 0
+        setStatus #message "Attaching, centering, welding and checking quadrify..."
+        operation_success = false
+
+
+        undo "Wall-Fixer - Attach RMB" on
+        (
+            operation_success = WallFixer.attachCenterWeldQuadrifySelection triangle_limit:12
         )
 
 
