@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer Core 0.28
+Wall-Fixer Core 0.39
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.36"
-global wall_fixer_core_tool_version = 0.926
+global wall_fixer_core_file_version = "0.39"
+global wall_fixer_core_tool_version = 0.944
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -80,6 +80,7 @@ struct WallFixer_v
     last_slice_elapsed_ms = 0,
     last_slice_processed_objects = 0,
     last_slice_processed_vertices = 0,
+    slice_progress_test_capture = undefined,
     slice_stats_csv_path = ((getDir #plugcfg) + "\\Wall-Fixer-Slice-Stats.csv"),
     batch_quiet = false,
     attach_weld_selection_order = #(),
@@ -2264,24 +2265,372 @@ struct WallFixer_v
     ),
 
     /*
-    Detects and removes redundant loops in one dedicated Cleanup LOOPS Edit Poly modifier.
-    The modifier is removed again when no valid redundant loops are found.
+    Returns the POST-PROCESS RMB mode for redundant-loop cleanup.
+    A live edge selection always takes precedence over automatic redundant-loop detection.
     */
-    function cleanupRedundantLoopsOnNode node angle_threshold:0.1 debug_output:true commit_delete:false =
+    function getRedundantLoopRemoveMode selected_edge_count =
+    (
+        if selected_edge_count > 0 then #selectedEdges else #allRedundant
+        -- return
+    ),
+
+    /*
+    Returns one selected edge source for a node, preferring the active Edit Poly, then other Edit Poly modifiers, then Editable Poly.
+    The result is #(source_kind, source_value, selected_edges).
+    */
+    function getRedundantLoopSelectedEdgeSource node =
+    (
+        if node == undefined or not(isValidNode node) then return #(#none, undefined, #{})
+
+        current_object = undefined
+        try
+        (
+            current_object = modPanel.getCurrentObject()
+        )
+        catch
+        (
+            current_object = undefined
+        )
+
+        if current_object != undefined and classOf current_object == Edit_Poly then
+        (
+            belongs_to_node = false
+            for modifier in node.modifiers while not belongs_to_node do
+            (
+                if modifier == current_object then belongs_to_node = true
+            )
+
+            if belongs_to_node then
+            (
+                selected_edges = #{}
+                try
+                (
+                    selected_edges = current_object.GetSelection #Edge node:node
+                )
+                catch
+                (
+                    selected_edges = #{}
+                )
+
+                if selected_edges.numberSet > 0 then return #(#editPoly, current_object, selected_edges)
+            )
+        )
+
+        for modifier in node.modifiers do
+        (
+            if classOf modifier == Edit_Poly then
+            (
+                selected_edges = #{}
+                try
+                (
+                    selected_edges = modifier.GetSelection #Edge node:node
+                )
+                catch
+                (
+                    selected_edges = #{}
+                )
+
+                if selected_edges.numberSet > 0 then return #(#editPoly, modifier, selected_edges)
+            )
+        )
+
+        if classOf node.baseObject == Editable_Poly then
+        (
+            selected_edges = #{}
+            try
+            (
+                selected_edges = polyop.getEdgeSelection node.baseObject
+            )
+            catch
+            (
+                selected_edges = #{}
+            )
+
+            if selected_edges.numberSet > 0 then return #(#editablePoly, node.baseObject, selected_edges)
+        )
+
+        #(#none, undefined, #{})
+        -- return
+    ),
+
+    /*
+    Selects detected redundant-loop edges on one node without removing geometry.
+    An existing top WMC - CLEANUP LOOPS Edit Poly is reused; otherwise a dedicated cleanup modifier is created only when needed.
+    */
+    function selectRedundantLoopsOnNode node angle_threshold:0.1 debug_output:true =
+    (
+        if node == undefined or not(isValidNode node) then return #(false, 0, 0, "invalid node", undefined)
+        if not(isSliceSupportedNode node) then return #(false, 0, 0, "requires Editable Poly geometry or an Edit Poly workflow", undefined)
+
+        cleanup_modifier = undefined
+        created_modifier = false
+        operation_error = undefined
+        loop_count = 0
+        redundant_edge_count = 0
+
+        try
+        (
+            if node.modifiers.count > 0 and classOf node.modifiers[1] == Edit_Poly and node.modifiers[1].name == "WMC - CLEANUP LOOPS" then
+            (
+                cleanup_modifier = node.modifiers[1]
+            )
+            else
+            (
+                cleanup_modifier = Edit_Poly name:"WMC - CLEANUP LOOPS"
+                addModifier node cleanup_modifier
+                created_modifier = true
+                update node
+            )
+
+            cleanup_modifier.SetPrimaryNode node
+            cleanup_modifier.useStackSelection = false
+
+            detection_data = detectRedundantLoops node cleanup_modifier angle_threshold:angle_threshold debug_output:debug_output
+            loop_records = detection_data[1]
+            redundant_edges = detection_data[2]
+            loop_count = loop_records.count
+            redundant_edge_count = redundant_edges.numberSet
+
+            cleanup_modifier.SetEPolySelLevel #Edge
+            cleanup_modifier.SetSelection #Edge #{} node:node
+            if redundant_edge_count > 0 then cleanup_modifier.Select #Edge redundant_edges node:node
+
+            stored_selection = cleanup_modifier.GetSelection #Edge node:node
+            if stored_selection != redundant_edges then
+            (
+                throw ("Cleanup LOOPS could not select the detected redundant edges. Requested:" + (redundant_edges as string) + " actual:" + (stored_selection as string))
+            )
+
+            if redundant_edge_count == 0 and created_modifier then
+            (
+                deleteModifier node cleanup_modifier
+                cleanup_modifier = undefined
+                update node
+            )
+        )
+        catch
+        (
+            operation_error = getCurrentException()
+
+            if cleanup_modifier != undefined and created_modifier then
+            (
+                try(deleteModifier node cleanup_modifier)catch()
+                cleanup_modifier = undefined
+            )
+
+            update node
+        )
+
+        if operation_error == undefined then
+        (
+            #(true, loop_count, redundant_edge_count, "", cleanup_modifier)
+        )
+        else
+        (
+            #(false, 0, 0, operation_error as string, undefined)
+        )
+        -- return
+    ),
+
+    /*
+    Selects redundant-loop edges on every selected supported wall and reports the aggregate result.
+    A single selected object is switched to Edge sub-object mode so the detected loops are immediately visible.
+    */
+    function selectRedundantLoopsSelection angle_threshold:0.1 debug_output:true =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+        selected_nodes = selection as array
+
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select at least one wall object."
+            return #(false, 0, 0)
+        )
+
+        total_loops = 0
+        total_edges = 0
+        failed_nodes = #()
+        report_text = ""
+        display_node = undefined
+        display_modifier = undefined
+
+        for node in selected_nodes do
+        (
+            selection_result = selectRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output
+            if selection_result[1] then
+            (
+                total_loops += selection_result[2]
+                total_edges += selection_result[3]
+                report_text += node.name + ": loops " + (selection_result[2] as string) + ", edges selected " + (selection_result[3] as string) + ".\n"
+
+                if display_modifier == undefined and selection_result[3] > 0 then
+                (
+                    display_node = node
+                    display_modifier = selection_result[5]
+                )
+            )
+            else
+            (
+                append failed_nodes node.name
+                report_text += node.name + ": FAILED - " + selection_result[4] + ".\n"
+            )
+        )
+
+        select selected_nodes
+
+        if selected_nodes.count == 1 and display_modifier != undefined then
+        (
+            try
+            (
+                max modify mode
+                display_modifier.SetPrimaryNode display_node
+                modPanel.setCurrentObject display_modifier
+                display_modifier.SetEPolySelLevel #Edge
+                subObjectLevel = 2
+            )
+            catch
+            (
+            )
+        )
+
+        completeRedraw()
+
+        if failed_nodes.count == 0 then
+        (
+            if total_edges > 0 then
+            (
+                last_slice_report = "Redundant Loop Selection complete. Loops: " + (total_loops as string) + "; edges selected: " + (total_edges as string) + ".\n" + report_text
+            )
+            else
+            (
+                last_slice_report = "No redundant loops found.\n" + report_text
+            )
+
+            if not batch_quiet then format "%" last_slice_report
+            #(true, total_loops, total_edges)
+        )
+        else
+        (
+            last_slice_report = "Redundant Loop Selection completed with failures.\n" + report_text
+            if not batch_quiet then format "%" last_slice_report
+            #(false, total_loops, total_edges)
+        )
+        -- return
+    ),
+
+    /*
+    Removes the supplied selected edges from one Edit Poly or Editable Poly source without deleting attached faces.
+    Edit Poly uses Remove Edge; Editable Poly uses the native EditablePoly.Remove interface with a temporary user flag.
+    */
+    function removeRedundantLoopSelectedEdgesOnNode node source_kind source_value selected_edges =
+    (
+        if node == undefined or not(isValidNode node) then return #(false, 0, "invalid node")
+        if selected_edges == undefined or selected_edges.numberSet == 0 then return #(false, 0, "no selected edges")
+
+        operation_error = undefined
+        removed_edge_count = selected_edges.numberSet
+        old_remove_ctrl = undefined
+        edge_flag = undefined
+
+        try
+        (
+            case source_kind of
+            (
+                #editPoly:
+                (
+                    if source_value == undefined or classOf source_value != Edit_Poly then throw "invalid Edit Poly source"
+
+                    old_remove_ctrl = source_value.remveEdgeCtrlKey
+                    source_value.remveEdgeCtrlKey = false
+                    source_value.SetPrimaryNode node
+                    source_value.SetEPolySelLevel #Edge
+                    source_value.SetSelection #Edge selected_edges node:node
+
+                    actual_selection = source_value.GetSelection #Edge node:node
+                    if actual_selection != selected_edges then
+                    (
+                        throw ("Could not restore selected edges before removal. Requested:" + (selected_edges as string) + " actual:" + (actual_selection as string))
+                    )
+
+                    source_value.SetOperation #RemoveEdge
+                    source_value.Commit()
+                    source_value.remveEdgeCtrlKey = old_remove_ctrl
+                    old_remove_ctrl = undefined
+                    source_value.RefreshScreen()
+                    update node
+                )
+
+                #editablePoly:
+                (
+                    if classOf node.baseObject != Editable_Poly then throw "invalid Editable Poly source"
+
+                    edge_flag = bit.set 0 30 true
+                    polyop.setEdgeFlags node.baseObject selected_edges edge_flag mask:edge_flag undoable:true
+                    remove_success = source_value.EditablePoly.Remove selLevel:#Edge flag:edge_flag
+                    if not remove_success then throw "Editable Poly Remove Edge failed"
+
+                    try(polyop.setEdgeFlags node.baseObject #all 0 mask:edge_flag undoable:false)catch()
+                    polyop.setEdgeSelection node.baseObject #{}
+                    update node
+                )
+
+                default:
+                (
+                    throw "unsupported selected-edge source"
+                )
+            )
+        )
+        catch
+        (
+            operation_error = getCurrentException()
+        )
+
+        if old_remove_ctrl != undefined and source_value != undefined then
+        (
+            try(source_value.remveEdgeCtrlKey = old_remove_ctrl)catch()
+        )
+
+        if operation_error == undefined then
+        (
+            #(true, removed_edge_count, "")
+        )
+        else
+        (
+            #(false, 0, operation_error as string)
+        )
+        -- return
+    ),
+
+    /*
+    Detects and removes redundant loops in one Cleanup LOOPS Edit Poly modifier.
+    The optional reuse mode lets POST-PROCESS RMB operate in the same dedicated top Cleanup LOOPS modifier used by its preceding LMB selection.
+    */
+    function cleanupRedundantLoopsOnNode node angle_threshold:0.1 debug_output:true commit_delete:false reuse_top_modifier:false =
     (
         if node == undefined or not(isValidNode node) then return #(false, 0, 0, "invalid node")
         if not(isSliceSupportedNode node) then return #(false, 0, 0, "requires Editable Poly geometry or an Edit Poly workflow")
 
-        local cleanup_modifier = undefined
-        local operation_error = undefined
-        local loop_count = 0
-        local redundant_edge_count = 0
+        cleanup_modifier = undefined
+        created_modifier = false
+        operation_error = undefined
+        loop_count = 0
+        redundant_edge_count = 0
+        old_remove_ctrl = undefined
 
         try
         (
-            cleanup_modifier = Edit_Poly name:"WMC - CLEANUP LOOPS"
-            addModifier node cleanup_modifier
-            update node
+            if reuse_top_modifier and node.modifiers.count > 0 and classOf node.modifiers[1] == Edit_Poly and node.modifiers[1].name == "WMC - CLEANUP LOOPS" then
+            (
+                cleanup_modifier = node.modifiers[1]
+            )
+            else
+            (
+                cleanup_modifier = Edit_Poly name:"WMC - CLEANUP LOOPS"
+                addModifier node cleanup_modifier
+                created_modifier = true
+                update node
+            )
 
             select node
             max modify mode
@@ -2289,39 +2638,47 @@ struct WallFixer_v
             cleanup_modifier.SetPrimaryNode node
             cleanup_modifier.useStackSelection = false
 
-            local detection_data = detectRedundantLoops node cleanup_modifier angle_threshold:angle_threshold debug_output:debug_output
-            local loop_records = detection_data[1]
-            local redundant_edges = detection_data[2]
+            detection_data = detectRedundantLoops node cleanup_modifier angle_threshold:angle_threshold debug_output:debug_output
+            loop_records = detection_data[1]
+            redundant_edges = detection_data[2]
             loop_count = loop_records.count
             redundant_edge_count = redundant_edges.numberSet
 
             if redundant_edge_count == 0 then
             (
-                deleteModifier node cleanup_modifier
-                cleanup_modifier = undefined
-                update node
+                if created_modifier then
+                (
+                    deleteModifier node cleanup_modifier
+                    cleanup_modifier = undefined
+                    update node
+                )
+                else
+                (
+                    cleanup_modifier.SetEPolySelLevel #Edge
+                    cleanup_modifier.SetSelection #Edge #{} node:node
+                )
 
                 if debug_output then
                 (
-                    if not batch_quiet then format "Wall-Fixer Redundant Loop Cleanup: node:% no redundant loops found; Cleanup LOOPS removed.\n" node.name
+                    if not batch_quiet then format "Wall-Fixer Redundant Loop Cleanup: node:% no redundant loops found.\n" node.name
                 )
 
                 return #(true, 0, 0, "")
             )
 
-            local edge_descriptors = #()
+            edge_descriptors = #()
             for edge_index in redundant_edges do
             (
-                local edge_a = cleanup_modifier.GetEdgeVertex edge_index 1 node:node
-                local edge_b = cleanup_modifier.GetEdgeVertex edge_index 2 node:node
+                edge_a = cleanup_modifier.GetEdgeVertex edge_index 1 node:node
+                edge_b = cleanup_modifier.GetEdgeVertex edge_index 2 node:node
 
                 if edge_a == undefined or edge_b == undefined then
                 (
                     throw ("Detected redundant-loop edge became invalid before cleanup: " + (edge_index as string))
                 )
 
-                local point_a = cleanup_modifier.GetVertex edge_a node:node
-                local point_b = cleanup_modifier.GetVertex edge_b node:node
+                point_a = cleanup_modifier.GetVertex edge_a node:node
+                point_b = cleanup_modifier.GetVertex edge_b node:node
 
                 if point_a == undefined or point_b == undefined then
                 (
@@ -2331,13 +2688,13 @@ struct WallFixer_v
                 append edge_descriptors #(edge_index, point_a, point_b)
             )
 
-            local old_remove_ctrl = cleanup_modifier.remveEdgeCtrlKey
+            old_remove_ctrl = cleanup_modifier.remveEdgeCtrlKey
             cleanup_modifier.remveEdgeCtrlKey = false
             cleanup_modifier.SetEPolySelLevel #Edge
             cleanup_modifier.SetSelection #Edge #{} node:node
             cleanup_modifier.Select #Edge redundant_edges node:node
 
-            local stored_selection = cleanup_modifier.GetSelection #Edge node:node
+            stored_selection = cleanup_modifier.GetSelection #Edge node:node
             if stored_selection != redundant_edges then
             (
                 throw ("Cleanup LOOPS could not select the detected redundant edges. Requested:" + (redundant_edges as string) + " actual:" + (stored_selection as string))
@@ -2346,9 +2703,10 @@ struct WallFixer_v
             cleanup_modifier.SetOperation #RemoveEdge
             cleanup_modifier.Commit()
             cleanup_modifier.remveEdgeCtrlKey = old_remove_ctrl
+            old_remove_ctrl = undefined
             update node
 
-            local unresolved_edges = #{}
+            unresolved_edges = #{}
             for edge_data in edge_descriptors do
             (
                 if doesDebugVisibleEdgeExistByEndpointPositions node edge_data[2] edge_data[3] tolerance:0.01 then
@@ -2371,7 +2729,12 @@ struct WallFixer_v
         (
             operation_error = getCurrentException()
 
-            if cleanup_modifier != undefined then
+            if old_remove_ctrl != undefined and cleanup_modifier != undefined then
+            (
+                try(cleanup_modifier.remveEdgeCtrlKey = old_remove_ctrl)catch()
+            )
+
+            if cleanup_modifier != undefined and created_modifier then
             (
                 try(deleteModifier node cleanup_modifier)catch()
                 cleanup_modifier = undefined
@@ -2393,9 +2756,9 @@ struct WallFixer_v
 
     /*
     Runs redundant-loop cleanup on every selected supported wall and restores the original node selection.
-    Nodes with no redundant loops receive no new modifiers.
+    Nodes with no redundant loops receive no new modifiers unless an existing top Edit Poly is explicitly reused.
     */
-    function cleanupRedundantLoopsSelection angle_threshold:0.1 debug_output:true =
+    function cleanupRedundantLoopsSelection angle_threshold:0.1 debug_output:true reuse_top_modifier:false =
     (
         last_slice_error = undefined
         last_slice_report = ""
@@ -2415,7 +2778,7 @@ struct WallFixer_v
 
         for node in selected_nodes do
         (
-            cleanup_result = cleanupRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output
+            cleanup_result = cleanupRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output reuse_top_modifier:reuse_top_modifier
             if cleanup_result[1] then
             (
                 processed_nodes += 1
@@ -2444,6 +2807,85 @@ struct WallFixer_v
             last_slice_report = "Redundant Loop Cleanup completed with failures.\n" + report_text
             if not batch_quiet then format "%" last_slice_report
             false
+        )
+        -- return
+    ),
+
+    /*
+    POST-PROCESS RMB removes live selected edges first; with no selected edges it removes all detected redundant-loop edges.
+    The result is #(completed, mode, removed_selected_edge_count).
+    */
+    function removeSelectedOrRedundantLoopEdgesSelection angle_threshold:0.1 debug_output:true =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+        selected_nodes = selection as array
+
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select at least one wall object."
+            return #(false, #none, 0)
+        )
+
+        edge_source_records = #()
+        selected_edge_count = 0
+
+        for node in selected_nodes do
+        (
+            source_data = getRedundantLoopSelectedEdgeSource node
+            if source_data[3].numberSet > 0 then
+            (
+                append edge_source_records #(node, source_data[1], source_data[2], source_data[3])
+                selected_edge_count += source_data[3].numberSet
+            )
+        )
+
+        remove_mode = getRedundantLoopRemoveMode selected_edge_count
+
+        if remove_mode == #allRedundant then
+        (
+            completed = cleanupRedundantLoopsSelection angle_threshold:angle_threshold debug_output:debug_output reuse_top_modifier:true
+            return #(completed, remove_mode, 0)
+        )
+
+        removed_edge_count = 0
+        failed_nodes = #()
+        report_text = ""
+
+        undo "Wall-Fixer - Remove Selected Edges" on
+        (
+            for source_record in edge_source_records do
+            (
+                node = source_record[1]
+                remove_result = removeRedundantLoopSelectedEdgesOnNode node source_record[2] source_record[3] source_record[4]
+
+                if remove_result[1] then
+                (
+                    removed_edge_count += remove_result[2]
+                    report_text += node.name + ": selected edges removed " + (remove_result[2] as string) + ".\n"
+                )
+                else
+                (
+                    append failed_nodes node.name
+                    report_text += node.name + ": FAILED - " + remove_result[3] + ".\n"
+                )
+            )
+        )
+
+        select selected_nodes
+        completeRedraw()
+
+        if failed_nodes.count == 0 then
+        (
+            last_slice_report = "Selected edge removal complete. Edges removed: " + (removed_edge_count as string) + ".\n" + report_text
+            if not batch_quiet then format "%" last_slice_report
+            #(true, remove_mode, removed_edge_count)
+        )
+        else
+        (
+            last_slice_report = "Selected edge removal completed with failures.\n" + report_text
+            if not batch_quiet then format "%" last_slice_report
+            #(false, remove_mode, removed_edge_count)
         )
         -- return
     ),
@@ -6300,7 +6742,7 @@ modifier.split = false
 
                 if progress_callback != undefined then
                 (
-                    try(progress_callback display_task_index queue_total object_index object_total object_name vertex_count)catch()
+                    try(progress_callback display_task_index queue_total object_index:object_index object_total:object_total object_name:object_name vertex_count:vertex_count)catch()
                 )
 
                 if slice_result == undefined then
@@ -6669,7 +7111,7 @@ modifier.split = false
 
                     if node_ok and progress_callback != undefined then
                     (
-                        try(progress_callback 0 total_task_count (processed_count + 1) selected_nodes.count node.name current_vertex_count)catch()
+                        try(progress_callback 0 total_task_count object_index:(processed_count + 1) object_total:selected_nodes.count object_name:node.name vertex_count:current_vertex_count)catch()
                     )
 
                     if node_ok and total_task_count == 0 then
@@ -6849,6 +7291,41 @@ modifier.split = false
         test_passed = test_passed and not (object_mode != undefined and object_mode > 0)
         test_passed = test_passed and (vertex_mode > 0)
         test_passed = test_passed and (edge_mode > 0)
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Captures Slice Walls progress callback arguments for the regression test.
+    Uses struct state so MAXScript does not need an unsupported outer-local closure.
+    */
+    function captureSliceProgressTest processed_count total_count object_index:0 object_total:0 object_name:"" vertex_count:0 =
+    (
+        slice_progress_test_capture = #(processed_count, total_count, object_index, object_total, object_name, vertex_count)
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Tests the Slice Walls progress callback keyword-argument contract.
+    */
+    function testSliceProgressCallbackArguments =
+    (
+        slice_progress_test_capture = undefined
+
+        captureSliceProgressTest 3 10 object_index:2 object_total:4 object_name:"Wall_A" vertex_count:24
+
+        test_passed = slice_progress_test_capture != undefined
+        test_passed = test_passed and slice_progress_test_capture[1] == 3
+        test_passed = test_passed and slice_progress_test_capture[2] == 10
+        test_passed = test_passed and slice_progress_test_capture[3] == 2
+        test_passed = test_passed and slice_progress_test_capture[4] == 4
+        test_passed = test_passed and slice_progress_test_capture[5] == "Wall_A"
+        test_passed = test_passed and slice_progress_test_capture[6] == 24
 
         test_passed
         -- return

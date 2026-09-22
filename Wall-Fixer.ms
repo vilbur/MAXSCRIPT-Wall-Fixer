@@ -1,6 +1,6 @@
-﻿/*
-Wall-Fixer Bundled Loader 0.907
-Project version 0.933.
+/*
+Wall-Fixer Bundled Loader 0.919
+Project version 0.945.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.907"
-global wall_fixer_loader_tool_version = 0.933
+global wall_fixer_loader_file_version = "0.919"
+global wall_fixer_loader_tool_version = 0.945
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -1952,7 +1952,7 @@ struct WMCWallSlicePipeline
 
 
 /*
-Wall-Fixer Core 0.28
+Wall-Fixer Core 0.39
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -1961,8 +1961,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.36"
-global wall_fixer_core_tool_version = 0.926
+global wall_fixer_core_file_version = "0.39"
+global wall_fixer_core_tool_version = 0.944
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -2033,6 +2033,7 @@ struct WallFixer_v
     last_slice_elapsed_ms = 0,
     last_slice_processed_objects = 0,
     last_slice_processed_vertices = 0,
+    slice_progress_test_capture = undefined,
     slice_stats_csv_path = ((getDir #plugcfg) + "\\Wall-Fixer-Slice-Stats.csv"),
     batch_quiet = false,
     attach_weld_selection_order = #(),
@@ -4217,24 +4218,372 @@ struct WallFixer_v
     ),
 
     /*
-    Detects and removes redundant loops in one dedicated Cleanup LOOPS Edit Poly modifier.
-    The modifier is removed again when no valid redundant loops are found.
+    Returns the POST-PROCESS RMB mode for redundant-loop cleanup.
+    A live edge selection always takes precedence over automatic redundant-loop detection.
     */
-    function cleanupRedundantLoopsOnNode node angle_threshold:0.1 debug_output:true commit_delete:false =
+    function getRedundantLoopRemoveMode selected_edge_count =
+    (
+        if selected_edge_count > 0 then #selectedEdges else #allRedundant
+        -- return
+    ),
+
+    /*
+    Returns one selected edge source for a node, preferring the active Edit Poly, then other Edit Poly modifiers, then Editable Poly.
+    The result is #(source_kind, source_value, selected_edges).
+    */
+    function getRedundantLoopSelectedEdgeSource node =
+    (
+        if node == undefined or not(isValidNode node) then return #(#none, undefined, #{})
+
+        current_object = undefined
+        try
+        (
+            current_object = modPanel.getCurrentObject()
+        )
+        catch
+        (
+            current_object = undefined
+        )
+
+        if current_object != undefined and classOf current_object == Edit_Poly then
+        (
+            belongs_to_node = false
+            for modifier in node.modifiers while not belongs_to_node do
+            (
+                if modifier == current_object then belongs_to_node = true
+            )
+
+            if belongs_to_node then
+            (
+                selected_edges = #{}
+                try
+                (
+                    selected_edges = current_object.GetSelection #Edge node:node
+                )
+                catch
+                (
+                    selected_edges = #{}
+                )
+
+                if selected_edges.numberSet > 0 then return #(#editPoly, current_object, selected_edges)
+            )
+        )
+
+        for modifier in node.modifiers do
+        (
+            if classOf modifier == Edit_Poly then
+            (
+                selected_edges = #{}
+                try
+                (
+                    selected_edges = modifier.GetSelection #Edge node:node
+                )
+                catch
+                (
+                    selected_edges = #{}
+                )
+
+                if selected_edges.numberSet > 0 then return #(#editPoly, modifier, selected_edges)
+            )
+        )
+
+        if classOf node.baseObject == Editable_Poly then
+        (
+            selected_edges = #{}
+            try
+            (
+                selected_edges = polyop.getEdgeSelection node.baseObject
+            )
+            catch
+            (
+                selected_edges = #{}
+            )
+
+            if selected_edges.numberSet > 0 then return #(#editablePoly, node.baseObject, selected_edges)
+        )
+
+        #(#none, undefined, #{})
+        -- return
+    ),
+
+    /*
+    Selects detected redundant-loop edges on one node without removing geometry.
+    An existing top WMC - CLEANUP LOOPS Edit Poly is reused; otherwise a dedicated cleanup modifier is created only when needed.
+    */
+    function selectRedundantLoopsOnNode node angle_threshold:0.1 debug_output:true =
+    (
+        if node == undefined or not(isValidNode node) then return #(false, 0, 0, "invalid node", undefined)
+        if not(isSliceSupportedNode node) then return #(false, 0, 0, "requires Editable Poly geometry or an Edit Poly workflow", undefined)
+
+        cleanup_modifier = undefined
+        created_modifier = false
+        operation_error = undefined
+        loop_count = 0
+        redundant_edge_count = 0
+
+        try
+        (
+            if node.modifiers.count > 0 and classOf node.modifiers[1] == Edit_Poly and node.modifiers[1].name == "WMC - CLEANUP LOOPS" then
+            (
+                cleanup_modifier = node.modifiers[1]
+            )
+            else
+            (
+                cleanup_modifier = Edit_Poly name:"WMC - CLEANUP LOOPS"
+                addModifier node cleanup_modifier
+                created_modifier = true
+                update node
+            )
+
+            cleanup_modifier.SetPrimaryNode node
+            cleanup_modifier.useStackSelection = false
+
+            detection_data = detectRedundantLoops node cleanup_modifier angle_threshold:angle_threshold debug_output:debug_output
+            loop_records = detection_data[1]
+            redundant_edges = detection_data[2]
+            loop_count = loop_records.count
+            redundant_edge_count = redundant_edges.numberSet
+
+            cleanup_modifier.SetEPolySelLevel #Edge
+            cleanup_modifier.SetSelection #Edge #{} node:node
+            if redundant_edge_count > 0 then cleanup_modifier.Select #Edge redundant_edges node:node
+
+            stored_selection = cleanup_modifier.GetSelection #Edge node:node
+            if stored_selection != redundant_edges then
+            (
+                throw ("Cleanup LOOPS could not select the detected redundant edges. Requested:" + (redundant_edges as string) + " actual:" + (stored_selection as string))
+            )
+
+            if redundant_edge_count == 0 and created_modifier then
+            (
+                deleteModifier node cleanup_modifier
+                cleanup_modifier = undefined
+                update node
+            )
+        )
+        catch
+        (
+            operation_error = getCurrentException()
+
+            if cleanup_modifier != undefined and created_modifier then
+            (
+                try(deleteModifier node cleanup_modifier)catch()
+                cleanup_modifier = undefined
+            )
+
+            update node
+        )
+
+        if operation_error == undefined then
+        (
+            #(true, loop_count, redundant_edge_count, "", cleanup_modifier)
+        )
+        else
+        (
+            #(false, 0, 0, operation_error as string, undefined)
+        )
+        -- return
+    ),
+
+    /*
+    Selects redundant-loop edges on every selected supported wall and reports the aggregate result.
+    A single selected object is switched to Edge sub-object mode so the detected loops are immediately visible.
+    */
+    function selectRedundantLoopsSelection angle_threshold:0.1 debug_output:true =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+        selected_nodes = selection as array
+
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select at least one wall object."
+            return #(false, 0, 0)
+        )
+
+        total_loops = 0
+        total_edges = 0
+        failed_nodes = #()
+        report_text = ""
+        display_node = undefined
+        display_modifier = undefined
+
+        for node in selected_nodes do
+        (
+            selection_result = selectRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output
+            if selection_result[1] then
+            (
+                total_loops += selection_result[2]
+                total_edges += selection_result[3]
+                report_text += node.name + ": loops " + (selection_result[2] as string) + ", edges selected " + (selection_result[3] as string) + ".\n"
+
+                if display_modifier == undefined and selection_result[3] > 0 then
+                (
+                    display_node = node
+                    display_modifier = selection_result[5]
+                )
+            )
+            else
+            (
+                append failed_nodes node.name
+                report_text += node.name + ": FAILED - " + selection_result[4] + ".\n"
+            )
+        )
+
+        select selected_nodes
+
+        if selected_nodes.count == 1 and display_modifier != undefined then
+        (
+            try
+            (
+                max modify mode
+                display_modifier.SetPrimaryNode display_node
+                modPanel.setCurrentObject display_modifier
+                display_modifier.SetEPolySelLevel #Edge
+                subObjectLevel = 2
+            )
+            catch
+            (
+            )
+        )
+
+        completeRedraw()
+
+        if failed_nodes.count == 0 then
+        (
+            if total_edges > 0 then
+            (
+                last_slice_report = "Redundant Loop Selection complete. Loops: " + (total_loops as string) + "; edges selected: " + (total_edges as string) + ".\n" + report_text
+            )
+            else
+            (
+                last_slice_report = "No redundant loops found.\n" + report_text
+            )
+
+            if not batch_quiet then format "%" last_slice_report
+            #(true, total_loops, total_edges)
+        )
+        else
+        (
+            last_slice_report = "Redundant Loop Selection completed with failures.\n" + report_text
+            if not batch_quiet then format "%" last_slice_report
+            #(false, total_loops, total_edges)
+        )
+        -- return
+    ),
+
+    /*
+    Removes the supplied selected edges from one Edit Poly or Editable Poly source without deleting attached faces.
+    Edit Poly uses Remove Edge; Editable Poly uses the native EditablePoly.Remove interface with a temporary user flag.
+    */
+    function removeRedundantLoopSelectedEdgesOnNode node source_kind source_value selected_edges =
+    (
+        if node == undefined or not(isValidNode node) then return #(false, 0, "invalid node")
+        if selected_edges == undefined or selected_edges.numberSet == 0 then return #(false, 0, "no selected edges")
+
+        operation_error = undefined
+        removed_edge_count = selected_edges.numberSet
+        old_remove_ctrl = undefined
+        edge_flag = undefined
+
+        try
+        (
+            case source_kind of
+            (
+                #editPoly:
+                (
+                    if source_value == undefined or classOf source_value != Edit_Poly then throw "invalid Edit Poly source"
+
+                    old_remove_ctrl = source_value.remveEdgeCtrlKey
+                    source_value.remveEdgeCtrlKey = false
+                    source_value.SetPrimaryNode node
+                    source_value.SetEPolySelLevel #Edge
+                    source_value.SetSelection #Edge selected_edges node:node
+
+                    actual_selection = source_value.GetSelection #Edge node:node
+                    if actual_selection != selected_edges then
+                    (
+                        throw ("Could not restore selected edges before removal. Requested:" + (selected_edges as string) + " actual:" + (actual_selection as string))
+                    )
+
+                    source_value.SetOperation #RemoveEdge
+                    source_value.Commit()
+                    source_value.remveEdgeCtrlKey = old_remove_ctrl
+                    old_remove_ctrl = undefined
+                    source_value.RefreshScreen()
+                    update node
+                )
+
+                #editablePoly:
+                (
+                    if classOf node.baseObject != Editable_Poly then throw "invalid Editable Poly source"
+
+                    edge_flag = bit.set 0 30 true
+                    polyop.setEdgeFlags node.baseObject selected_edges edge_flag mask:edge_flag undoable:true
+                    remove_success = source_value.EditablePoly.Remove selLevel:#Edge flag:edge_flag
+                    if not remove_success then throw "Editable Poly Remove Edge failed"
+
+                    try(polyop.setEdgeFlags node.baseObject #all 0 mask:edge_flag undoable:false)catch()
+                    polyop.setEdgeSelection node.baseObject #{}
+                    update node
+                )
+
+                default:
+                (
+                    throw "unsupported selected-edge source"
+                )
+            )
+        )
+        catch
+        (
+            operation_error = getCurrentException()
+        )
+
+        if old_remove_ctrl != undefined and source_value != undefined then
+        (
+            try(source_value.remveEdgeCtrlKey = old_remove_ctrl)catch()
+        )
+
+        if operation_error == undefined then
+        (
+            #(true, removed_edge_count, "")
+        )
+        else
+        (
+            #(false, 0, operation_error as string)
+        )
+        -- return
+    ),
+
+    /*
+    Detects and removes redundant loops in one Cleanup LOOPS Edit Poly modifier.
+    The optional reuse mode lets POST-PROCESS RMB operate in the same dedicated top Cleanup LOOPS modifier used by its preceding LMB selection.
+    */
+    function cleanupRedundantLoopsOnNode node angle_threshold:0.1 debug_output:true commit_delete:false reuse_top_modifier:false =
     (
         if node == undefined or not(isValidNode node) then return #(false, 0, 0, "invalid node")
         if not(isSliceSupportedNode node) then return #(false, 0, 0, "requires Editable Poly geometry or an Edit Poly workflow")
 
-        local cleanup_modifier = undefined
-        local operation_error = undefined
-        local loop_count = 0
-        local redundant_edge_count = 0
+        cleanup_modifier = undefined
+        created_modifier = false
+        operation_error = undefined
+        loop_count = 0
+        redundant_edge_count = 0
+        old_remove_ctrl = undefined
 
         try
         (
-            cleanup_modifier = Edit_Poly name:"WMC - CLEANUP LOOPS"
-            addModifier node cleanup_modifier
-            update node
+            if reuse_top_modifier and node.modifiers.count > 0 and classOf node.modifiers[1] == Edit_Poly and node.modifiers[1].name == "WMC - CLEANUP LOOPS" then
+            (
+                cleanup_modifier = node.modifiers[1]
+            )
+            else
+            (
+                cleanup_modifier = Edit_Poly name:"WMC - CLEANUP LOOPS"
+                addModifier node cleanup_modifier
+                created_modifier = true
+                update node
+            )
 
             select node
             max modify mode
@@ -4242,39 +4591,47 @@ struct WallFixer_v
             cleanup_modifier.SetPrimaryNode node
             cleanup_modifier.useStackSelection = false
 
-            local detection_data = detectRedundantLoops node cleanup_modifier angle_threshold:angle_threshold debug_output:debug_output
-            local loop_records = detection_data[1]
-            local redundant_edges = detection_data[2]
+            detection_data = detectRedundantLoops node cleanup_modifier angle_threshold:angle_threshold debug_output:debug_output
+            loop_records = detection_data[1]
+            redundant_edges = detection_data[2]
             loop_count = loop_records.count
             redundant_edge_count = redundant_edges.numberSet
 
             if redundant_edge_count == 0 then
             (
-                deleteModifier node cleanup_modifier
-                cleanup_modifier = undefined
-                update node
+                if created_modifier then
+                (
+                    deleteModifier node cleanup_modifier
+                    cleanup_modifier = undefined
+                    update node
+                )
+                else
+                (
+                    cleanup_modifier.SetEPolySelLevel #Edge
+                    cleanup_modifier.SetSelection #Edge #{} node:node
+                )
 
                 if debug_output then
                 (
-                    if not batch_quiet then format "Wall-Fixer Redundant Loop Cleanup: node:% no redundant loops found; Cleanup LOOPS removed.\n" node.name
+                    if not batch_quiet then format "Wall-Fixer Redundant Loop Cleanup: node:% no redundant loops found.\n" node.name
                 )
 
                 return #(true, 0, 0, "")
             )
 
-            local edge_descriptors = #()
+            edge_descriptors = #()
             for edge_index in redundant_edges do
             (
-                local edge_a = cleanup_modifier.GetEdgeVertex edge_index 1 node:node
-                local edge_b = cleanup_modifier.GetEdgeVertex edge_index 2 node:node
+                edge_a = cleanup_modifier.GetEdgeVertex edge_index 1 node:node
+                edge_b = cleanup_modifier.GetEdgeVertex edge_index 2 node:node
 
                 if edge_a == undefined or edge_b == undefined then
                 (
                     throw ("Detected redundant-loop edge became invalid before cleanup: " + (edge_index as string))
                 )
 
-                local point_a = cleanup_modifier.GetVertex edge_a node:node
-                local point_b = cleanup_modifier.GetVertex edge_b node:node
+                point_a = cleanup_modifier.GetVertex edge_a node:node
+                point_b = cleanup_modifier.GetVertex edge_b node:node
 
                 if point_a == undefined or point_b == undefined then
                 (
@@ -4284,13 +4641,13 @@ struct WallFixer_v
                 append edge_descriptors #(edge_index, point_a, point_b)
             )
 
-            local old_remove_ctrl = cleanup_modifier.remveEdgeCtrlKey
+            old_remove_ctrl = cleanup_modifier.remveEdgeCtrlKey
             cleanup_modifier.remveEdgeCtrlKey = false
             cleanup_modifier.SetEPolySelLevel #Edge
             cleanup_modifier.SetSelection #Edge #{} node:node
             cleanup_modifier.Select #Edge redundant_edges node:node
 
-            local stored_selection = cleanup_modifier.GetSelection #Edge node:node
+            stored_selection = cleanup_modifier.GetSelection #Edge node:node
             if stored_selection != redundant_edges then
             (
                 throw ("Cleanup LOOPS could not select the detected redundant edges. Requested:" + (redundant_edges as string) + " actual:" + (stored_selection as string))
@@ -4299,9 +4656,10 @@ struct WallFixer_v
             cleanup_modifier.SetOperation #RemoveEdge
             cleanup_modifier.Commit()
             cleanup_modifier.remveEdgeCtrlKey = old_remove_ctrl
+            old_remove_ctrl = undefined
             update node
 
-            local unresolved_edges = #{}
+            unresolved_edges = #{}
             for edge_data in edge_descriptors do
             (
                 if doesDebugVisibleEdgeExistByEndpointPositions node edge_data[2] edge_data[3] tolerance:0.01 then
@@ -4324,7 +4682,12 @@ struct WallFixer_v
         (
             operation_error = getCurrentException()
 
-            if cleanup_modifier != undefined then
+            if old_remove_ctrl != undefined and cleanup_modifier != undefined then
+            (
+                try(cleanup_modifier.remveEdgeCtrlKey = old_remove_ctrl)catch()
+            )
+
+            if cleanup_modifier != undefined and created_modifier then
             (
                 try(deleteModifier node cleanup_modifier)catch()
                 cleanup_modifier = undefined
@@ -4346,9 +4709,9 @@ struct WallFixer_v
 
     /*
     Runs redundant-loop cleanup on every selected supported wall and restores the original node selection.
-    Nodes with no redundant loops receive no new modifiers.
+    Nodes with no redundant loops receive no new modifiers unless an existing top Edit Poly is explicitly reused.
     */
-    function cleanupRedundantLoopsSelection angle_threshold:0.1 debug_output:true =
+    function cleanupRedundantLoopsSelection angle_threshold:0.1 debug_output:true reuse_top_modifier:false =
     (
         last_slice_error = undefined
         last_slice_report = ""
@@ -4368,7 +4731,7 @@ struct WallFixer_v
 
         for node in selected_nodes do
         (
-            cleanup_result = cleanupRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output
+            cleanup_result = cleanupRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output reuse_top_modifier:reuse_top_modifier
             if cleanup_result[1] then
             (
                 processed_nodes += 1
@@ -4397,6 +4760,85 @@ struct WallFixer_v
             last_slice_report = "Redundant Loop Cleanup completed with failures.\n" + report_text
             if not batch_quiet then format "%" last_slice_report
             false
+        )
+        -- return
+    ),
+
+    /*
+    POST-PROCESS RMB removes live selected edges first; with no selected edges it removes all detected redundant-loop edges.
+    The result is #(completed, mode, removed_selected_edge_count).
+    */
+    function removeSelectedOrRedundantLoopEdgesSelection angle_threshold:0.1 debug_output:true =
+    (
+        last_slice_error = undefined
+        last_slice_report = ""
+        selected_nodes = selection as array
+
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select at least one wall object."
+            return #(false, #none, 0)
+        )
+
+        edge_source_records = #()
+        selected_edge_count = 0
+
+        for node in selected_nodes do
+        (
+            source_data = getRedundantLoopSelectedEdgeSource node
+            if source_data[3].numberSet > 0 then
+            (
+                append edge_source_records #(node, source_data[1], source_data[2], source_data[3])
+                selected_edge_count += source_data[3].numberSet
+            )
+        )
+
+        remove_mode = getRedundantLoopRemoveMode selected_edge_count
+
+        if remove_mode == #allRedundant then
+        (
+            completed = cleanupRedundantLoopsSelection angle_threshold:angle_threshold debug_output:debug_output reuse_top_modifier:true
+            return #(completed, remove_mode, 0)
+        )
+
+        removed_edge_count = 0
+        failed_nodes = #()
+        report_text = ""
+
+        undo "Wall-Fixer - Remove Selected Edges" on
+        (
+            for source_record in edge_source_records do
+            (
+                node = source_record[1]
+                remove_result = removeRedundantLoopSelectedEdgesOnNode node source_record[2] source_record[3] source_record[4]
+
+                if remove_result[1] then
+                (
+                    removed_edge_count += remove_result[2]
+                    report_text += node.name + ": selected edges removed " + (remove_result[2] as string) + ".\n"
+                )
+                else
+                (
+                    append failed_nodes node.name
+                    report_text += node.name + ": FAILED - " + remove_result[3] + ".\n"
+                )
+            )
+        )
+
+        select selected_nodes
+        completeRedraw()
+
+        if failed_nodes.count == 0 then
+        (
+            last_slice_report = "Selected edge removal complete. Edges removed: " + (removed_edge_count as string) + ".\n" + report_text
+            if not batch_quiet then format "%" last_slice_report
+            #(true, remove_mode, removed_edge_count)
+        )
+        else
+        (
+            last_slice_report = "Selected edge removal completed with failures.\n" + report_text
+            if not batch_quiet then format "%" last_slice_report
+            #(false, remove_mode, removed_edge_count)
         )
         -- return
     ),
@@ -8253,7 +8695,7 @@ modifier.split = false
 
                 if progress_callback != undefined then
                 (
-                    try(progress_callback display_task_index queue_total object_index object_total object_name vertex_count)catch()
+                    try(progress_callback display_task_index queue_total object_index:object_index object_total:object_total object_name:object_name vertex_count:vertex_count)catch()
                 )
 
                 if slice_result == undefined then
@@ -8622,7 +9064,7 @@ modifier.split = false
 
                     if node_ok and progress_callback != undefined then
                     (
-                        try(progress_callback 0 total_task_count (processed_count + 1) selected_nodes.count node.name current_vertex_count)catch()
+                        try(progress_callback 0 total_task_count object_index:(processed_count + 1) object_total:selected_nodes.count object_name:node.name vertex_count:current_vertex_count)catch()
                     )
 
                     if node_ok and total_task_count == 0 then
@@ -8802,6 +9244,41 @@ modifier.split = false
         test_passed = test_passed and not (object_mode != undefined and object_mode > 0)
         test_passed = test_passed and (vertex_mode > 0)
         test_passed = test_passed and (edge_mode > 0)
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Captures Slice Walls progress callback arguments for the regression test.
+    Uses struct state so MAXScript does not need an unsupported outer-local closure.
+    */
+    function captureSliceProgressTest processed_count total_count object_index:0 object_total:0 object_name:"" vertex_count:0 =
+    (
+        slice_progress_test_capture = #(processed_count, total_count, object_index, object_total, object_name, vertex_count)
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Tests the Slice Walls progress callback keyword-argument contract.
+    */
+    function testSliceProgressCallbackArguments =
+    (
+        slice_progress_test_capture = undefined
+
+        captureSliceProgressTest 3 10 object_index:2 object_total:4 object_name:"Wall_A" vertex_count:24
+
+        test_passed = slice_progress_test_capture != undefined
+        test_passed = test_passed and slice_progress_test_capture[1] == 3
+        test_passed = test_passed and slice_progress_test_capture[2] == 10
+        test_passed = test_passed and slice_progress_test_capture[3] == 2
+        test_passed = test_passed and slice_progress_test_capture[4] == 4
+        test_passed = test_passed and slice_progress_test_capture[5] == "Wall_A"
+        test_passed = test_passed and slice_progress_test_capture[6] == 24
 
         test_passed
         -- return
@@ -13087,7 +13564,7 @@ WallFixer = WallFixer_v()
 
 
 /*
-Straight Edge Fixer 0.30
+Straight Edge Fixer 0.31
 Detects repeated horizontal edge rows and aligns nearby horizontal edges to them.
 */
 
@@ -13095,8 +13572,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.30"
-global straight_edge_fixer_tool_version = 0.933
+global straight_edge_fixer_file_version = "0.31"
+global straight_edge_fixer_tool_version = 0.940
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -15079,20 +15556,49 @@ struct StraightEdgeFixer_v
 
 
     /*
-    Aligns selected vertices vertically to the unselected endpoint XY of each incident edge.
-    Only the selected vertex moves; its Z is preserved.
+    Chooses the best Vertical Vertex-mode reference candidate.
+    Visible exact-vertical edges win; otherwise the smallest vertical angle inside Angle wins.
     */
-    function fixSelectedVerticalVertices node adapter selected_vertices tolerance:0.01 angle_threshold:45.0 =
+    function chooseVerticalVertexReferenceCandidate candidate_records angle_threshold =
     (
-        fixed_count = 0
-        failed_vertices = #{}
+        exact_candidate = undefined
+        fallback_candidate = undefined
+        fallback_angle = 1.0e30
 
-        for selected_vertex in selected_vertices do
+        for candidate_record in candidate_records do
         (
-            incident_edges = getVertexIncidentEdges node adapter selected_vertex
-            vertex_fixed = false
+            if (candidate_record.count >= 5 and candidate_record[3]) then
+            (
+                if candidate_record[4] then
+                (
+                    if exact_candidate == undefined then exact_candidate = candidate_record
+                )
+                else if (candidate_record[5] != undefined and candidate_record[5] <= angle_threshold and candidate_record[5] < fallback_angle) then
+                (
+                    fallback_angle = candidate_record[5]
+                    fallback_candidate = candidate_record
+                )
+            )
+        )
 
-            for edge_id in incident_edges while not vertex_fixed do
+        if exact_candidate != undefined then exact_candidate else fallback_candidate
+        -- return
+    ),
+
+
+    /*
+    Finds the visible incident edge used to realign one selected vertex vertically.
+    If no exact vertical edge exists, the most vertical visible edge inside Angle is used.
+    */
+    function findSelectedVertexVerticalReference node adapter selected_vertex selected_vertices tolerance angle_threshold =
+    (
+        candidate_records = #()
+        incident_edges = getVertexIncidentEdges node adapter selected_vertex
+        selected_position = getVertexWorldPosition node adapter selected_vertex
+
+        if selected_position != undefined then
+        (
+            for edge_id in incident_edges do
             (
                 edge_verts = getEdgeVertIds node adapter edge_id
 
@@ -15103,27 +15609,90 @@ struct StraightEdgeFixer_v
 
                     if not other_is_selected then
                     (
-                        selected_position = getVertexWorldPosition node adapter selected_vertex
                         other_position = getVertexWorldPosition node adapter other_vertex
 
-                        if (selected_position != undefined and other_position != undefined) then
+                        if other_position != undefined then
                         (
+                            edge_visible = isEdgeVisible node adapter edge_id
                             horizontal_length = distance [selected_position.x, selected_position.y, 0.0] [other_position.x, other_position.y, 0.0]
                             vertical_length = abs(selected_position.z - other_position.z)
                             direction_angles = getDirectionAngles horizontal_length vertical_length
-                            vertical_angle = direction_angles[2]
+                            vertical_angle = if direction_angles != undefined then direction_angles[2] else undefined
+                            edge_is_vertical = ((vertical_angle != undefined) and (isVerticalEdge node adapter edge_id tolerance))
 
-                            if (vertical_angle != undefined and vertical_angle < 45.0) then
-                            (
-                                target_position = [other_position.x, other_position.y, selected_position.z]
-
-                                if (setVertexWorldPosition node adapter selected_vertex target_position) then
-                                (
-                                    vertex_fixed = true
-                                    fixed_count += 1
-                                )
-                            )
+                            append candidate_records #(edge_id, other_vertex, edge_visible, edge_is_vertical, vertical_angle)
                         )
+                    )
+                )
+            )
+        )
+
+        chooseVerticalVertexReferenceCandidate candidate_records angle_threshold
+        -- return
+    ),
+
+
+    /*
+    Tests Vertical Vertex-mode reference priority and skewed fallback selection.
+    Invisible exact edges are ignored and the most vertical visible skewed edge wins inside Angle.
+    */
+    function testVerticalVertexReferenceFallback =
+    (
+        test_passed = true
+        candidate_records = #(
+            #(11, 101, true, false, 12.0),
+            #(12, 102, false, true, 0.0),
+            #(13, 103, true, false, 4.0),
+            #(14, 104, true, false, 8.0)
+        )
+
+        fallback_result = chooseVerticalVertexReferenceCandidate candidate_records 10.0
+        test_passed = test_passed and fallback_result != undefined and fallback_result[1] == 13 and fallback_result[2] == 103
+
+        append candidate_records #(15, 105, true, true, 0.0)
+        exact_result = chooseVerticalVertexReferenceCandidate candidate_records 10.0
+        test_passed = test_passed and exact_result != undefined and exact_result[1] == 15 and exact_result[2] == 105
+
+        no_fallback_records = #(
+            #(21, 201, true, false, 12.0),
+            #(22, 202, false, true, 0.0)
+        )
+        no_fallback_result = chooseVerticalVertexReferenceCandidate no_fallback_records 10.0
+        test_passed = test_passed and no_fallback_result == undefined
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Aligns selected vertices vertically to the opposite endpoint of the best visible incident edge.
+    Exact vertical edges have priority; otherwise the most vertical visible edge inside Angle is used.
+    */
+    function fixSelectedVerticalVertices node adapter selected_vertices tolerance:0.01 angle_threshold:45.0 =
+    (
+        fixed_count = 0
+        failed_vertices = #{}
+
+        for selected_vertex in selected_vertices do
+        (
+            vertex_fixed = false
+            reference_data = findSelectedVertexVerticalReference node adapter selected_vertex selected_vertices tolerance angle_threshold
+
+            if reference_data != undefined then
+            (
+                other_vertex = reference_data[2]
+                selected_position = getVertexWorldPosition node adapter selected_vertex
+                other_position = getVertexWorldPosition node adapter other_vertex
+
+                if (selected_position != undefined and other_position != undefined) then
+                (
+                    target_position = [other_position.x, other_position.y, selected_position.z]
+
+                    if (setVertexWorldPosition node adapter selected_vertex target_position) then
+                    (
+                        vertex_fixed = true
+                        fixed_count += 1
                     )
                 )
             )
@@ -16200,7 +16769,7 @@ createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #
 
 
 /*
-Wall-Fixer UI 0.86
+Wall-Fixer UI 0.907
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -16210,8 +16779,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.86"
-global wall_fixer_ui_tool_version = 0.933
+global wall_fixer_ui_file_version = "0.907"
+global wall_fixer_ui_tool_version = 0.945
 
 
 /*
@@ -16429,20 +16998,18 @@ function wallFixerLoadDialogPosition fallback_position =
 
 
 /*
-Loads the saved Wall-Fixer dialog size.
-Width is restored but remains locked; height remains vertically resizable.
+Loads the saved Wall-Fixer dialog height while keeping startup width at the current default.
+Dialog registration/restore never forces a previously saved width.
 */
 function wallFixerLoadDialogSize default_size =
 (
-    saved_width = wallFixerReadIniInt "Window" "Width" default_size.x
     saved_height = wallFixerReadIniInt "Window" "Height" default_size.y
 
 
-    if saved_width < 300 then saved_width = default_size.x
     if saved_height < wall_fixer_min_dialog_height then saved_height = wall_fixer_min_dialog_height
 
 
-    [saved_width, saved_height]
+    [default_size.x, saved_height]
     -- return
 )
 
@@ -16994,6 +17561,26 @@ function wallFixerRestoreDockState dock_state =
 )
 
 
+/*
+Restores the saved floating dialog position after CUI registration.
+Using setDialogPos after FloatDialogBar keeps save and restore in the same screen-coordinate space.
+*/
+function wallFixerRestoreFloatingDialogPosition dialog_position dock_state =
+(
+    if dialog_position != undefined and dock_state == #cui_floatable and WallFixerRollout != undefined then
+    (
+        try
+        (
+            setDialogPos WallFixerRollout dialog_position
+        )
+        catch
+        (
+        )
+    )
+    -- return
+)
+
+
 wallFixerUnregisterDialogBar()
 saved_dock_state = wallFixerLoadDockState()
 
@@ -17514,10 +18101,10 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:82
 
 
 /*
-EDGE FIXER contains geometry-fix workflow step 6 and its result check.
+EDGE FIXER contains geometry-fix workflow step 6.
 Straight Edge Fixer tuning controls are kept in the OPTIONS subrollout at the bottom.
 */
-rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
+rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:192
 (
     groupBox edge_z_group "6. EDGE ROW FIXING AND BORDER EDGES CHECK" pos:[4,8] width:302 height:150
 
@@ -17544,11 +18131,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
         tooltip:"Detect repeated horizontal edge rows and align nearby horizontal edges to TOP, BOTTOM or CENTER target Z."
 
 
-    groupBox check_result_group "8. CHECK RESULT" pos:[4,164] width:302 height:38
-    label check_result_label "Manual viewport check of geometry fixes." pos:[18,180] width:274 height:18
-
-
-    subRollout edge_fixer_options_subrollout "" pos:[0,208] width:310 height:wall_fixer_closed_rollout_height
+    subRollout edge_fixer_options_subrollout "" pos:[0,164] width:310 height:wall_fixer_closed_rollout_height
 
 
     /*
@@ -17558,7 +18141,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
     function setOptionsLayout options_open =
     (
         edge_fixer_options_subrollout.height = if options_open then (88 + wall_fixer_closed_rollout_height) else wall_fixer_closed_rollout_height
-        WallFixerEdgeFixerRollout.height = if options_open then (300 + wall_fixer_closed_rollout_height) else 236
+        WallFixerEdgeFixerRollout.height = if options_open then (256 + wall_fixer_closed_rollout_height) else 192
         -- return
     )
 
@@ -17780,8 +18363,8 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:308
         tooltip:"LMB: select duplicate-position vertices at 0.01 tolerance.\n\nRMB: run the current duplicate-vertex fix at 0.01 tolerance."
 
 
-    button redundant_loops_button "11. REMOVE REDUNDANT LOOPS AND EDGES" pos:[4,88] width:302 height:34 \
-        tooltip:"Reuse the current Redundant Loop Cleanup operation."
+    button redundant_loops_button "11. REMOVE REDUNDANT LOOPS" pos:[4,88] width:302 height:34 \
+        tooltip:"LMB: Select redundant loop edges.\n\nRMB: Remove selected edges. If no edges are selected, remove all detected redundant loop edges."
 
 
     button repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" pos:[4,128] width:302 height:34 enabled:false \
@@ -17831,7 +18414,13 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:308
 
     on redundant_loops_button pressed do
     (
-        ::WallFixerRollout.runRedundantLoopCleanup()
+        ::WallFixerRollout.runSelectRedundantLoops()
+    )
+
+
+    on redundant_loops_button rightclick do
+    (
+        ::WallFixerRollout.runRemoveRedundantLoops()
     )
 
 
@@ -17857,7 +18446,7 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
 
 
     button align_camera_button "Align Camera" pos:[8,44] width:143 height:30 \
-        tooltip:"LMB: Align the active viewport perpendicular to selected wall faces, switch to orthographic User view, and zoom to the selection."
+        tooltip:"LMB: Align the active viewport perpendicular to selected wall faces. If no faces are selected, use the dominant wall-face normal. Switch to orthographic User view and zoom to the selection."
 
 
     button print_objs_button "Print Objs" pos:[159,44] width:143 height:30 \
@@ -17868,7 +18457,7 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
 
 
     button material_button "Material" pos:[159,80] width:143 height:30 \
-        tooltip:"LMB: Assign one shared 10-ID Multi/Sub-Object material to selected geometry.\n\nRMB: Remove the material from selected geometry."
+        tooltip:"LMB: Assign the same WALL FACE CLASSIFIER material used by INNER / OUTTER to selected geometry.\n\nRMB: Remove the material from selected geometry."
 
 
     on attach_button pressed do
@@ -19184,7 +19773,130 @@ function getSourceFaceSelection object_node source_data =
 )
 
 
-/* Collects the average world-space normal and center of the currently selected wall faces.
+/* Collects the dominant vertical face orientation from the selected wall objects.
+   Parallel and opposite face normals vote for one cluster while horizontal caps are ignored.
+*/
+function getDominantWallFaceAlignmentData =
+(
+    selected_nodes = selection as array
+    cluster_normals = #()
+    cluster_centers = #()
+    cluster_counts = #()
+    cluster_reference_normals = #()
+    dominant_cluster_index = 0
+    dominant_cluster_count = 0
+    dominant_normal_dot_threshold = 0.9961947
+
+
+    for object_node in selected_nodes do
+    (
+        if object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass then
+        (
+            source_data = getFaceGeometrySource object_node
+
+
+            if source_data != undefined then
+            (
+                source_face_count = getSourceNumFaces object_node source_data
+
+
+                for face_index = 1 to source_face_count do
+                (
+                    face_degree = getSourceFaceDegree object_node source_data face_index
+                    face_vertices = #()
+
+
+                    if face_degree >= 3 then
+                    (
+                        for corner_index = 1 to face_degree do
+                        (
+                            vertex_index = getSourceFaceVertex object_node source_data face_index corner_index
+
+
+                            if vertex_index > 0 then
+                            (
+                                append face_vertices (getSourceVertexWorld object_node source_data vertex_index)
+                            )
+                        )
+                    )
+
+
+                    if face_vertices.count >= 3 then
+                    (
+                        face_normal = calculatePolygonNormal face_vertices
+                        horizontal_normal = [face_normal.x, face_normal.y, 0.0]
+
+
+                        if (length horizontal_normal) > 0.0000001 then
+                        (
+                            horizontal_normal = normalize horizontal_normal
+                            cluster_index = 0
+
+
+                            for test_index = 1 to cluster_reference_normals.count while cluster_index == 0 do
+                            (
+                                if (abs (dot horizontal_normal cluster_reference_normals[test_index])) >= dominant_normal_dot_threshold then
+                                (
+                                    cluster_index = test_index
+                                )
+                            )
+
+
+                            if cluster_index == 0 then
+                            (
+                                append cluster_reference_normals horizontal_normal
+                                append cluster_normals horizontal_normal
+                                append cluster_centers (calculatePolygonCenter face_vertices)
+                                append cluster_counts 1
+                            )
+                            else
+                            (
+                                if (dot horizontal_normal cluster_reference_normals[cluster_index]) < 0.0 then
+                                (
+                                    horizontal_normal *= -1.0
+                                )
+
+
+                                cluster_normals[cluster_index] += horizontal_normal
+                                cluster_centers[cluster_index] += calculatePolygonCenter face_vertices
+                                cluster_counts[cluster_index] += 1
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+
+    for cluster_index = 1 to cluster_counts.count do
+    (
+        if cluster_counts[cluster_index] > dominant_cluster_count then
+        (
+            dominant_cluster_index = cluster_index
+            dominant_cluster_count = cluster_counts[cluster_index]
+        )
+    )
+
+
+    if dominant_cluster_index > 0 and (length cluster_normals[dominant_cluster_index]) > 0.0000001 then
+    (
+        #(
+            (cluster_centers[dominant_cluster_index] / dominant_cluster_count),
+            (normalize cluster_normals[dominant_cluster_index]),
+            dominant_cluster_count,
+            #dominant
+        )
+    )
+    else
+    (
+        undefined
+    )
+    -- return
+)
+
+
+/* Collects alignment data from selected faces, or falls back to the dominant wall-face orientation.
    Supports Editable Poly and a top Edit Poly modifier without changing topology or selection.
 */
 function getSelectedWallFaceAlignmentData =
@@ -19196,11 +19908,7 @@ function getSelectedWallFaceAlignmentData =
     valid_face_count = 0
 
 
-    if subObjectLevel != 4 then
-    (
-        undefined
-    )
-    else
+    if subObjectLevel == 4 then
     (
         for object_node in selected_nodes do
         (
@@ -19261,16 +19969,16 @@ function getSelectedWallFaceAlignmentData =
                 )
             )
         )
+    )
 
 
-        if valid_face_count > 0 and (length normal_sum) > 0.0000001 then
-        (
-            #((center_sum / valid_face_count), (normalize normal_sum), valid_face_count)
-        )
-        else
-        (
-            undefined
-        )
+    if valid_face_count > 0 and (length normal_sum) > 0.0000001 then
+    (
+        #((center_sum / valid_face_count), (normalize normal_sum), valid_face_count, #selected)
+    )
+    else
+    (
+        getDominantWallFaceAlignmentData()
     )
     -- return
 )
@@ -19289,13 +19997,14 @@ function alignViewportToSelectedWallFaces =
 
     if alignment_data == undefined then
     (
-        WallFixer.last_slice_report = "Align Camera: select one or more wall faces in Face sub-object mode."
+        WallFixer.last_slice_report = "Align Camera: select one or more supported wall objects."
     )
     else
     (
         face_center = alignment_data[1]
         face_normal = alignment_data[2]
         face_count = alignment_data[3]
+        alignment_mode = alignment_data[4]
         reference_up = [0.0, 0.0, 1.0]
         horizontal_normal = [face_normal.x, face_normal.y, 0.0]
 
@@ -19371,7 +20080,14 @@ function alignViewportToSelectedWallFaces =
 
         if operation_success then
         (
-            WallFixer.last_slice_report = "Align Camera: User view aligned to " + (face_count as string) + " selected wall face(s) and zoomed to selection."
+            if alignment_mode == #selected then
+            (
+                WallFixer.last_slice_report = "Align Camera: User view aligned to " + (face_count as string) + " selected wall face(s) and zoomed to selection."
+            )
+            else
+            (
+                WallFixer.last_slice_report = "Align Camera: no faces selected; User view aligned to the dominant normal from " + (face_count as string) + " wall face(s) and zoomed to selection."
+            )
         )
         else
         (
@@ -23451,14 +24167,14 @@ function testEdgeFixerOptionsLayout =
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout false
-    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 236) and (slot_control.height == wall_fixer_closed_rollout_height) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
+    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 192) and (slot_control.height == wall_fixer_closed_rollout_height) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]))
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout true
-    expanded_ok = ((WallFixerEdgeFixerRollout.height == (300 + wall_fixer_closed_rollout_height)) and (slot_control.height == (88 + wall_fixer_closed_rollout_height)) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
+    expanded_ok = ((WallFixerEdgeFixerRollout.height == (256 + wall_fixer_closed_rollout_height)) and (slot_control.height == (88 + wall_fixer_closed_rollout_height)) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]))
 
 
-    WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 236)
+    WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 192)
 
 
     local test_passed = width_ok and collapsed_ok and expanded_ok
@@ -23510,6 +24226,25 @@ function testRolloutOpenPersistence =
 )
 
 
+/*
+Tests POST-PROCESS redundant-loop RMB routing without changing scene geometry.
+Selected edges must win over automatic redundant-loop cleanup; an empty selection must use all redundant loops.
+*/
+function testPostProcessRedundantLoopRouting =
+(
+    selected_mode = WallFixer.getRedundantLoopRemoveMode 3
+    empty_mode = WallFixer.getRedundantLoopRemoveMode 0
+    passed = (selected_mode == #selectedEdges) and (empty_mode == #allRedundant)
+
+
+    format "POST-PROCESS redundant-loop routing | selected:% | empty:% | passed:%\n" selected_mode empty_mode passed
+
+
+    passed
+    -- return
+)
+
+
 function testParentControlWidths =
 (
     local width_ok = true
@@ -23519,7 +24254,6 @@ function testParentControlWidths =
     width_ok = width_ok and (WallFixerPreProcessRollout.planar_button.pos.x == 4) and (WallFixerPreProcessRollout.planar_button.width == (WallFixerPreProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPreProcessRollout.explode_walls_button.pos.x == 4) and (WallFixerPreProcessRollout.explode_walls_button.width == (WallFixerPreProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerEdgeFixerRollout.edge_z_group.pos.x == 4) and (WallFixerEdgeFixerRollout.edge_z_group.width == (WallFixerEdgeFixerRollout.width - 8))
-    width_ok = width_ok and (WallFixerEdgeFixerRollout.check_result_group.pos.x == 4) and (WallFixerEdgeFixerRollout.check_result_group.width == (WallFixerEdgeFixerRollout.width - 8))
     width_ok = width_ok and (WallFixerSliceWallsRollout.slice_selected_walls_button.pos.x == 4) and (WallFixerSliceWallsRollout.slice_selected_walls_button.width == (WallFixerSliceWallsRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.two_edge_verts_button.pos.x == 4) and (WallFixerPostProcessRollout.two_edge_verts_button.width == (WallFixerPostProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.duplicated_vertices_button.pos.x == 4) and (WallFixerPostProcessRollout.duplicated_vertices_button.width == (WallFixerPostProcessRollout.width - 8))
@@ -24203,6 +24937,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
 
 
+        process_status_label.Visible = false
         workflow_progress.visible = false
         progress_count_label.Visible = false
         status_line_top.Visible = true
@@ -24247,7 +24982,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
     /*
     Sets the global progress bar directly and clamps it to 0-100.
-    Starting or updating work shows the bar and hides the completed-state label.
+    Running state always repaints immediately so READY/result labels cannot remain visible over the bar.
     */
     function setProgress progress_value =
     (
@@ -24258,6 +24993,8 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
         if clamped_value < 100 then
         (
+            workflow_progress.visible = false
+            progress_count_label.Visible = false
             process_status_label.Visible = false
             status_line_top.Visible = false
             status_line_bottom.Visible = false
@@ -24270,33 +25007,56 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         (
             last_progress_value = clamped_value
             workflow_progress.value = clamped_value
+        )
 
-            try
-            (
-                (dotNetClass "System.Windows.Forms.Application").DoEvents()
-            )
-            catch
-            (
-            )
+        try
+        (
+            (dotNetClass "System.Windows.Forms.Application").DoEvents()
+        )
+        catch
+        (
         )
         -- return
     )
 
 
     /*
-    Receives the existing batch slicer's processed/total object counts.
-    It updates both the green progress bar and the shared plain status line.
+    Returns one monotonic Slice Walls batch percentage.
+    Each object receives an equal share of the bar while task progress fills that object's share.
     */
-    function updateSliceProgress processed_count total_count object_index:0 object_total:0 object_name:"" vertex_count:0 =
+    function getSliceProgressPercent processed_count total_count object_index:0 object_total:0 =
     (
         progress_percent = 0
 
-        if total_count > 0 then
+        if object_total > 0 and object_index > 0 then
+        (
+            task_fraction = 0.0
+            if total_count > 0 then task_fraction = (processed_count as float) / total_count
+            if task_fraction < 0.0 then task_fraction = 0.0
+            if task_fraction > 1.0 then task_fraction = 1.0
+
+            progress_percent = ((100.0 * (((object_index - 1) as float) + task_fraction)) / object_total) as integer
+        )
+        else if total_count > 0 then
         (
             progress_percent = ((100.0 * processed_count) / total_count) as integer
         )
 
-        setProgress progress_percent
+        if progress_percent < 0 then progress_percent = 0
+        if progress_percent > 100 then progress_percent = 100
+
+        progress_percent
+        -- return
+    )
+
+
+    /*
+    Receives live Slice Walls task/object progress.
+    It updates the green bar plus the centered object/task overlay.
+    */
+    function updateSliceProgress processed_count total_count object_index:0 object_total:0 object_name:"" vertex_count:0 =
+    (
+        progress_percent = getSliceProgressPercent             processed_count             total_count             object_index:object_index             object_total:object_total
 
         if object_total > 0 then
         (
@@ -24308,6 +25068,24 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
 
         try(progress_count_label.BringToFront())catch()
+        setProgress progress_percent
+        -- return
+    )
+
+
+    /*
+    Tests Slice Walls batch progress across task and object boundaries.
+    */
+    function testSliceProgressPercent =
+    (
+        test_passed = true
+        test_passed = test_passed and (getSliceProgressPercent 0 10 object_index:1 object_total:2) == 0
+        test_passed = test_passed and (getSliceProgressPercent 5 10 object_index:1 object_total:2) == 25
+        test_passed = test_passed and (getSliceProgressPercent 10 10 object_index:1 object_total:2) == 50
+        test_passed = test_passed and (getSliceProgressPercent 0 10 object_index:2 object_total:2) == 50
+        test_passed = test_passed and (getSliceProgressPercent 10 10 object_index:2 object_total:2) == 100
+
+        test_passed
         -- return
     )
 
@@ -24385,7 +25163,6 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
         if dialog_size != undefined then
         (
-            setIniSetting wall_fixer_ui_ini_path "Window" "Width" ((dialog_size.x as integer) as string)
             setIniSetting wall_fixer_ui_ini_path "Window" "Height" ((dialog_size.y as integer) as string)
         )
 
@@ -24535,7 +25312,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
     function runAlignCameraToWallFaces =
     (
         setProgress 0
-        setStatus #message "Aligning User view to selected wall faces..."
+        setStatus #message "Aligning User view to wall face normal..."
         operation_success = alignViewportToSelectedWallFaces()
         setProgress 100
 
@@ -24592,8 +25369,8 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Assigns one shared 10-ID Multi/Sub-Object material to all selected geometry nodes.
-    The material is created once per button press and shared by the whole selection.
+    Assigns the same WALL FACE CLASSIFIER material used by INNER / OUTTER to selected geometry nodes.
+    Reuses an existing classifier material from the selection or classified scene when available.
     */
     function runAssignMultiMaterial =
     (
@@ -24606,21 +25383,37 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
         else
         (
-            multi_material = multimaterial numsubs:10 name:"WALL-FIXER MULTI"
+            classifier_material = undefined
 
-            for material_index = 1 to 10 do
+            for object_node in selected_nodes while classifier_material == undefined do
             (
-                multi_material.materialList[material_index] = standardMaterial name:("ID " + (material_index as string))
-            )
-            multi_material.materialIDList = #(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-            multi_material.names = #("ID 1", "ID 2", "ID 3", "ID 4", "ID 5", "ID 6", "ID 7", "ID 8", "ID 9", "ID 10")
-
-            undo "Wall-Fixer - Assign Multi Material" on
-            (
-                for object_node in selected_nodes do object_node.material = multi_material
+                if hasWallClassifierMaterial object_node then
+                (
+                    classifier_material = object_node.material
+                )
             )
 
-            setStatus #success ("Material: assigned 10-ID Multi/Sub-Object to " + (selected_nodes.count as string) + " object(s).")
+            if classifier_material == undefined then
+            (
+                classified_nodes = getWallFaceGrowthSceneNodes()
+
+                if classified_nodes.count > 0 then
+                (
+                    classifier_material = classified_nodes[1].material
+                )
+            )
+
+            if classifier_material == undefined then
+            (
+                classifier_material = createWallClassifierMaterial()
+            )
+
+            undo "Wall-Fixer - Assign Classifier Material" on
+            (
+                for object_node in selected_nodes do object_node.material = classifier_material
+            )
+
+            setStatus #success ("Material: assigned WALL FACE CLASSIFIER to " + (selected_nodes.count as string) + " object(s).")
             true
         )
         -- return
@@ -28230,7 +29023,10 @@ result_groups
         (
             cleanupRedundantVerticesAfterGeometryChange (selection as array)
             setProgress 100
-            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Slice selected walls completed.")
+            elapsed_seconds = (WallFixer.last_slice_elapsed_ms as float) / 1000.0
+            completion_message = "Slice selected walls completed in " + (elapsed_seconds as string) + " s."
+            if WallFixer.last_slice_report != "" then completion_message += " " + WallFixer.last_slice_report
+            setStatus #success completion_message
         )
         else
         (
@@ -28271,6 +29067,7 @@ result_groups
 
 
         first_report = WallFixer.last_slice_report
+        first_elapsed_ms = WallFixer.last_slice_elapsed_ms
 
 
         setProgress 0
@@ -28288,6 +29085,7 @@ result_groups
 
 
         second_report = WallFixer.last_slice_report
+        second_elapsed_ms = WallFixer.last_slice_elapsed_ms
         completed = first_completed and second_completed
 
 
@@ -28295,7 +29093,8 @@ result_groups
         (
             cleanupRedundantVerticesAfterGeometryChange (selection as array)
             setProgress 100
-            setStatus #success "Slice selected walls completed in both modes."
+            elapsed_seconds = ((first_elapsed_ms + second_elapsed_ms) as float) / 1000.0
+            setStatus #success ("Slice selected walls completed in both modes in " + (elapsed_seconds as string) + " s.")
         )
         else
         (
@@ -28310,25 +29109,60 @@ result_groups
 
 
     /*
-    Reuses the current geometric redundant-loop cleanup operation.
-    It leaves no cleanup modifier behind when no valid redundant loop is found.
+    Selects detected redundant-loop edges without changing topology.
+    A single selected object is left in Edge sub-object mode for inspection.
     */
-    function runRedundantLoopCleanup =
+    function runSelectRedundantLoops =
     (
         setProgress 0
-        setStatus #message "Removing redundant loops and edges..."
-        completed = WallFixer.cleanupRedundantLoopsSelection angle_threshold:0.1 debug_output:true
-        if completed then cleanupRedundantVerticesAfterGeometryChange (selection as array)
+        setStatus #message "Selecting redundant loops..."
+        selection_result = WallFixer.selectRedundantLoopsSelection angle_threshold:0.1 debug_output:true
+        completed = selection_result[1]
+        selected_edge_count = selection_result[3]
+        setProgress 100
+
+
+        if completed and selected_edge_count > 0 then
+        (
+            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant loops selected.")
+        )
+        else if completed then
+        (
+            setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No redundant loops found.")
+        )
+        else
+        (
+            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant-loop selection failed.")
+        )
+
+
+        completed
+        -- return
+    )
+
+
+    /*
+    Removes selected edges first; when no edges are selected, removes all detected redundant-loop edges.
+    Manual selected-edge removal does not run the broader redundant-vertex cleanup pass.
+    */
+    function runRemoveRedundantLoops =
+    (
+        setProgress 0
+        setStatus #message "Removing selected or redundant-loop edges..."
+        removal_result = WallFixer.removeSelectedOrRedundantLoopEdgesSelection angle_threshold:0.1 debug_output:true
+        completed = removal_result[1]
+        remove_mode = removal_result[2]
+        if completed and remove_mode == #allRedundant then cleanupRedundantVerticesAfterGeometryChange (selection as array)
         setProgress 100
 
 
         if completed then
         (
-            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant-loop cleanup completed.")
+            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Edge removal completed.")
         )
         else
         (
-            setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No redundant loops were removed.")
+            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Edge removal failed.")
         )
 
 
@@ -28516,7 +29350,7 @@ if saved_dialog_position == undefined then
         height:saved_dialog_size.y \
         menu:wall_fixer_main_menu \
         style:#(#style_titlebar, #style_sysmenu, #style_toolwindow, #style_resizing) \
-        lockWidth:true \
+        lockWidth:false \
         lockHeight:false
 )
 else
@@ -28527,10 +29361,11 @@ else
         pos:saved_dialog_position \
         menu:wall_fixer_main_menu \
         style:#(#style_titlebar, #style_sysmenu, #style_toolwindow, #style_resizing) \
-        lockWidth:true \
+        lockWidth:false \
         lockHeight:false
 )
 
 
 wallFixerRegisterDialogBar()
 wallFixerRestoreDockState saved_dock_state
+wallFixerRestoreFloatingDialogPosition saved_dialog_position saved_dock_state

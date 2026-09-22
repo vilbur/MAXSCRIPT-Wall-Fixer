@@ -1,5 +1,5 @@
-﻿/*
-Straight Edge Fixer 0.30
+/*
+Straight Edge Fixer 0.31
 Detects repeated horizontal edge rows and aligns nearby horizontal edges to them.
 */
 
@@ -7,8 +7,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.30"
-global straight_edge_fixer_tool_version = 0.933
+global straight_edge_fixer_file_version = "0.31"
+global straight_edge_fixer_tool_version = 0.940
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -1991,20 +1991,49 @@ struct StraightEdgeFixer_v
 
 
     /*
-    Aligns selected vertices vertically to the unselected endpoint XY of each incident edge.
-    Only the selected vertex moves; its Z is preserved.
+    Chooses the best Vertical Vertex-mode reference candidate.
+    Visible exact-vertical edges win; otherwise the smallest vertical angle inside Angle wins.
     */
-    function fixSelectedVerticalVertices node adapter selected_vertices tolerance:0.01 angle_threshold:45.0 =
+    function chooseVerticalVertexReferenceCandidate candidate_records angle_threshold =
     (
-        fixed_count = 0
-        failed_vertices = #{}
+        exact_candidate = undefined
+        fallback_candidate = undefined
+        fallback_angle = 1.0e30
 
-        for selected_vertex in selected_vertices do
+        for candidate_record in candidate_records do
         (
-            incident_edges = getVertexIncidentEdges node adapter selected_vertex
-            vertex_fixed = false
+            if (candidate_record.count >= 5 and candidate_record[3]) then
+            (
+                if candidate_record[4] then
+                (
+                    if exact_candidate == undefined then exact_candidate = candidate_record
+                )
+                else if (candidate_record[5] != undefined and candidate_record[5] <= angle_threshold and candidate_record[5] < fallback_angle) then
+                (
+                    fallback_angle = candidate_record[5]
+                    fallback_candidate = candidate_record
+                )
+            )
+        )
 
-            for edge_id in incident_edges while not vertex_fixed do
+        if exact_candidate != undefined then exact_candidate else fallback_candidate
+        -- return
+    ),
+
+
+    /*
+    Finds the visible incident edge used to realign one selected vertex vertically.
+    If no exact vertical edge exists, the most vertical visible edge inside Angle is used.
+    */
+    function findSelectedVertexVerticalReference node adapter selected_vertex selected_vertices tolerance angle_threshold =
+    (
+        candidate_records = #()
+        incident_edges = getVertexIncidentEdges node adapter selected_vertex
+        selected_position = getVertexWorldPosition node adapter selected_vertex
+
+        if selected_position != undefined then
+        (
+            for edge_id in incident_edges do
             (
                 edge_verts = getEdgeVertIds node adapter edge_id
 
@@ -2015,27 +2044,90 @@ struct StraightEdgeFixer_v
 
                     if not other_is_selected then
                     (
-                        selected_position = getVertexWorldPosition node adapter selected_vertex
                         other_position = getVertexWorldPosition node adapter other_vertex
 
-                        if (selected_position != undefined and other_position != undefined) then
+                        if other_position != undefined then
                         (
+                            edge_visible = isEdgeVisible node adapter edge_id
                             horizontal_length = distance [selected_position.x, selected_position.y, 0.0] [other_position.x, other_position.y, 0.0]
                             vertical_length = abs(selected_position.z - other_position.z)
                             direction_angles = getDirectionAngles horizontal_length vertical_length
-                            vertical_angle = direction_angles[2]
+                            vertical_angle = if direction_angles != undefined then direction_angles[2] else undefined
+                            edge_is_vertical = ((vertical_angle != undefined) and (isVerticalEdge node adapter edge_id tolerance))
 
-                            if (vertical_angle != undefined and vertical_angle < 45.0) then
-                            (
-                                target_position = [other_position.x, other_position.y, selected_position.z]
-
-                                if (setVertexWorldPosition node adapter selected_vertex target_position) then
-                                (
-                                    vertex_fixed = true
-                                    fixed_count += 1
-                                )
-                            )
+                            append candidate_records #(edge_id, other_vertex, edge_visible, edge_is_vertical, vertical_angle)
                         )
+                    )
+                )
+            )
+        )
+
+        chooseVerticalVertexReferenceCandidate candidate_records angle_threshold
+        -- return
+    ),
+
+
+    /*
+    Tests Vertical Vertex-mode reference priority and skewed fallback selection.
+    Invisible exact edges are ignored and the most vertical visible skewed edge wins inside Angle.
+    */
+    function testVerticalVertexReferenceFallback =
+    (
+        test_passed = true
+        candidate_records = #(
+            #(11, 101, true, false, 12.0),
+            #(12, 102, false, true, 0.0),
+            #(13, 103, true, false, 4.0),
+            #(14, 104, true, false, 8.0)
+        )
+
+        fallback_result = chooseVerticalVertexReferenceCandidate candidate_records 10.0
+        test_passed = test_passed and fallback_result != undefined and fallback_result[1] == 13 and fallback_result[2] == 103
+
+        append candidate_records #(15, 105, true, true, 0.0)
+        exact_result = chooseVerticalVertexReferenceCandidate candidate_records 10.0
+        test_passed = test_passed and exact_result != undefined and exact_result[1] == 15 and exact_result[2] == 105
+
+        no_fallback_records = #(
+            #(21, 201, true, false, 12.0),
+            #(22, 202, false, true, 0.0)
+        )
+        no_fallback_result = chooseVerticalVertexReferenceCandidate no_fallback_records 10.0
+        test_passed = test_passed and no_fallback_result == undefined
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Aligns selected vertices vertically to the opposite endpoint of the best visible incident edge.
+    Exact vertical edges have priority; otherwise the most vertical visible edge inside Angle is used.
+    */
+    function fixSelectedVerticalVertices node adapter selected_vertices tolerance:0.01 angle_threshold:45.0 =
+    (
+        fixed_count = 0
+        failed_vertices = #{}
+
+        for selected_vertex in selected_vertices do
+        (
+            vertex_fixed = false
+            reference_data = findSelectedVertexVerticalReference node adapter selected_vertex selected_vertices tolerance angle_threshold
+
+            if reference_data != undefined then
+            (
+                other_vertex = reference_data[2]
+                selected_position = getVertexWorldPosition node adapter selected_vertex
+                other_position = getVertexWorldPosition node adapter other_vertex
+
+                if (selected_position != undefined and other_position != undefined) then
+                (
+                    target_position = [other_position.x, other_position.y, selected_position.z]
+
+                    if (setVertexWorldPosition node adapter selected_vertex target_position) then
+                    (
+                        vertex_fixed = true
+                        fixed_count += 1
                     )
                 )
             )

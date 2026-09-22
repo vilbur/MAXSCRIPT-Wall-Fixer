@@ -1,5 +1,5 @@
-﻿/*
-Wall-Fixer UI 0.86
+/*
+Wall-Fixer UI 0.907
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.86"
-global wall_fixer_ui_tool_version = 0.933
+global wall_fixer_ui_file_version = "0.907"
+global wall_fixer_ui_tool_version = 0.945
 
 
 /*
@@ -228,20 +228,18 @@ function wallFixerLoadDialogPosition fallback_position =
 
 
 /*
-Loads the saved Wall-Fixer dialog size.
-Width is restored but remains locked; height remains vertically resizable.
+Loads the saved Wall-Fixer dialog height while keeping startup width at the current default.
+Dialog registration/restore never forces a previously saved width.
 */
 function wallFixerLoadDialogSize default_size =
 (
-    saved_width = wallFixerReadIniInt "Window" "Width" default_size.x
     saved_height = wallFixerReadIniInt "Window" "Height" default_size.y
 
 
-    if saved_width < 300 then saved_width = default_size.x
     if saved_height < wall_fixer_min_dialog_height then saved_height = wall_fixer_min_dialog_height
 
 
-    [saved_width, saved_height]
+    [default_size.x, saved_height]
     -- return
 )
 
@@ -793,6 +791,26 @@ function wallFixerRestoreDockState dock_state =
 )
 
 
+/*
+Restores the saved floating dialog position after CUI registration.
+Using setDialogPos after FloatDialogBar keeps save and restore in the same screen-coordinate space.
+*/
+function wallFixerRestoreFloatingDialogPosition dialog_position dock_state =
+(
+    if dialog_position != undefined and dock_state == #cui_floatable and WallFixerRollout != undefined then
+    (
+        try
+        (
+            setDialogPos WallFixerRollout dialog_position
+        )
+        catch
+        (
+        )
+    )
+    -- return
+)
+
+
 wallFixerUnregisterDialogBar()
 saved_dock_state = wallFixerLoadDockState()
 
@@ -1313,10 +1331,10 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:82
 
 
 /*
-EDGE FIXER contains geometry-fix workflow step 6 and its result check.
+EDGE FIXER contains geometry-fix workflow step 6.
 Straight Edge Fixer tuning controls are kept in the OPTIONS subrollout at the bottom.
 */
-rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
+rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:192
 (
     groupBox edge_z_group "6. EDGE ROW FIXING AND BORDER EDGES CHECK" pos:[4,8] width:302 height:150
 
@@ -1343,11 +1361,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
         tooltip:"Detect repeated horizontal edge rows and align nearby horizontal edges to TOP, BOTTOM or CENTER target Z."
 
 
-    groupBox check_result_group "8. CHECK RESULT" pos:[4,164] width:302 height:38
-    label check_result_label "Manual viewport check of geometry fixes." pos:[18,180] width:274 height:18
-
-
-    subRollout edge_fixer_options_subrollout "" pos:[0,208] width:310 height:wall_fixer_closed_rollout_height
+    subRollout edge_fixer_options_subrollout "" pos:[0,164] width:310 height:wall_fixer_closed_rollout_height
 
 
     /*
@@ -1357,7 +1371,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
     function setOptionsLayout options_open =
     (
         edge_fixer_options_subrollout.height = if options_open then (88 + wall_fixer_closed_rollout_height) else wall_fixer_closed_rollout_height
-        WallFixerEdgeFixerRollout.height = if options_open then (300 + wall_fixer_closed_rollout_height) else 236
+        WallFixerEdgeFixerRollout.height = if options_open then (256 + wall_fixer_closed_rollout_height) else 192
         -- return
     )
 
@@ -1579,8 +1593,8 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:308
         tooltip:"LMB: select duplicate-position vertices at 0.01 tolerance.\n\nRMB: run the current duplicate-vertex fix at 0.01 tolerance."
 
 
-    button redundant_loops_button "11. REMOVE REDUNDANT LOOPS AND EDGES" pos:[4,88] width:302 height:34 \
-        tooltip:"Reuse the current Redundant Loop Cleanup operation."
+    button redundant_loops_button "11. REMOVE REDUNDANT LOOPS" pos:[4,88] width:302 height:34 \
+        tooltip:"LMB: Select redundant loop edges.\n\nRMB: Remove selected edges. If no edges are selected, remove all detected redundant loop edges."
 
 
     button repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" pos:[4,128] width:302 height:34 enabled:false \
@@ -1630,7 +1644,13 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:308
 
     on redundant_loops_button pressed do
     (
-        ::WallFixerRollout.runRedundantLoopCleanup()
+        ::WallFixerRollout.runSelectRedundantLoops()
+    )
+
+
+    on redundant_loops_button rightclick do
+    (
+        ::WallFixerRollout.runRemoveRedundantLoops()
     )
 
 
@@ -1656,7 +1676,7 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
 
 
     button align_camera_button "Align Camera" pos:[8,44] width:143 height:30 \
-        tooltip:"LMB: Align the active viewport perpendicular to selected wall faces, switch to orthographic User view, and zoom to the selection."
+        tooltip:"LMB: Align the active viewport perpendicular to selected wall faces. If no faces are selected, use the dominant wall-face normal. Switch to orthographic User view and zoom to the selection."
 
 
     button print_objs_button "Print Objs" pos:[159,44] width:143 height:30 \
@@ -1667,7 +1687,7 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
 
 
     button material_button "Material" pos:[159,80] width:143 height:30 \
-        tooltip:"LMB: Assign one shared 10-ID Multi/Sub-Object material to selected geometry.\n\nRMB: Remove the material from selected geometry."
+        tooltip:"LMB: Assign the same WALL FACE CLASSIFIER material used by INNER / OUTTER to selected geometry.\n\nRMB: Remove the material from selected geometry."
 
 
     on attach_button pressed do
@@ -2983,7 +3003,130 @@ function getSourceFaceSelection object_node source_data =
 )
 
 
-/* Collects the average world-space normal and center of the currently selected wall faces.
+/* Collects the dominant vertical face orientation from the selected wall objects.
+   Parallel and opposite face normals vote for one cluster while horizontal caps are ignored.
+*/
+function getDominantWallFaceAlignmentData =
+(
+    selected_nodes = selection as array
+    cluster_normals = #()
+    cluster_centers = #()
+    cluster_counts = #()
+    cluster_reference_normals = #()
+    dominant_cluster_index = 0
+    dominant_cluster_count = 0
+    dominant_normal_dot_threshold = 0.9961947
+
+
+    for object_node in selected_nodes do
+    (
+        if object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass then
+        (
+            source_data = getFaceGeometrySource object_node
+
+
+            if source_data != undefined then
+            (
+                source_face_count = getSourceNumFaces object_node source_data
+
+
+                for face_index = 1 to source_face_count do
+                (
+                    face_degree = getSourceFaceDegree object_node source_data face_index
+                    face_vertices = #()
+
+
+                    if face_degree >= 3 then
+                    (
+                        for corner_index = 1 to face_degree do
+                        (
+                            vertex_index = getSourceFaceVertex object_node source_data face_index corner_index
+
+
+                            if vertex_index > 0 then
+                            (
+                                append face_vertices (getSourceVertexWorld object_node source_data vertex_index)
+                            )
+                        )
+                    )
+
+
+                    if face_vertices.count >= 3 then
+                    (
+                        face_normal = calculatePolygonNormal face_vertices
+                        horizontal_normal = [face_normal.x, face_normal.y, 0.0]
+
+
+                        if (length horizontal_normal) > 0.0000001 then
+                        (
+                            horizontal_normal = normalize horizontal_normal
+                            cluster_index = 0
+
+
+                            for test_index = 1 to cluster_reference_normals.count while cluster_index == 0 do
+                            (
+                                if (abs (dot horizontal_normal cluster_reference_normals[test_index])) >= dominant_normal_dot_threshold then
+                                (
+                                    cluster_index = test_index
+                                )
+                            )
+
+
+                            if cluster_index == 0 then
+                            (
+                                append cluster_reference_normals horizontal_normal
+                                append cluster_normals horizontal_normal
+                                append cluster_centers (calculatePolygonCenter face_vertices)
+                                append cluster_counts 1
+                            )
+                            else
+                            (
+                                if (dot horizontal_normal cluster_reference_normals[cluster_index]) < 0.0 then
+                                (
+                                    horizontal_normal *= -1.0
+                                )
+
+
+                                cluster_normals[cluster_index] += horizontal_normal
+                                cluster_centers[cluster_index] += calculatePolygonCenter face_vertices
+                                cluster_counts[cluster_index] += 1
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+
+    for cluster_index = 1 to cluster_counts.count do
+    (
+        if cluster_counts[cluster_index] > dominant_cluster_count then
+        (
+            dominant_cluster_index = cluster_index
+            dominant_cluster_count = cluster_counts[cluster_index]
+        )
+    )
+
+
+    if dominant_cluster_index > 0 and (length cluster_normals[dominant_cluster_index]) > 0.0000001 then
+    (
+        #(
+            (cluster_centers[dominant_cluster_index] / dominant_cluster_count),
+            (normalize cluster_normals[dominant_cluster_index]),
+            dominant_cluster_count,
+            #dominant
+        )
+    )
+    else
+    (
+        undefined
+    )
+    -- return
+)
+
+
+/* Collects alignment data from selected faces, or falls back to the dominant wall-face orientation.
    Supports Editable Poly and a top Edit Poly modifier without changing topology or selection.
 */
 function getSelectedWallFaceAlignmentData =
@@ -2995,11 +3138,7 @@ function getSelectedWallFaceAlignmentData =
     valid_face_count = 0
 
 
-    if subObjectLevel != 4 then
-    (
-        undefined
-    )
-    else
+    if subObjectLevel == 4 then
     (
         for object_node in selected_nodes do
         (
@@ -3060,16 +3199,16 @@ function getSelectedWallFaceAlignmentData =
                 )
             )
         )
+    )
 
 
-        if valid_face_count > 0 and (length normal_sum) > 0.0000001 then
-        (
-            #((center_sum / valid_face_count), (normalize normal_sum), valid_face_count)
-        )
-        else
-        (
-            undefined
-        )
+    if valid_face_count > 0 and (length normal_sum) > 0.0000001 then
+    (
+        #((center_sum / valid_face_count), (normalize normal_sum), valid_face_count, #selected)
+    )
+    else
+    (
+        getDominantWallFaceAlignmentData()
     )
     -- return
 )
@@ -3088,13 +3227,14 @@ function alignViewportToSelectedWallFaces =
 
     if alignment_data == undefined then
     (
-        WallFixer.last_slice_report = "Align Camera: select one or more wall faces in Face sub-object mode."
+        WallFixer.last_slice_report = "Align Camera: select one or more supported wall objects."
     )
     else
     (
         face_center = alignment_data[1]
         face_normal = alignment_data[2]
         face_count = alignment_data[3]
+        alignment_mode = alignment_data[4]
         reference_up = [0.0, 0.0, 1.0]
         horizontal_normal = [face_normal.x, face_normal.y, 0.0]
 
@@ -3170,7 +3310,14 @@ function alignViewportToSelectedWallFaces =
 
         if operation_success then
         (
-            WallFixer.last_slice_report = "Align Camera: User view aligned to " + (face_count as string) + " selected wall face(s) and zoomed to selection."
+            if alignment_mode == #selected then
+            (
+                WallFixer.last_slice_report = "Align Camera: User view aligned to " + (face_count as string) + " selected wall face(s) and zoomed to selection."
+            )
+            else
+            (
+                WallFixer.last_slice_report = "Align Camera: no faces selected; User view aligned to the dominant normal from " + (face_count as string) + " wall face(s) and zoomed to selection."
+            )
         )
         else
         (
@@ -7250,14 +7397,14 @@ function testEdgeFixerOptionsLayout =
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout false
-    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 236) and (slot_control.height == wall_fixer_closed_rollout_height) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
+    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 192) and (slot_control.height == wall_fixer_closed_rollout_height) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]))
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout true
-    expanded_ok = ((WallFixerEdgeFixerRollout.height == (300 + wall_fixer_closed_rollout_height)) and (slot_control.height == (88 + wall_fixer_closed_rollout_height)) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
+    expanded_ok = ((WallFixerEdgeFixerRollout.height == (256 + wall_fixer_closed_rollout_height)) and (slot_control.height == (88 + wall_fixer_closed_rollout_height)) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]))
 
 
-    WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 236)
+    WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 192)
 
 
     local test_passed = width_ok and collapsed_ok and expanded_ok
@@ -7309,6 +7456,25 @@ function testRolloutOpenPersistence =
 )
 
 
+/*
+Tests POST-PROCESS redundant-loop RMB routing without changing scene geometry.
+Selected edges must win over automatic redundant-loop cleanup; an empty selection must use all redundant loops.
+*/
+function testPostProcessRedundantLoopRouting =
+(
+    selected_mode = WallFixer.getRedundantLoopRemoveMode 3
+    empty_mode = WallFixer.getRedundantLoopRemoveMode 0
+    passed = (selected_mode == #selectedEdges) and (empty_mode == #allRedundant)
+
+
+    format "POST-PROCESS redundant-loop routing | selected:% | empty:% | passed:%\n" selected_mode empty_mode passed
+
+
+    passed
+    -- return
+)
+
+
 function testParentControlWidths =
 (
     local width_ok = true
@@ -7318,7 +7484,6 @@ function testParentControlWidths =
     width_ok = width_ok and (WallFixerPreProcessRollout.planar_button.pos.x == 4) and (WallFixerPreProcessRollout.planar_button.width == (WallFixerPreProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPreProcessRollout.explode_walls_button.pos.x == 4) and (WallFixerPreProcessRollout.explode_walls_button.width == (WallFixerPreProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerEdgeFixerRollout.edge_z_group.pos.x == 4) and (WallFixerEdgeFixerRollout.edge_z_group.width == (WallFixerEdgeFixerRollout.width - 8))
-    width_ok = width_ok and (WallFixerEdgeFixerRollout.check_result_group.pos.x == 4) and (WallFixerEdgeFixerRollout.check_result_group.width == (WallFixerEdgeFixerRollout.width - 8))
     width_ok = width_ok and (WallFixerSliceWallsRollout.slice_selected_walls_button.pos.x == 4) and (WallFixerSliceWallsRollout.slice_selected_walls_button.width == (WallFixerSliceWallsRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.two_edge_verts_button.pos.x == 4) and (WallFixerPostProcessRollout.two_edge_verts_button.width == (WallFixerPostProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.duplicated_vertices_button.pos.x == 4) and (WallFixerPostProcessRollout.duplicated_vertices_button.width == (WallFixerPostProcessRollout.width - 8))
@@ -8002,6 +8167,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
 
 
+        process_status_label.Visible = false
         workflow_progress.visible = false
         progress_count_label.Visible = false
         status_line_top.Visible = true
@@ -8046,7 +8212,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
     /*
     Sets the global progress bar directly and clamps it to 0-100.
-    Starting or updating work shows the bar and hides the completed-state label.
+    Running state always repaints immediately so READY/result labels cannot remain visible over the bar.
     */
     function setProgress progress_value =
     (
@@ -8057,6 +8223,8 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
         if clamped_value < 100 then
         (
+            workflow_progress.visible = false
+            progress_count_label.Visible = false
             process_status_label.Visible = false
             status_line_top.Visible = false
             status_line_bottom.Visible = false
@@ -8069,33 +8237,56 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         (
             last_progress_value = clamped_value
             workflow_progress.value = clamped_value
+        )
 
-            try
-            (
-                (dotNetClass "System.Windows.Forms.Application").DoEvents()
-            )
-            catch
-            (
-            )
+        try
+        (
+            (dotNetClass "System.Windows.Forms.Application").DoEvents()
+        )
+        catch
+        (
         )
         -- return
     )
 
 
     /*
-    Receives the existing batch slicer's processed/total object counts.
-    It updates both the green progress bar and the shared plain status line.
+    Returns one monotonic Slice Walls batch percentage.
+    Each object receives an equal share of the bar while task progress fills that object's share.
     */
-    function updateSliceProgress processed_count total_count object_index:0 object_total:0 object_name:"" vertex_count:0 =
+    function getSliceProgressPercent processed_count total_count object_index:0 object_total:0 =
     (
         progress_percent = 0
 
-        if total_count > 0 then
+        if object_total > 0 and object_index > 0 then
+        (
+            task_fraction = 0.0
+            if total_count > 0 then task_fraction = (processed_count as float) / total_count
+            if task_fraction < 0.0 then task_fraction = 0.0
+            if task_fraction > 1.0 then task_fraction = 1.0
+
+            progress_percent = ((100.0 * (((object_index - 1) as float) + task_fraction)) / object_total) as integer
+        )
+        else if total_count > 0 then
         (
             progress_percent = ((100.0 * processed_count) / total_count) as integer
         )
 
-        setProgress progress_percent
+        if progress_percent < 0 then progress_percent = 0
+        if progress_percent > 100 then progress_percent = 100
+
+        progress_percent
+        -- return
+    )
+
+
+    /*
+    Receives live Slice Walls task/object progress.
+    It updates the green bar plus the centered object/task overlay.
+    */
+    function updateSliceProgress processed_count total_count object_index:0 object_total:0 object_name:"" vertex_count:0 =
+    (
+        progress_percent = getSliceProgressPercent             processed_count             total_count             object_index:object_index             object_total:object_total
 
         if object_total > 0 then
         (
@@ -8107,6 +8298,24 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
 
         try(progress_count_label.BringToFront())catch()
+        setProgress progress_percent
+        -- return
+    )
+
+
+    /*
+    Tests Slice Walls batch progress across task and object boundaries.
+    */
+    function testSliceProgressPercent =
+    (
+        test_passed = true
+        test_passed = test_passed and (getSliceProgressPercent 0 10 object_index:1 object_total:2) == 0
+        test_passed = test_passed and (getSliceProgressPercent 5 10 object_index:1 object_total:2) == 25
+        test_passed = test_passed and (getSliceProgressPercent 10 10 object_index:1 object_total:2) == 50
+        test_passed = test_passed and (getSliceProgressPercent 0 10 object_index:2 object_total:2) == 50
+        test_passed = test_passed and (getSliceProgressPercent 10 10 object_index:2 object_total:2) == 100
+
+        test_passed
         -- return
     )
 
@@ -8184,7 +8393,6 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
         if dialog_size != undefined then
         (
-            setIniSetting wall_fixer_ui_ini_path "Window" "Width" ((dialog_size.x as integer) as string)
             setIniSetting wall_fixer_ui_ini_path "Window" "Height" ((dialog_size.y as integer) as string)
         )
 
@@ -8334,7 +8542,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
     function runAlignCameraToWallFaces =
     (
         setProgress 0
-        setStatus #message "Aligning User view to selected wall faces..."
+        setStatus #message "Aligning User view to wall face normal..."
         operation_success = alignViewportToSelectedWallFaces()
         setProgress 100
 
@@ -8391,8 +8599,8 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Assigns one shared 10-ID Multi/Sub-Object material to all selected geometry nodes.
-    The material is created once per button press and shared by the whole selection.
+    Assigns the same WALL FACE CLASSIFIER material used by INNER / OUTTER to selected geometry nodes.
+    Reuses an existing classifier material from the selection or classified scene when available.
     */
     function runAssignMultiMaterial =
     (
@@ -8405,21 +8613,37 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
         else
         (
-            multi_material = multimaterial numsubs:10 name:"WALL-FIXER MULTI"
+            classifier_material = undefined
 
-            for material_index = 1 to 10 do
+            for object_node in selected_nodes while classifier_material == undefined do
             (
-                multi_material.materialList[material_index] = standardMaterial name:("ID " + (material_index as string))
-            )
-            multi_material.materialIDList = #(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
-            multi_material.names = #("ID 1", "ID 2", "ID 3", "ID 4", "ID 5", "ID 6", "ID 7", "ID 8", "ID 9", "ID 10")
-
-            undo "Wall-Fixer - Assign Multi Material" on
-            (
-                for object_node in selected_nodes do object_node.material = multi_material
+                if hasWallClassifierMaterial object_node then
+                (
+                    classifier_material = object_node.material
+                )
             )
 
-            setStatus #success ("Material: assigned 10-ID Multi/Sub-Object to " + (selected_nodes.count as string) + " object(s).")
+            if classifier_material == undefined then
+            (
+                classified_nodes = getWallFaceGrowthSceneNodes()
+
+                if classified_nodes.count > 0 then
+                (
+                    classifier_material = classified_nodes[1].material
+                )
+            )
+
+            if classifier_material == undefined then
+            (
+                classifier_material = createWallClassifierMaterial()
+            )
+
+            undo "Wall-Fixer - Assign Classifier Material" on
+            (
+                for object_node in selected_nodes do object_node.material = classifier_material
+            )
+
+            setStatus #success ("Material: assigned WALL FACE CLASSIFIER to " + (selected_nodes.count as string) + " object(s).")
             true
         )
         -- return
@@ -12029,7 +12253,10 @@ result_groups
         (
             cleanupRedundantVerticesAfterGeometryChange (selection as array)
             setProgress 100
-            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Slice selected walls completed.")
+            elapsed_seconds = (WallFixer.last_slice_elapsed_ms as float) / 1000.0
+            completion_message = "Slice selected walls completed in " + (elapsed_seconds as string) + " s."
+            if WallFixer.last_slice_report != "" then completion_message += " " + WallFixer.last_slice_report
+            setStatus #success completion_message
         )
         else
         (
@@ -12070,6 +12297,7 @@ result_groups
 
 
         first_report = WallFixer.last_slice_report
+        first_elapsed_ms = WallFixer.last_slice_elapsed_ms
 
 
         setProgress 0
@@ -12087,6 +12315,7 @@ result_groups
 
 
         second_report = WallFixer.last_slice_report
+        second_elapsed_ms = WallFixer.last_slice_elapsed_ms
         completed = first_completed and second_completed
 
 
@@ -12094,7 +12323,8 @@ result_groups
         (
             cleanupRedundantVerticesAfterGeometryChange (selection as array)
             setProgress 100
-            setStatus #success "Slice selected walls completed in both modes."
+            elapsed_seconds = ((first_elapsed_ms + second_elapsed_ms) as float) / 1000.0
+            setStatus #success ("Slice selected walls completed in both modes in " + (elapsed_seconds as string) + " s.")
         )
         else
         (
@@ -12109,25 +12339,60 @@ result_groups
 
 
     /*
-    Reuses the current geometric redundant-loop cleanup operation.
-    It leaves no cleanup modifier behind when no valid redundant loop is found.
+    Selects detected redundant-loop edges without changing topology.
+    A single selected object is left in Edge sub-object mode for inspection.
     */
-    function runRedundantLoopCleanup =
+    function runSelectRedundantLoops =
     (
         setProgress 0
-        setStatus #message "Removing redundant loops and edges..."
-        completed = WallFixer.cleanupRedundantLoopsSelection angle_threshold:0.1 debug_output:true
-        if completed then cleanupRedundantVerticesAfterGeometryChange (selection as array)
+        setStatus #message "Selecting redundant loops..."
+        selection_result = WallFixer.selectRedundantLoopsSelection angle_threshold:0.1 debug_output:true
+        completed = selection_result[1]
+        selected_edge_count = selection_result[3]
+        setProgress 100
+
+
+        if completed and selected_edge_count > 0 then
+        (
+            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant loops selected.")
+        )
+        else if completed then
+        (
+            setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No redundant loops found.")
+        )
+        else
+        (
+            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant-loop selection failed.")
+        )
+
+
+        completed
+        -- return
+    )
+
+
+    /*
+    Removes selected edges first; when no edges are selected, removes all detected redundant-loop edges.
+    Manual selected-edge removal does not run the broader redundant-vertex cleanup pass.
+    */
+    function runRemoveRedundantLoops =
+    (
+        setProgress 0
+        setStatus #message "Removing selected or redundant-loop edges..."
+        removal_result = WallFixer.removeSelectedOrRedundantLoopEdgesSelection angle_threshold:0.1 debug_output:true
+        completed = removal_result[1]
+        remove_mode = removal_result[2]
+        if completed and remove_mode == #allRedundant then cleanupRedundantVerticesAfterGeometryChange (selection as array)
         setProgress 100
 
 
         if completed then
         (
-            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant-loop cleanup completed.")
+            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Edge removal completed.")
         )
         else
         (
-            setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No redundant loops were removed.")
+            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Edge removal failed.")
         )
 
 
@@ -12315,7 +12580,7 @@ if saved_dialog_position == undefined then
         height:saved_dialog_size.y \
         menu:wall_fixer_main_menu \
         style:#(#style_titlebar, #style_sysmenu, #style_toolwindow, #style_resizing) \
-        lockWidth:true \
+        lockWidth:false \
         lockHeight:false
 )
 else
@@ -12326,10 +12591,11 @@ else
         pos:saved_dialog_position \
         menu:wall_fixer_main_menu \
         style:#(#style_titlebar, #style_sysmenu, #style_toolwindow, #style_resizing) \
-        lockWidth:true \
+        lockWidth:false \
         lockHeight:false
 )
 
 
 wallFixerRegisterDialogBar()
 wallFixerRestoreDockState saved_dock_state
+wallFixerRestoreFloatingDialogPosition saved_dialog_position saved_dock_state
