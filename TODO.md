@@ -7,6 +7,16 @@ UI: SUCCESS label: display the SUCCESS status text in green.
 
 ## QUEUE
 
+UI: button 2: make the button font/text color orange.
+
+UI: VERTICAL / SKEWED row buttons: make the button font/text color orange.
+
+UI: button 3: make the button font/text color orange.
+
+UI: INNER / OUTTER buttons: make the .NET button font orange.
+
+UI: button 9: make the button font/text color orange.
+
 UI: FAILED label: add a "FAILED" status label and use it instead of a warning when a function fails but the failure is non-critical.
 
 ## DONE TODAY

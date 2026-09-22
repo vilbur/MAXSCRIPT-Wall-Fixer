@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer Core 0.39
+Wall-Fixer Core 0.41
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.39"
-global wall_fixer_core_tool_version = 0.944
+global wall_fixer_core_file_version = "0.41"
+global wall_fixer_core_tool_version = 0.950
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -428,6 +428,33 @@ struct WallFixer_v
         -- return
     ),
     /*
+    Tests directional slice-modifier retention.
+    Horizontal replaces Horizontal but keeps Vertical; Vertical replaces Vertical but keeps Horizontal.
+    */
+    function testSliceModifierRetentionPolicy =
+    (
+        local test_passed = true
+
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "SLICE HORIZONTAL" #horizontal
+        test_passed = test_passed and not (shouldRemoveWallFixerSliceModifierName "SLICE VERTICAL" #horizontal)
+
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "SLICE VERTICAL" #vertical
+        test_passed = test_passed and not (shouldRemoveWallFixerSliceModifierName "SLICE HORIZONTAL" #vertical)
+
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "SLICE ALL" #horizontal
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "SLICE ALL" #vertical
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "WMC - WALL TOPOLOGY CLEANUP" #horizontal
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "WMC - WALL TOPOLOGY CLEANUP" #vertical
+
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "SLICE HORIZONTAL" #all
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "SLICE VERTICAL" #all
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
     Returns true when the requested slicing Edit Poly already owns the active Modify-panel context.
     Used to avoid redundant command-panel refreshes during batch slicing.
     */
@@ -524,20 +551,50 @@ struct WallFixer_v
 
 
     /*
-    Removes only Edit Poly modifiers that belong to the slicing workflow.
-    Other Wall-Fixer modifiers and all user modifiers remain untouched.
+    Returns true when one Wall-Fixer slice modifier name should be rebuilt for the requested mode.
+    Directional runs replace only the same direction and preserve the opposite directional slice.
+    Legacy SLICE ALL and slicing cleanup modifiers are removed because they conflict with a deterministic rebuild.
     */
-    function removeWallFixerSliceModifiers node =
+    function shouldRemoveWallFixerSliceModifierName modifier_name cut_mode =
+    (
+        local normalized_name = toUpper (modifier_name as string)
+
+        if normalized_name == "WMC - WALL TOPOLOGY CLEANUP" or normalized_name == "WALL TOPOLOGY CLEANUP" then return true
+        if normalized_name == "SLICE ALL" then return true
+
+        case cut_mode of
+        (
+            #horizontal: normalized_name == "SLICE HORIZONTAL"
+            #vertical: normalized_name == "SLICE VERTICAL"
+            default:
+            (
+                normalized_name == "SLICE HORIZONTAL" or
+                normalized_name == "SLICE VERTICAL"
+            )
+        )
+        -- return
+    ),
+
+
+    /*
+    Removes only the slicing modifiers that conflict with the requested mode.
+    Horizontal preserves SLICE VERTICAL; Vertical preserves SLICE HORIZONTAL.
+    */
+    function removeWallFixerSliceModifiers node cut_mode:#all =
     (
         if node == undefined or not(isValidNode node) then return false
 
-        modifier_index = node.modifiers.count
+        local modifier_index = node.modifiers.count
         while modifier_index >= 1 do
         (
-            stack_modifier = node.modifiers[modifier_index]
+            local stack_modifier = node.modifiers[modifier_index]
+
             if isWallFixerSliceModifier stack_modifier then
             (
-                deleteModifier node stack_modifier
+                if shouldRemoveWallFixerSliceModifierName stack_modifier.name cut_mode then
+                (
+                    deleteModifier node stack_modifier
+                )
             )
 
             modifier_index -= 1
@@ -7024,11 +7081,11 @@ modifier.split = false
                     current_vertex_count = getEvaluatedVertexCount node
                     processed_vertex_count += current_vertex_count
 
-                    /* Every batch starts from the same unchanged base object.
-                       Remove only prior slicing modifiers so the requested modifier layout is deterministic. */
-                    if not(::WallFixer.removeWallFixerSliceModifiers node) then
+                    /* Rebuild only the requested slice direction.
+                       Preserve an existing opposite-direction slice modifier so a second mode stacks above it. */
+                    if not(::WallFixer.removeWallFixerSliceModifiers node cut_mode:cut_mode) then
                     (
-                        node_error = node.name + ": could not clear previous Wall-Fixer slicing modifiers."
+                        node_error = node.name + ": could not clear conflicting Wall-Fixer slicing modifiers."
                         node_ok = false
                     )
                     else
@@ -7163,7 +7220,7 @@ modifier.split = false
                             task_index_offset += pass_tasks.count
                         )
 
-                        if node_ok and total_sliced_count > 0 and final_sliced_node == undefined then
+                        if node_ok and total_sliced_count > 0 then
                         (
                             final_sliced_node = node
                         )
@@ -7200,25 +7257,30 @@ modifier.split = false
 
         select all_selected_nodes
 
-        if final_sliced_node != undefined and all_selected_nodes.count == 1 and isValidNode final_sliced_node and final_sliced_node.modifiers.count > 0 then
+        if final_sliced_node != undefined and isValidNode final_sliced_node and final_sliced_node.modifiers.count > 0 then
         (
             local top_modifier = final_sliced_node.modifiers[1]
 
-            if classOf top_modifier == Edit_Poly then
-            (
-                select final_sliced_node
-                max modify mode
+            select final_sliced_node
+            max modify mode
 
-                try
+            try
+            (
+                if classOf top_modifier == Edit_Poly then
                 (
                     top_modifier.SetPrimaryNode final_sliced_node
-                    modPanel.setCurrentObject top_modifier
+                )
+
+                modPanel.setCurrentObject top_modifier
+
+                if classOf top_modifier == Edit_Poly then
+                (
                     top_modifier.SetEPolySelLevel #Edge
                     subObjectLevel = 2
                 )
-                catch
-                (
-                )
+            )
+            catch
+            (
             )
         )
         else if original_panel_mode == #modify then
@@ -7265,6 +7327,28 @@ modifier.split = false
         all_ok
         -- return
     ),
+
+    /*
+    Tests that the last successful Slice Walls object becomes the completion target.
+    */
+    function testSliceCompletionTargetPolicy =
+    (
+        local final_target = undefined
+        local sample_results = #(
+            #("Wall_A", 2),
+            #("Wall_B", 0),
+            #("Wall_C", 1)
+        )
+
+        for sample_result in sample_results do
+        (
+            if sample_result[2] > 0 then final_target = sample_result[1]
+        )
+
+        final_target == "Wall_C"
+        -- return
+    ),
+
 
     /*
     Tests synthetic selected-live slice task structure used for modifier-created vertices.

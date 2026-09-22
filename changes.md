@@ -1,4 +1,17 @@
-﻿2026-09-22 — `Wall-Fixer-Deploy.ahk`: added AutoHotkey 1.1.36.02 deployment helper version 1.3. Running it from the project folder creates a sibling `<folder>_<current tool version>` deployment, copies all project content except the `.git` directory, keeps `.gitignore`, and refuses to overwrite an existing deployment. Added a `--test` self-test covering version parsing, sibling naming, copied files, `.gitignore`, and `.git` exclusion. This utility does not change the Wall-Fixer runtime; tool version remains 0.945.
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: removed the duplicate PRE-PROCESS step 2 weld spinner and expanded `2. VERTEX CHECK / WELD` to the full row; step 2 now reads only `Options > WELD DISTANCE`, renamed the Options `Threshold` label to `WELD DISTANCE`, and added `testPreProcessWeldDistanceControl`; project version 0.951.
+
+2026-09-22 — `Wall-Fixer-Core.ms`, `Wall-Fixer.ms`: Slice Walls directional runs now preserve the opposite existing slice modifier; Horizontal replaces only `SLICE HORIZONTAL` and keeps `SLICE VERTICAL`, while Vertical replaces only `SLICE VERTICAL` and keeps `SLICE HORIZONTAL`. Legacy `SLICE ALL` and slicing cleanup modifiers are still cleared before a directional rebuild. RMB both-mode slicing therefore finishes with two directional slice modifiers stacked instead of deleting the first pass. Added `testSliceModifierRetentionPolicy`; project version 0.950.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: updated numbered `.NET` workflow buttons with a visible 1 px gray border (RGB 120,120,120) and light-green bold text (RGB 170,220,170); extended `testNumberedDarkButtons` to verify border and foreground styling; project version 0.949.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: fixed init-time MAXScript parser error in `testNumberedDarkButtons`; changed the invalid `.NET` chain `btn.GetType().FullName` to `(btn.GetType()).FullName` and scanned the complete UI/bundle for other unparenthesized `method().property` chains; project version 0.948.
+
+2026-09-22 — `Wall-Fixer-Core.ms`, `Wall-Fixer.ms`: Slice Walls success now focuses the last object that actually produced a slice and activates that object's current top modifier; this lands on the final slicing modifier when it is still topmost, or on another modifier when one is above it. Top Edit Poly modifiers still finish in Edge sub-object level 2. Added `testSliceCompletionTargetPolicy`; project version 0.947.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: replaced the numbered workflow action buttons (1, 2, 3, 5, 9, 10–15) with dark WinForms `.NET` buttons using the shared `setupDarkButton` template; existing positions, sizes, disabled states, tooltips, and LMB/RMB behavior are preserved; added `testNumberedDarkButtons`; project version 0.946.
+
+
+2026-09-22 — `Wall-Fixer-Deploy.ahk`: added AutoHotkey 1.1.36.02 deployment helper version 1.3. Running it from the project folder creates a sibling `<folder>_<current tool version>` deployment, copies all project content except the `.git` directory, keeps `.gitignore`, and refuses to overwrite an existing deployment. Added a `--test` self-test covering version parsing, sibling naming, copied files, `.gitignore`, and `.git` exclusion. This utility does not change the Wall-Fixer runtime; tool version remains 0.945.
 
 
 2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: fixed init-time rollout parser error in `testSliceProgressPercent`; removed the stray comma after the rollout function body and verified the standalone UI contains no other standalone `),` rollout/function terminators; project version 0.945.

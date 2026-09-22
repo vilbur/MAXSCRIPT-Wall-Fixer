@@ -1,6 +1,6 @@
 /*
-Wall-Fixer Bundled Loader 0.919
-Project version 0.945.
+Wall-Fixer Bundled Loader 0.924
+Project version 0.951.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.919"
-global wall_fixer_loader_tool_version = 0.945
+global wall_fixer_loader_file_version = "0.925"
+global wall_fixer_loader_tool_version = 0.951
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -1952,7 +1952,7 @@ struct WMCWallSlicePipeline
 
 
 /*
-Wall-Fixer Core 0.39
+Wall-Fixer Core 0.41
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -1961,8 +1961,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.39"
-global wall_fixer_core_tool_version = 0.944
+global wall_fixer_core_file_version = "0.41"
+global wall_fixer_core_tool_version = 0.950
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -2381,6 +2381,33 @@ struct WallFixer_v
         -- return
     ),
     /*
+    Tests directional slice-modifier retention.
+    Horizontal replaces Horizontal but keeps Vertical; Vertical replaces Vertical but keeps Horizontal.
+    */
+    function testSliceModifierRetentionPolicy =
+    (
+        local test_passed = true
+
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "SLICE HORIZONTAL" #horizontal
+        test_passed = test_passed and not (shouldRemoveWallFixerSliceModifierName "SLICE VERTICAL" #horizontal)
+
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "SLICE VERTICAL" #vertical
+        test_passed = test_passed and not (shouldRemoveWallFixerSliceModifierName "SLICE HORIZONTAL" #vertical)
+
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "SLICE ALL" #horizontal
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "SLICE ALL" #vertical
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "WMC - WALL TOPOLOGY CLEANUP" #horizontal
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "WMC - WALL TOPOLOGY CLEANUP" #vertical
+
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "SLICE HORIZONTAL" #all
+        test_passed = test_passed and shouldRemoveWallFixerSliceModifierName "SLICE VERTICAL" #all
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
     Returns true when the requested slicing Edit Poly already owns the active Modify-panel context.
     Used to avoid redundant command-panel refreshes during batch slicing.
     */
@@ -2477,20 +2504,50 @@ struct WallFixer_v
 
 
     /*
-    Removes only Edit Poly modifiers that belong to the slicing workflow.
-    Other Wall-Fixer modifiers and all user modifiers remain untouched.
+    Returns true when one Wall-Fixer slice modifier name should be rebuilt for the requested mode.
+    Directional runs replace only the same direction and preserve the opposite directional slice.
+    Legacy SLICE ALL and slicing cleanup modifiers are removed because they conflict with a deterministic rebuild.
     */
-    function removeWallFixerSliceModifiers node =
+    function shouldRemoveWallFixerSliceModifierName modifier_name cut_mode =
+    (
+        local normalized_name = toUpper (modifier_name as string)
+
+        if normalized_name == "WMC - WALL TOPOLOGY CLEANUP" or normalized_name == "WALL TOPOLOGY CLEANUP" then return true
+        if normalized_name == "SLICE ALL" then return true
+
+        case cut_mode of
+        (
+            #horizontal: normalized_name == "SLICE HORIZONTAL"
+            #vertical: normalized_name == "SLICE VERTICAL"
+            default:
+            (
+                normalized_name == "SLICE HORIZONTAL" or
+                normalized_name == "SLICE VERTICAL"
+            )
+        )
+        -- return
+    ),
+
+
+    /*
+    Removes only the slicing modifiers that conflict with the requested mode.
+    Horizontal preserves SLICE VERTICAL; Vertical preserves SLICE HORIZONTAL.
+    */
+    function removeWallFixerSliceModifiers node cut_mode:#all =
     (
         if node == undefined or not(isValidNode node) then return false
 
-        modifier_index = node.modifiers.count
+        local modifier_index = node.modifiers.count
         while modifier_index >= 1 do
         (
-            stack_modifier = node.modifiers[modifier_index]
+            local stack_modifier = node.modifiers[modifier_index]
+
             if isWallFixerSliceModifier stack_modifier then
             (
-                deleteModifier node stack_modifier
+                if shouldRemoveWallFixerSliceModifierName stack_modifier.name cut_mode then
+                (
+                    deleteModifier node stack_modifier
+                )
             )
 
             modifier_index -= 1
@@ -8977,11 +9034,11 @@ modifier.split = false
                     current_vertex_count = getEvaluatedVertexCount node
                     processed_vertex_count += current_vertex_count
 
-                    /* Every batch starts from the same unchanged base object.
-                       Remove only prior slicing modifiers so the requested modifier layout is deterministic. */
-                    if not(::WallFixer.removeWallFixerSliceModifiers node) then
+                    /* Rebuild only the requested slice direction.
+                       Preserve an existing opposite-direction slice modifier so a second mode stacks above it. */
+                    if not(::WallFixer.removeWallFixerSliceModifiers node cut_mode:cut_mode) then
                     (
-                        node_error = node.name + ": could not clear previous Wall-Fixer slicing modifiers."
+                        node_error = node.name + ": could not clear conflicting Wall-Fixer slicing modifiers."
                         node_ok = false
                     )
                     else
@@ -9116,7 +9173,7 @@ modifier.split = false
                             task_index_offset += pass_tasks.count
                         )
 
-                        if node_ok and total_sliced_count > 0 and final_sliced_node == undefined then
+                        if node_ok and total_sliced_count > 0 then
                         (
                             final_sliced_node = node
                         )
@@ -9153,25 +9210,30 @@ modifier.split = false
 
         select all_selected_nodes
 
-        if final_sliced_node != undefined and all_selected_nodes.count == 1 and isValidNode final_sliced_node and final_sliced_node.modifiers.count > 0 then
+        if final_sliced_node != undefined and isValidNode final_sliced_node and final_sliced_node.modifiers.count > 0 then
         (
             local top_modifier = final_sliced_node.modifiers[1]
 
-            if classOf top_modifier == Edit_Poly then
-            (
-                select final_sliced_node
-                max modify mode
+            select final_sliced_node
+            max modify mode
 
-                try
+            try
+            (
+                if classOf top_modifier == Edit_Poly then
                 (
                     top_modifier.SetPrimaryNode final_sliced_node
-                    modPanel.setCurrentObject top_modifier
+                )
+
+                modPanel.setCurrentObject top_modifier
+
+                if classOf top_modifier == Edit_Poly then
+                (
                     top_modifier.SetEPolySelLevel #Edge
                     subObjectLevel = 2
                 )
-                catch
-                (
-                )
+            )
+            catch
+            (
             )
         )
         else if original_panel_mode == #modify then
@@ -9218,6 +9280,28 @@ modifier.split = false
         all_ok
         -- return
     ),
+
+    /*
+    Tests that the last successful Slice Walls object becomes the completion target.
+    */
+    function testSliceCompletionTargetPolicy =
+    (
+        local final_target = undefined
+        local sample_results = #(
+            #("Wall_A", 2),
+            #("Wall_B", 0),
+            #("Wall_C", 1)
+        )
+
+        for sample_result in sample_results do
+        (
+            if sample_result[2] > 0 then final_target = sample_result[1]
+        )
+
+        final_target == "Wall_C"
+        -- return
+    ),
+
 
     /*
     Tests synthetic selected-live slice task structure used for modifier-created vertices.
@@ -16769,7 +16853,7 @@ createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #
 
 
 /*
-Wall-Fixer UI 0.907
+Wall-Fixer UI 0.911
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -16779,8 +16863,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.907"
-global wall_fixer_ui_tool_version = 0.945
+global wall_fixer_ui_file_version = "0.911"
+global wall_fixer_ui_tool_version = 0.951
 
 
 /*
@@ -16880,6 +16964,63 @@ wall_fixer_ui_ini_path = ((getDir #plugcfg) + "\\Wall-Fixer.ini")
 wall_fixer_default_dialog_size = [344,748]
 wall_fixer_min_dialog_height = 320
 wall_fixer_closed_rollout_height = 24
+
+
+/*
+Creates a dark .NET button with bold light-green text and a visible gray border.
+Use this as the standard styled button template.
+*/
+function setupDarkButton btn =
+(
+    color_class = dotNetClass "System.Drawing.Color"
+    font_style_class = dotNetClass "System.Drawing.FontStyle"
+    flat_style_class = dotNetClass "System.Windows.Forms.FlatStyle"
+
+    btn.UseVisualStyleBackColor = false
+    btn.FlatStyle = flat_style_class.Flat
+
+    btn.BackColor = color_class.FromArgb 68 68 68
+    btn.ForeColor = color_class.FromArgb 170 220 170
+
+    btn.FlatAppearance.BorderColor = color_class.FromArgb 120 120 120
+    btn.FlatAppearance.BorderSize = 1
+
+    btn.FlatAppearance.MouseOverBackColor = color_class.FromArgb 78 78 78
+    btn.FlatAppearance.MouseDownBackColor = color_class.FromArgb 55 55 55
+
+    btn.Font = dotNetObject \
+        "System.Drawing.Font" \
+        "Segoe UI" \
+        9.0 \
+        font_style_class.Bold
+
+    btn -- return
+)
+
+
+/*
+Applies text, enabled state, tooltip, and the standard numbered-action button style.
+The supplied ToolTip object keeps native LMB/RMB help available for .NET controls.
+*/
+function wallFixerSetupNumberedDarkButton btn button_text tooltip_object tooltip_text enabled_state:true =
+(
+    setupDarkButton btn
+    btn.Text = button_text
+    btn.Enabled = enabled_state
+    tooltip_object.SetToolTip btn tooltip_text
+
+    btn -- return
+)
+
+
+/*
+Returns the WinForms mouse button name used by numbered .NET action handlers.
+This keeps LMB/RMB routing explicit without relying on the native rollout button events.
+*/
+function wallFixerGetDotNetMouseButton event_args =
+(
+    ((event_args.Button.ToString()) as string) -- return
+)
 
 
 /*
@@ -17825,10 +17966,10 @@ Its controls keep the existing Core behavior while using the Wall-Fixer settings
 rollout WallFixerOptionsRollout "Options" width:310 height:142
 (
     checkbox weld_checkbox "Weld Vertices" pos:[8,13] width:110 height:20 checked:saved_weld_enabled tooltip:"Legacy weld setting.\nSlice and Fix N-gons preserve boundaries without welding."
-    label weld_threshold_label "Threshold:" pos:[140,15] width:62 height:18
-    spinner weld_threshold_spinner "" pos:[200,12] width:102 height:20 \
+    label weld_threshold_label "WELD DISTANCE" pos:[116,15] width:110 height:18 align:#right
+    spinner weld_threshold_spinner "" pos:[230,12] width:72 height:20 \
         range:[0.0,1000000.0,saved_weld_threshold] type:#worldUnits scale:0.1 \
-        tooltip:"Maximum weld distance. Shared with PRE-PROCESS Vertex Check / Weld.\n\nFresh default: 1 current display unit."
+        tooltip:"Maximum vertex-pair weld and search distance.\n\nFresh default: 1 current display unit."
 
 
     checkbox auto_smooth_checkbox "Auto Smooth" \
@@ -17880,16 +18021,6 @@ rollout WallFixerOptionsRollout "Options" width:310 height:142
             saved_double_vert_threshold = control_value
 
 
-            try
-            (
-                WallFixerPreProcessRollout.weld_threshold_spinner.value = control_value
-                WallFixerPreProcessRollout.weld_unit_label.text = wallFixerGetDisplayUnitLabel()
-            )
-            catch
-            (
-            )
-
-
             wall_fixer_weld_threshold_syncing = false
             ::WallFixerRollout.saveUiSettings()
         )
@@ -17935,95 +18066,96 @@ Step 4 is exposed as its own top-level Get Outter Walls rollout.
 */
 rollout WallFixerPreProcessRollout "1 PRE-PROCESS & FIX GEOMETRY" width:310 height:126
 (
-    button planar_button "1. CHECK AND MAKE WALLS PLANAR" pos:[4,8] width:302 height:34 \
-        tooltip:"LMB: check selected walls and select vertices outside the dominant wall plane. An existing top Edit Poly is reused; a NON PLANAR VERTS marker is added only when required.\n\nRMB: move only detected outlier vertices onto the dominant wall plane. Script selection markers are removed first, and the object is collapsed to Editable Poly only when the real stack requires repair."
+    local numbered_button_tooltip
 
 
-    button duplicate_verts_button "2. VERTEX CHECK / WELD" pos:[8,48] width:154 height:34 \
-        tooltip:"LMB: find unwelded/near-coincident vertices using the Weld threshold as the search distance. Open border edges are also selected when candidates are found.\n\nRMB: weld/fix duplicated vertices using the same Weld threshold."
-    label weld_threshold_label "Weld:" pos:[166,57] width:34 height:18 align:#right
-    spinner weld_threshold_spinner "" pos:[201,53] width:67 height:20 \
-        range:[0.000001,1000000.0,saved_weld_threshold] type:#worldUnits scale:0.1 \
-        tooltip:"Weld threshold and LMB search distance. Fresh default: 1 current display unit."
-    label weld_unit_label "" pos:[270,57] width:32 height:18 align:#left
+    dotNetControl planar_button "System.Windows.Forms.Button" pos:[4,8] width:302 height:34
 
 
-    button explode_walls_button "3. EXPLODE OBJECTS TO WALLS" pos:[4,88] width:302 height:30 \
-        tooltip:"1. NORMALS: Explode walls by normals\n\n2. FACE DIRECTION: Explode walls by face direction — detects front/backside normals\n\n3. XY POSITION: Explode walls by position\n\n4. ELEMENTS: Explode to elements"
+    dotNetControl duplicate_verts_button "System.Windows.Forms.Button" pos:[4,48] width:302 height:34
+
+
+    dotNetControl explode_walls_button "System.Windows.Forms.Button" pos:[4,88] width:302 height:30
 
 
 
 
     on WallFixerPreProcessRollout open do
     (
-        wall_fixer_weld_threshold_syncing = true
-        weld_threshold_spinner.value = saved_weld_threshold
-        weld_unit_label.text = wallFixerGetDisplayUnitLabel()
-        wall_fixer_weld_threshold_syncing = false
+        if numbered_button_tooltip == undefined then
+        (
+            numbered_button_tooltip = dotNetObject "System.Windows.Forms.ToolTip"
+        )
 
 
+        wallFixerSetupNumberedDarkButton \
+            planar_button \
+            "1. CHECK AND MAKE WALLS PLANAR" \
+            numbered_button_tooltip \
+            "LMB: check selected walls and select vertices outside the dominant wall plane. An existing top Edit Poly is reused; a NON PLANAR VERTS marker is added only when required.\n\nRMB: move only detected outlier vertices onto the dominant wall plane. Script selection markers are removed first, and the object is collapsed to Editable Poly only when the real stack requires repair."
+
+
+        wallFixerSetupNumberedDarkButton \
+            duplicate_verts_button \
+            "2. VERTEX CHECK / WELD" \
+            numbered_button_tooltip \
+            "LMB: find unwelded/near-coincident vertices using Options > WELD DISTANCE as the maximum pair distance. Open border edges are also selected when candidates are found.\n\nRMB: weld/fix duplicated vertices using the same WELD DISTANCE."
+
+
+        wallFixerSetupNumberedDarkButton \
+            explode_walls_button \
+            "3. EXPLODE OBJECTS TO WALLS" \
+            numbered_button_tooltip \
+            "1. NORMALS: Explode walls by normals\n\n2. FACE DIRECTION: Explode walls by face direction — detects front/backside normals\n\n3. XY POSITION: Explode walls by position\n\n4. ELEMENTS: Explode to elements"
     )
 
 
-    on weld_threshold_spinner changed control_value do
+
+    on duplicate_verts_button MouseUp sender event_args do
     (
-        if not wall_fixer_weld_threshold_syncing then
+        mouse_button = wallFixerGetDotNetMouseButton event_args
+
+
+        if mouse_button == "Left" then
         (
-            wall_fixer_weld_threshold_syncing = true
-            saved_weld_threshold = control_value
-            saved_double_vert_threshold = control_value
-            weld_unit_label.text = wallFixerGetDisplayUnitLabel()
-
-
-            try
+            ::WallFixerRollout.runDuplicateVerts fix_vertices:false
+        )
+        else if mouse_button == "Right" then
+        (
+            if subObjectLevel == 1 then
             (
-                WallFixerOptionsRollout.weld_threshold_spinner.value = control_value
+                ::WallFixerRollout.runSelectedVertexWeld()
             )
-            catch
+            else
             (
+                ::WallFixerRollout.runDuplicateVerts fix_vertices:true
             )
-
-
-            wall_fixer_weld_threshold_syncing = false
-            setIniSetting wall_fixer_ui_ini_path "Controls" "WeldThreshold" (control_value as string)
         )
     )
 
 
-    on duplicate_verts_button pressed do
+    on explode_walls_button MouseUp sender event_args do
     (
-        ::WallFixerRollout.runDuplicateVerts fix_vertices:false
-    )
-
-
-    on duplicate_verts_button rightclick do
-    (
-        if subObjectLevel == 1 then
+        if (wallFixerGetDotNetMouseButton event_args) == "Left" then
         (
-            ::WallFixerRollout.runSelectedVertexWeld()
+            ::WallFixerRollout.runExplodeObjectsToWalls()
         )
-        else
+    )
+
+
+    on planar_button MouseUp sender event_args do
+    (
+        mouse_button = wallFixerGetDotNetMouseButton event_args
+
+
+        if mouse_button == "Left" then
         (
-            ::WallFixerRollout.runDuplicateVerts fix_vertices:true
+            ::WallFixerRollout.runPlanarWalls fix_vertices:false
         )
-    )
-
-
-    on explode_walls_button pressed do
-    (
-        ::WallFixerRollout.runExplodeObjectsToWalls()
-    )
-
-
-    on planar_button pressed do
-    (
-        ::WallFixerRollout.runPlanarWalls fix_vertices:false
-    )
-
-
-    on planar_button rightclick do
-    (
-        ::WallFixerRollout.runPlanarWalls fix_vertices:true
+        else if mouse_button == "Right" then
+        (
+            ::WallFixerRollout.runPlanarWalls fix_vertices:true
+        )
     )
 )
 
@@ -18279,6 +18411,9 @@ Advanced slicer values continue to come from the existing Wall-Fixer INI setting
 */
 rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
 (
+    local numbered_button_tooltip
+
+
     radiobuttons slice_direction_radio "" pos:[8,8] width:178 height:20 \
         labels:#("Vertical", "Horizontal") default:saved_slice_direction_index columns:2 align:#left \
         tooltip:"Choose which directional pass runs first. Existing directional modifier separation is preserved."
@@ -18288,8 +18423,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
         tooltip:"Suppress verbose Listener output during the inherited batch slicing operation."
 
 
-    button slice_selected_walls_button "9. SLICE WALLS" pos:[4,42] width:150 height:38 \
-        tooltip:"LMB: Slice selected walls using the active Vertical/Horizontal mode.\n\nRMB: Run both modes; active mode first, then the other mode."
+    dotNetControl slice_selected_walls_button "System.Windows.Forms.Button" pos:[4,42] width:150 height:38
 
 
     button slice_modifier_button "H \\ V" pos:[158,42] width:72 height:38 \
@@ -18298,6 +18432,22 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
 
     button select_slice_state_button "Select" pos:[234,42] width:72 height:38 \
         tooltip:"LMB: Filter only SLICED objects. If nothing is selected, use all visible geometry.\n\nRMB: Filter only UNSLICED objects. If nothing is selected, use all visible geometry."
+
+
+    on WallFixerSliceWallsRollout open do
+    (
+        if numbered_button_tooltip == undefined then
+        (
+            numbered_button_tooltip = dotNetObject "System.Windows.Forms.ToolTip"
+        )
+
+
+        wallFixerSetupNumberedDarkButton \
+            slice_selected_walls_button \
+            "9. SLICE WALLS" \
+            numbered_button_tooltip \
+            "LMB: Slice selected walls using the active Vertical/Horizontal mode.\n\nRMB: Run both modes; active mode first, then the other mode."
+    )
 
 
     on slice_direction_radio changed state do
@@ -18312,15 +18462,19 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
     )
 
 
-    on slice_selected_walls_button pressed do
+    on slice_selected_walls_button MouseUp sender event_args do
     (
-        ::WallFixerRollout.runSliceSelectedWalls()
-    )
+        mouse_button = wallFixerGetDotNetMouseButton event_args
 
 
-    on slice_selected_walls_button rightclick do
-    (
-        ::WallFixerRollout.runSliceSelectedWallsBothModes()
+        if mouse_button == "Left" then
+        (
+            ::WallFixerRollout.runSliceSelectedWalls()
+        )
+        else if mouse_button == "Right" then
+        (
+            ::WallFixerRollout.runSliceSelectedWallsBothModes()
+        )
     )
 
 
@@ -18355,78 +18509,107 @@ The two wall-completion buttons remain disabled until their detailed behavior is
 */
 rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:308
 (
-    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[4,8] width:302 height:34 \
-        tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
+    local numbered_button_tooltip
 
 
-    button duplicated_vertices_button "10. DUPLICATED VERTICES" pos:[4,48] width:302 height:34 \
-        tooltip:"LMB: select duplicate-position vertices at 0.01 tolerance.\n\nRMB: run the current duplicate-vertex fix at 0.01 tolerance."
+    dotNetControl two_edge_verts_button "System.Windows.Forms.Button" pos:[4,8] width:302 height:34
 
 
-    button redundant_loops_button "11. REMOVE REDUNDANT LOOPS" pos:[4,88] width:302 height:34 \
-        tooltip:"LMB: Select redundant loop edges.\n\nRMB: Remove selected edges. If no edges are selected, remove all detected redundant loop edges."
+    dotNetControl duplicated_vertices_button "System.Windows.Forms.Button" pos:[4,48] width:302 height:34
 
 
-    button repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" pos:[4,128] width:302 height:34 enabled:false \
-        tooltip:"Reserved for the new missing-loop completion tool."
+    dotNetControl redundant_loops_button "System.Windows.Forms.Button" pos:[4,88] width:302 height:34
 
 
-    button post_fix_ngons_button "13. FIX N-GONS" pos:[4,168] width:302 height:34 \
-        tooltip:"Run the current Wall-Fixer Fix N-gons function again after slicing cleanup."
+    dotNetControl repair_missing_loops_button "System.Windows.Forms.Button" pos:[4,128] width:302 height:34
+
+
+    dotNetControl post_fix_ngons_button "System.Windows.Forms.Button" pos:[4,168] width:302 height:34
 
 
     groupBox walls_completion_group "WALLS COMPLETION" pos:[4,210] width:302 height:90
 
 
-    button attach_walls_button "14. ATTACH WALLS TO OBJECTS" pos:[18,230] width:264 height:28 enabled:false \
-        tooltip:"Reserved for the new Attach walls to objects function. Existing ATTACH AND WELD is intentionally not substituted because this step will have separate requirements."
+    dotNetControl attach_walls_button "System.Windows.Forms.Button" pos:[18,230] width:264 height:28
 
 
-    button weld_corners_button "15. WELD AND CONNECT WALL CORNERS" pos:[18,264] width:264 height:28 enabled:false \
-        tooltip:"Reserved for welding wall corners and repairing continuous edge loops through the corners."
+    dotNetControl weld_corners_button "System.Windows.Forms.Button" pos:[18,264] width:264 height:28
 
 
-    on two_edge_verts_button pressed do
+    on WallFixerPostProcessRollout open do
     (
-        ::WallFixerRollout.runFindTwoEdgeVerts()
+        if numbered_button_tooltip == undefined then
+        (
+            numbered_button_tooltip = dotNetObject "System.Windows.Forms.ToolTip"
+        )
+
+
+        wallFixerSetupNumberedDarkButton two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" numbered_button_tooltip "LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
+        wallFixerSetupNumberedDarkButton duplicated_vertices_button "10. DUPLICATED VERTICES" numbered_button_tooltip "LMB: select duplicate-position vertices at 0.01 tolerance.\n\nRMB: run the current duplicate-vertex fix at 0.01 tolerance."
+        wallFixerSetupNumberedDarkButton redundant_loops_button "11. REMOVE REDUNDANT LOOPS" numbered_button_tooltip "LMB: Select redundant loop edges.\n\nRMB: Remove selected edges. If no edges are selected, remove all detected redundant loop edges."
+        wallFixerSetupNumberedDarkButton repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" numbered_button_tooltip "Reserved for the new missing-loop completion tool." enabled_state:false
+        wallFixerSetupNumberedDarkButton post_fix_ngons_button "13. FIX N-GONS" numbered_button_tooltip "Run the current Wall-Fixer Fix N-gons function again after slicing cleanup."
+        wallFixerSetupNumberedDarkButton attach_walls_button "14. ATTACH WALLS TO OBJECTS" numbered_button_tooltip "Reserved for the new Attach walls to objects function. Existing ATTACH AND WELD is intentionally not substituted because this step will have separate requirements." enabled_state:false
+        wallFixerSetupNumberedDarkButton weld_corners_button "15. WELD AND CONNECT WALL CORNERS" numbered_button_tooltip "Reserved for welding wall corners and repairing continuous edge loops through the corners." enabled_state:false
     )
 
 
-    on two_edge_verts_button rightclick do
+    on two_edge_verts_button MouseUp sender event_args do
     (
-        macros.run "Ribbon - Modeling" "VertexRemove"
-        ::WallFixerRollout.cleanupRedundantVerticesAfterGeometryChange (selection as array)
-        ::WallFixerRollout.setStatus #success "Vertex Remove command executed on the current selection."
+        mouse_button = wallFixerGetDotNetMouseButton event_args
+
+
+        if mouse_button == "Left" then
+        (
+            ::WallFixerRollout.runFindTwoEdgeVerts()
+        )
+        else if mouse_button == "Right" then
+        (
+            macros.run "Ribbon - Modeling" "VertexRemove"
+            ::WallFixerRollout.cleanupRedundantVerticesAfterGeometryChange (selection as array)
+            ::WallFixerRollout.setStatus #success "Vertex Remove command executed on the current selection."
+        )
     )
 
 
-    on duplicated_vertices_button pressed do
+    on duplicated_vertices_button MouseUp sender event_args do
     (
-        ::WallFixerRollout.runDuplicateVerts fix_vertices:false
+        mouse_button = wallFixerGetDotNetMouseButton event_args
+
+
+        if mouse_button == "Left" then
+        (
+            ::WallFixerRollout.runDuplicateVerts fix_vertices:false
+        )
+        else if mouse_button == "Right" then
+        (
+            ::WallFixerRollout.runDuplicateVerts fix_vertices:true
+        )
     )
 
 
-    on duplicated_vertices_button rightclick do
+    on redundant_loops_button MouseUp sender event_args do
     (
-        ::WallFixerRollout.runDuplicateVerts fix_vertices:true
+        mouse_button = wallFixerGetDotNetMouseButton event_args
+
+
+        if mouse_button == "Left" then
+        (
+            ::WallFixerRollout.runSelectRedundantLoops()
+        )
+        else if mouse_button == "Right" then
+        (
+            ::WallFixerRollout.runRemoveRedundantLoops()
+        )
     )
 
 
-    on redundant_loops_button pressed do
+    on post_fix_ngons_button MouseUp sender event_args do
     (
-        ::WallFixerRollout.runSelectRedundantLoops()
-    )
-
-
-    on redundant_loops_button rightclick do
-    (
-        ::WallFixerRollout.runRemoveRedundantLoops()
-    )
-
-
-    on post_fix_ngons_button pressed do
-    (
-        ::WallFixerRollout.runFixNgons #postprocess
+        if (wallFixerGetDotNetMouseButton event_args) == "Left" then
+        (
+            ::WallFixerRollout.runFixNgons #postprocess
+        )
     )
 )
 
@@ -24245,6 +24428,83 @@ function testPostProcessRedundantLoopRouting =
 )
 
 
+/* Verifies numbered workflow actions use the standard dark WinForms Button style.
+   Disabled reserved steps must remain disabled after conversion.
+*/
+function testNumberedDarkButtons =
+(
+    numbered_buttons = #( \
+        WallFixerPreProcessRollout.planar_button, \
+        WallFixerPreProcessRollout.duplicate_verts_button, \
+        WallFixerPreProcessRollout.explode_walls_button, \
+        WallFixerSliceWallsRollout.slice_selected_walls_button, \
+        WallFixerPostProcessRollout.two_edge_verts_button, \
+        WallFixerPostProcessRollout.duplicated_vertices_button, \
+        WallFixerPostProcessRollout.redundant_loops_button, \
+        WallFixerPostProcessRollout.repair_missing_loops_button, \
+        WallFixerPostProcessRollout.post_fix_ngons_button, \
+        WallFixerPostProcessRollout.attach_walls_button, \
+        WallFixerPostProcessRollout.weld_corners_button)
+
+
+    passed = true
+
+
+    for btn in numbered_buttons do
+    (
+        type_name = ""
+
+
+        try
+        (
+            type_name = (btn.GetType()).FullName as string
+            passed = passed and (type_name == "System.Windows.Forms.Button")
+            passed = passed and (((btn.FlatStyle.ToString()) as string) == "Flat")
+            passed = passed and btn.Font.Bold
+            passed = passed and (btn.BackColor.R == 68) and (btn.BackColor.G == 68) and (btn.BackColor.B == 68)
+            passed = passed and (btn.ForeColor.R == 170) and (btn.ForeColor.G == 220) and (btn.ForeColor.B == 170)
+            passed = passed and (btn.FlatAppearance.BorderColor.R == 120) and (btn.FlatAppearance.BorderColor.G == 120) and (btn.FlatAppearance.BorderColor.B == 120)
+            passed = passed and (btn.FlatAppearance.BorderSize == 1)
+        )
+        catch
+        (
+            passed = false
+        )
+    )
+
+
+    passed = passed and (not WallFixerPostProcessRollout.repair_missing_loops_button.Enabled)
+    passed = passed and (not WallFixerPostProcessRollout.attach_walls_button.Enabled)
+    passed = passed and (not WallFixerPostProcessRollout.weld_corners_button.Enabled)
+
+
+    format "Numbered dark button test | result:%\n" passed
+
+
+    passed -- return
+)
+
+
+/*
+Tests that step 2 uses only Options > WELD DISTANCE and spans the full PRE-PROCESS row.
+The visible options label and full-width action button are checked without changing scene geometry.
+*/
+function testPreProcessWeldDistanceControl =
+(
+    label_ok = WallFixerOptionsRollout.weld_threshold_label.text == "WELD DISTANCE"
+    button_ok = (WallFixerPreProcessRollout.duplicate_verts_button.pos.x == 4) and (WallFixerPreProcessRollout.duplicate_verts_button.width == 302)
+    threshold_ok = WallFixerOptionsRollout.weld_threshold_spinner.value >= 0.0
+    passed = label_ok and button_ok and threshold_ok
+
+
+    format "PRE-PROCESS weld distance control | label:% | button:% | threshold:% | passed:%\n" label_ok button_ok threshold_ok passed
+
+
+    passed
+    -- return
+)
+
+
 function testParentControlWidths =
 (
     local width_ok = true
@@ -25701,7 +25961,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
     */
     function runSelectedVertexWeld =
     (
-        weld_threshold = WallFixerPreProcessRollout.weld_threshold_spinner.value
+        weld_threshold = WallFixerOptionsRollout.weld_threshold_spinner.value
         selected_nodes = selection as array
         welded_count = 0
         failed_count = 0
@@ -25781,29 +26041,15 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Runs the duplicate-vertex check/fix using the visible Weld threshold.
+    Runs the duplicate-vertex check/fix using Options > WELD DISTANCE.
     LMB finds duplicate vertices; RMB selects the same candidates and welds them with weldSelectedEPolyVerts.
     */
     function runDuplicateVerts fix_vertices:false =
     (
         setProgress 0
-        WallFixerPreProcessRollout.weld_unit_label.text = wallFixerGetDisplayUnitLabel()
-        weld_threshold = WallFixerPreProcessRollout.weld_threshold_spinner.value
+        weld_threshold = WallFixerOptionsRollout.weld_threshold_spinner.value
         saved_weld_threshold = weld_threshold
         saved_double_vert_threshold = weld_threshold
-        wall_fixer_weld_threshold_syncing = true
-
-
-        try
-        (
-            WallFixerOptionsRollout.weld_threshold_spinner.value = weld_threshold
-        )
-        catch
-        (
-        )
-
-
-        wall_fixer_weld_threshold_syncing = false
         setIniSetting wall_fixer_ui_ini_path "Controls" "WeldThreshold" (weld_threshold as string)
         setStatus #message (if fix_vertices then "Welding duplicated vertices..." else "Checking unwelded vertices...")
 
