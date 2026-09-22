@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer Core 0.27
+Wall-Fixer Core 0.28
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.27"
-global wall_fixer_core_tool_version = 0.73
+global wall_fixer_core_file_version = "0.28"
+global wall_fixer_core_tool_version = 0.78
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -66,7 +66,7 @@ global WallFixer
 
 struct WallFixer_v
 (
-    version = "0.25",
+    version = "0.26",
     processed_slice_nodes = #(),
     processed_vertical_planes = #(),
     processed_horizontal_planes = #(),
@@ -422,6 +422,101 @@ struct WallFixer_v
         (findItem slice_modifier_names modifier_name) > 0
         -- return
     ),
+    /*
+    Returns true when the requested slicing Edit Poly already owns the active Modify-panel context.
+    Used to avoid redundant command-panel refreshes during batch slicing.
+    */
+    function hasSliceModifyContext node modifier =
+    (
+        if node == undefined or modifier == undefined then return false
+        if not (isValidNode node) then return false
+
+        panel_mode = undefined
+        current_object = undefined
+
+        try
+        (
+            panel_mode = getCommandPanelTaskMode()
+        )
+        catch
+        (
+            panel_mode = undefined
+        )
+
+        if panel_mode != #modify then return false
+
+        try
+        (
+            current_object = modPanel.getCurrentObject()
+        )
+        catch
+        (
+            current_object = undefined
+        )
+
+        selection_matches = (selection.count == 1 and selection[1] == node)
+        selection_matches and current_object == modifier
+        -- return
+    ),
+
+    /*
+    Activates only the Modify-panel context required by Edit Poly topology commands.
+    If the correct node and modifier are already active, the command panel is left untouched.
+    */
+    function ensureSliceModifyContext node modifier =
+    (
+        if node == undefined or modifier == undefined then return false
+        if not (isValidNode node) then return false
+
+        context_changed = false
+
+        if not (hasSliceModifyContext node modifier) then
+        (
+            if selection.count != 1 or selection[1] != node then
+            (
+                select node
+                context_changed = true
+            )
+
+            panel_mode = undefined
+            try
+            (
+                panel_mode = getCommandPanelTaskMode()
+            )
+            catch
+            (
+                panel_mode = undefined
+            )
+
+            if panel_mode != #modify then
+            (
+                max modify mode
+                context_changed = true
+            )
+
+            current_object = undefined
+            try
+            (
+                current_object = modPanel.getCurrentObject()
+            )
+            catch
+            (
+                current_object = undefined
+            )
+
+            if current_object != modifier then
+            (
+                modPanel.setCurrentObject modifier
+                context_changed = true
+            )
+        )
+
+        modifier.SetPrimaryNode node
+        context_changed
+        -- return
+    ),
+
+
 
     /*
     Removes only Edit Poly modifiers that belong to the slicing workflow.
@@ -5482,7 +5577,7 @@ struct WallFixer_v
     Repairs every precision candidate from the latest Make 1 Slice while preserving all original pre-slice anchors.
     Manual mode captures and repairs immediately; batch mode can keep the same capture across sliced-edge cleanup.
     */
-    function cleanupMassSlicePrecisionVerts node precision_threshold:0.01 preserve_base_ids:false =
+    function cleanupMassSlicePrecisionVerts node precision_threshold:0.01 preserve_base_ids:false keep_modify_context:false =
     (
         if preserve_base_ids then
         (
@@ -5524,10 +5619,7 @@ struct WallFixer_v
             local repaired_vertices = #{}
             local unresolved_vertices = #{}
 
-            select node
-            max modify mode
-            modPanel.setCurrentObject modifier
-            modifier.SetPrimaryNode node
+            ensureSliceModifyContext node modifier
             modifier.useStackSelection = false
 
             for repair_item in repair_items do
@@ -5835,11 +5927,8 @@ struct WallFixer_v
             modifier = Edit_Poly name:modifier_name
             addModifier node modifier
 
-            select node
-            max modify mode
-            modPanel.setCurrentObject modifier
-            modifier.SetPrimaryNode node
-            modifier.split = false
+            ensureSliceModifyContext node modifier
+modifier.split = false
             modifier.useStackSelection = false
             modifier.useSoftSel = false
             modifier.remveEdgeCtrlKey = false
@@ -5937,7 +6026,8 @@ struct WallFixer_v
                         local precision_cleanup = ::WallFixer.cleanupMassSlicePrecisionVerts \
                             node \
                             precision_threshold:precision_threshold \
-                            preserve_base_ids:true
+                            preserve_base_ids:true \
+                            keep_modify_context:true
                         precision_ok = precision_cleanup[1]
                         if not batch_quiet then format "Wall-Fixer Batch Fix Slice Precision: node:% modifier:% baseVert:% direction:% candidates:% fixed:% success:%\n" \
                             node.name modifier_name base_vertex slice_kind precision_candidates precision_cleanup[2] precision_ok
@@ -5978,11 +6068,8 @@ struct WallFixer_v
                             node.name modifier_name base_vertex slice_kind
                     )
 
-                    /* Return to this pass modifier and continue directly to the next stored base-object task. */
-                    select node
-                    max modify mode
-                    modPanel.setCurrentObject modifier
-                    modifier.SetPrimaryNode node
+                    /* Keep the required Edit Poly context without refreshing the command panel when it is already correct. */
+                    ensureSliceModifyContext node modifier
                     modifier.split = false
                     modifier.useStackSelection = false
                     modifier.useSoftSel = false
@@ -6024,7 +6111,31 @@ struct WallFixer_v
     (
         local all_selected_nodes = selection as array
         local selected_nodes = getBatchSliceProcessNodes all_selected_nodes
+        local original_panel_mode = undefined
+        local original_current_object = undefined
+        local original_subobject_level = subObjectLevel
         local processed_count = 0
+
+        try
+        (
+            original_panel_mode = getCommandPanelTaskMode()
+        )
+        catch
+        (
+            original_panel_mode = undefined
+        )
+
+        if original_panel_mode == #modify then
+        (
+            try
+            (
+                original_current_object = modPanel.getCurrentObject()
+            )
+            catch
+            (
+                original_current_object = undefined
+            )
+        )
         local skipped_count = all_selected_nodes.count - selected_nodes.count
         last_slice_report = ""
         last_slice_error = undefined
@@ -6181,8 +6292,6 @@ struct WallFixer_v
                     automation_report += node_error + "\n"
                 )
 
-                max create mode
-
                 processed_count += 1
             )
         )
@@ -6193,12 +6302,60 @@ struct WallFixer_v
         )
 
         select all_selected_nodes
+
+        if original_panel_mode == #modify then
+        (
+            max modify mode
+
+            if original_current_object != undefined then
+            (
+                try
+                (
+                    modPanel.setCurrentObject original_current_object
+                )
+                catch
+                (
+                )
+            )
+
+            if original_subobject_level != undefined then
+            (
+                try
+                (
+                    subObjectLevel = original_subobject_level
+                )
+                catch
+                (
+                )
+            )
+        )
+        else if original_panel_mode != undefined then
+        (
+            setCommandPanelTaskMode original_panel_mode
+        )
+        else
+        (
+            max create mode
+        )
+
         completeRedraw()
         last_slice_report = automation_report
 
         all_ok
         -- return
     ),
+
+    /*
+    Tests the slice Modify-context helper's non-scene guard path.
+    Returns true without changing selection or command-panel mode.
+    */
+    function testSliceModifyContextGuards =
+    (
+        test_passed = not (ensureSliceModifyContext undefined undefined)
+        test_passed
+        -- return
+    ),
+
 
     /*
     Runs batch slicing with optional quiet Listener output.
@@ -7323,12 +7480,9 @@ struct WallFixer_v
         (
             disableSceneRedraw()
             redraw_disabled = true
-            select node
-                max modify mode
-                modPanel.setCurrentObject modifier
-                modifier.SetPrimaryNode node
-                modifier.useStackSelection = false
-                modifier.remveEdgeCtrlKey = false
+            ensureSliceModifyContext node modifier
+            modifier.useStackSelection = false
+            modifier.remveEdgeCtrlKey = false
             -- Redundant edges are always removed and verified before any cleanup vertex is touched.
             local unresolved_edges = #{}
             for edge_data in edge_descriptors do

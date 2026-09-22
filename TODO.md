@@ -1,10 +1,16 @@
 [NEXT]
+UI: remove SLICE WALLS > CHECK RESULT
 
 
 [IN PROGRESS]
 
 
 [QUEUE]
+SLICE SELECTED WALLS > Success/Stats: on successful completion, show elapsed processing time, processed object count, and total processed vertex count. Append each run to a CSV log for later performance/statistics analysis.
+UI: remember rolled-up/expanded state of all rollouts in the INI file and restore those states when the tool opens.
+PROGRESS BAR: place label behind bar which swhow x of n processed objects E.G.: "x \ n" (example: "5 \ 10").
+SLICE SELECTED WALLS > Status: while processing, show current object number over total processed objects, current object name, and vertex count;
+UI: show progress bar only while a process is running; hide the status label during processing. When idle, hide the progress bar and show the status label. Both controls must occupy the same UI space.
 
 [DONE]
 0.75 GET OUTER WALLS > Layer > LMB: after creating the new layer, assign the currently selected objects to that new layer.

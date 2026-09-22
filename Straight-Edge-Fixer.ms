@@ -1,5 +1,5 @@
 ﻿/*
-Straight Edge Fixer 0.22
+Straight Edge Fixer 0.23
 Detects repeated horizontal edge levels and aligns nearby horizontal edges to them.
 */
 
@@ -7,8 +7,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.22"
-global straight_edge_fixer_tool_version = 0.69
+global straight_edge_fixer_file_version = "0.23"
+global straight_edge_fixer_tool_version = 0.77
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -1147,21 +1147,16 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Returns true when a non-horizontal edge is still close enough to horizontal to be checked.
-    Opposite vertical-like edges are ignored.
+    Returns true when an edge direction exceeds the maximum allowed angular deviation.
+    The threshold itself is allowed; only angles above it are violations.
     */
-    function isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold =
+    function isDirectionAngleViolation angle_from_target angle_threshold =
     (
         result_value = false
 
-        if (not (isHorizontalEdge node adapter edge_id tolerance)) then
+        if (angle_from_target != undefined) then
         (
-            angle_value = getEdgeAngleFromHorizontal node adapter edge_id
-
-            if (angle_value != undefined) then
-            (
-                result_value = (angle_value <= angle_threshold)
-            )
+            result_value = (angle_from_target > angle_threshold)
         )
 
         result_value
@@ -1169,25 +1164,58 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Returns true when a non-vertical edge is still close enough to vertical to be checked.
-    Opposite horizontal-like edges are ignored.
+    Returns true when an edge exceeds the maximum allowed deviation from horizontal.
+    At zero degrees every non-horizontal edge is a violation; at 45 degrees vertical-like edges are violations.
+    */
+    function isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold =
+    (
+        result_value = false
+        angle_from_horizontal = getEdgeAngleFromHorizontal node adapter edge_id
+
+        if (angle_from_horizontal != undefined) then
+        (
+            result_value = isDirectionAngleViolation angle_from_horizontal angle_threshold
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Returns true when an edge exceeds the maximum allowed deviation from vertical.
+    At zero degrees every non-vertical edge is a violation; at 45 degrees horizontal-like edges are violations.
     */
     function isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold =
     (
         result_value = false
+        angle_from_horizontal = getEdgeAngleFromHorizontal node adapter edge_id
 
-        if (not (isVerticalEdge node adapter edge_id tolerance)) then
+        if (angle_from_horizontal != undefined) then
         (
-            angle_from_horizontal = getEdgeAngleFromHorizontal node adapter edge_id
-
-            if (angle_from_horizontal != undefined) then
-            (
-                angle_from_vertical = 90.0 - angle_from_horizontal
-                result_value = (angle_from_vertical <= angle_threshold)
-            )
+            angle_from_vertical = 90.0 - angle_from_horizontal
+            result_value = isDirectionAngleViolation angle_from_vertical angle_threshold
         )
 
         result_value
+        -- return
+    ),
+
+    /*
+    Tests the maximum allowed direction-angle rule at key threshold boundaries.
+    Returns true when zero, one-degree and forty-five-degree behavior is correct.
+    */
+    function testDirectionAngleThreshold =
+    (
+        test_passed = true
+
+        test_passed = test_passed and (not (isDirectionAngleViolation 0.0 0.0))
+        test_passed = test_passed and (isDirectionAngleViolation 0.001 0.0)
+        test_passed = test_passed and (not (isDirectionAngleViolation 1.0 1.0))
+        test_passed = test_passed and (isDirectionAngleViolation 1.001 1.0)
+        test_passed = test_passed and (not (isDirectionAngleViolation 45.0 45.0))
+        test_passed = test_passed and (isDirectionAngleViolation 90.0 45.0)
+
+        test_passed
         -- return
     ),
 
@@ -1800,11 +1828,11 @@ struct StraightEdgeFixer_v
 
                 if (check_type == #horizontal) then
                 (
-                    format "Check Horizontal Edges: selected % near-horizontal error edge(s), angle threshold: % deg.\n" total_bad_edges angle_threshold
+                    format "Check Horizontal Edges: selected % edge(s) above the allowed horizontal deviation, max angle: % deg.\n" total_bad_edges angle_threshold
                 )
                 else
                 (
-                    format "Check Vertical Edges: selected % near-vertical error edge(s), angle threshold: % deg.\n" total_bad_edges angle_threshold
+                    format "Check Vertical Edges: selected % edge(s) above the allowed vertical deviation, max angle: % deg.\n" total_bad_edges angle_threshold
                 )
             )
         )
@@ -2335,11 +2363,11 @@ rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
 
     groupBox grp_checks "EDGE CHECKS" pos:[8,148] width:284 height:144
 
-    label lbl_angle_threshold "Angle:" pos:[20,172] width:46 height:18 tooltip:"Maximum angle away from the requested axis that is still considered a candidate error edge. Range is limited to 0-45 degrees so the opposite axis is ignored."
-    spinner spn_angle_threshold "" pos:[64,170] width:58 height:18 range:[0.0,45.0,45.0] type:#float scale:1.0 tooltip:"Candidate angle threshold in degrees. Horizontal Check ignores edges farther than this from horizontal. Vertical Check ignores edges farther than this from vertical."
+    label lbl_angle_threshold "Angle:" pos:[20,172] width:46 height:18 tooltip:"Maximum allowed angle away from the requested direction. Edges above this angle are selected as direction errors. At 0 degrees every non-matching edge is selected; 45 degrees is the horizontal/vertical crossover."
+    spinner spn_angle_threshold "" pos:[64,170] width:58 height:18 range:[0.0,45.0,45.0] type:#float scale:1.0 tooltip:"Maximum allowed direction deviation in degrees. CHECK HORIZONTAL selects edges above this deviation from horizontal. CHECK VERTICAL selects edges above this deviation from vertical."
 
-    button btn_check_horizontal "CHECK HORIZONTAL" pos:[18,198] width:127 height:42 tooltip:"LMB: select visible near-horizontal error edges.\n\nRMB: straighten currently selected visible near-horizontal edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
-    button btn_check_vertical "CHECK VERTICAL" pos:[155,198] width:127 height:42 tooltip:"LMB: select visible near-vertical error edges.\n\nRMB: straighten currently selected visible near-vertical edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
+    button btn_check_horizontal "CHECK HORIZONTAL" pos:[18,198] width:127 height:42 tooltip:"LMB: select visible edges whose deviation from horizontal is greater than Angle.\n\nRMB: straighten currently selected horizontal-direction error edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
+    button btn_check_vertical "CHECK VERTICAL" pos:[155,198] width:127 height:42 tooltip:"LMB: select visible edges whose deviation from vertical is greater than Angle.\n\nRMB: straighten currently selected vertical-direction error edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
 
     button btn_border_check "BORDER CHECK" pos:[18,248] width:264 height:28 tooltip:"Select visible border edges with an unwelded/overlapping local-Z seam, a reflex corner above 180 degrees, or a 360-degree backtracking border. Backtracking does not require the remote vertices to share position."
 

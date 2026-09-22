@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer UI 0.64
+Wall-Fixer UI 0.66
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.64"
-global wall_fixer_ui_tool_version = 0.75
+global wall_fixer_ui_file_version = "0.66"
+global wall_fixer_ui_tool_version = 0.77
 
 
 /*
@@ -1227,7 +1227,7 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:112
     label edge_angle_label "Angle:" pos:[148,86] width:42 height:18
     spinner edge_angle_spinner "" pos:[192,83] width:80 height:20 \
         range:[0.0,45.0,45.0] type:#float scale:1.0 \
-        tooltip:"Candidate direction angle threshold in degrees."
+        tooltip:"Maximum allowed deviation from the requested horizontal or vertical direction. Edges above this angle are selected as errors; 45 degrees is the crossover."
 
 
     on WallFixerEdgeFixerOptionsRollout open do
@@ -1297,9 +1297,9 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:236
 
 
     button check_horizontal_button "CHECK HORIZONTAL" pos:[18,30] width:127 height:34 \
-        tooltip:"LMB: select visible near-horizontal error edges.\n\nRMB: straighten currently selected near-horizontal edges."
+        tooltip:"LMB: select visible edges whose deviation from horizontal is greater than Angle.\n\nRMB: straighten the currently selected horizontal-direction error edges."
     button check_vertical_button "CHECK VERTICAL" pos:[155,30] width:127 height:34 \
-        tooltip:"LMB: select visible near-vertical error edges.\n\nRMB: straighten currently selected near-vertical edges."
+        tooltip:"LMB: select visible edges whose deviation from vertical is greater than Angle.\n\nRMB: straighten the currently selected vertical-direction error edges."
 
 
     button border_check_button "BORDER CHECK" pos:[18,70] width:264 height:30 \
@@ -1406,8 +1406,12 @@ rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
         tooltip:"Suppress verbose Listener output during the inherited batch slicing operation."
 
 
-    button slice_selected_walls_button "9. SLICE SELECTED WALLS" pos:[4,42] width:302 height:38 \
+    button slice_selected_walls_button "9. SLICE SELECTED WALLS" pos:[4,42] width:226 height:38 \
         tooltip:"LMB: Slice selected walls using the active Vertical/Horizontal mode.\n\nRMB: Run both modes; active mode first, then the other mode."
+
+
+    button select_slice_state_button "Select" pos:[234,42] width:72 height:38 \
+        tooltip:"LMB: Filter only SLICED objects. If nothing is selected, use all visible geometry.\n\nRMB: Filter only UNSLICED objects. If nothing is selected, use all visible geometry."
 
 
     groupBox slice_check_result_group "CHECK RESULT" pos:[4,84] width:302 height:40
@@ -1435,6 +1439,18 @@ rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
     on slice_selected_walls_button rightclick do
     (
         ::WallFixerRollout.runSliceSelectedWallsBothModes()
+    )
+
+
+    on select_slice_state_button pressed do
+    (
+        ::WallFixerRollout.selectSliceWallObjects sliced_state:true
+    )
+
+
+    on select_slice_state_button rightclick do
+    (
+        ::WallFixerRollout.selectSliceWallObjects sliced_state:false
     )
 )
 
@@ -6878,6 +6894,27 @@ function testEdgeFixerOptionsLayout =
 Verifies full-row parent controls and parent group boxes use 4px side padding.
 The test checks width equals parent rollout width minus 8 and left position equals 4.
 */
+/*
+Tests Wall-Fixer slice-modifier name classification without changing scene geometry.
+Current directional names and the legacy combined name must classify as sliced.
+*/
+function testSliceWallModifierNameClassification =
+(
+    horizontal_ok = WallFixerRollout.isSliceWallModifierName "SLICE HORIZONTAL"
+    vertical_ok = WallFixerRollout.isSliceWallModifierName "SLICE VERTICAL"
+    legacy_ok = WallFixerRollout.isSliceWallModifierName "SLICE ALL"
+    unrelated_ok = not (WallFixerRollout.isSliceWallModifierName "Edit Poly")
+    passed = horizontal_ok and vertical_ok and legacy_ok and unrelated_ok
+
+
+    format "Slice wall modifier classification | horizontal:% | vertical:% | legacy:% | unrelated:% | passed:%\n" horizontal_ok vertical_ok legacy_ok unrelated_ok passed
+
+
+    passed
+    -- return
+)
+
+
 function testParentControlWidths =
 (
     local width_ok = true
@@ -11092,6 +11129,101 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
 
 
         completed
+        -- return
+    )
+
+
+    /*
+    Returns true when a modifier name belongs to a Wall-Fixer slicing pass.
+    Supports both current directional modifiers and the legacy combined slice modifier.
+    */
+    function isSliceWallModifierName modifier_name =
+    (
+        normalized_name = toUpper (modifier_name as string)
+        is_slice_modifier = (
+            normalized_name == "SLICE HORIZONTAL" or
+            normalized_name == "SLICE VERTICAL" or
+            normalized_name == "SLICE ALL"
+        )
+
+
+        is_slice_modifier
+        -- return
+    )
+
+
+    /*
+    Returns true when the object contains at least one Wall-Fixer slicing modifier.
+    Slice state is detected without evaluating or changing object topology.
+    */
+    function isSliceWallObjectSliced object_node =
+    (
+        sliced_state = false
+
+
+        if object_node != undefined and isValidNode object_node then
+        (
+            for modifier in object_node.modifiers while not sliced_state do
+            (
+                sliced_state = isSliceWallModifierName modifier.name
+            )
+        )
+
+
+        sliced_state
+        -- return
+    )
+
+
+    /*
+    Filters the current selection by Wall-Fixer slice state.
+    When nothing is selected, all visible geometry is used as the source set.
+    */
+    function selectSliceWallObjects sliced_state:true =
+    (
+        source_nodes = if selection.count > 0 then
+        (
+            selection as array
+        )
+        else
+        (
+            for object_node in geometry where not object_node.isHidden collect object_node
+        )
+
+
+        filtered_nodes = #()
+
+
+        for object_node in source_nodes do
+        (
+            if object_node != undefined and isValidNode object_node then
+            (
+                object_is_sliced = isSliceWallObjectSliced object_node
+
+
+                if object_is_sliced == sliced_state then
+                (
+                    append filtered_nodes object_node
+                )
+            )
+        )
+
+
+        if filtered_nodes.count > 0 then
+        (
+            select filtered_nodes
+        )
+        else
+        (
+            clearSelection()
+        )
+
+
+        state_label = if sliced_state then "SLICED" else "UNSLICED"
+        setStatus #message (("Selected " + (filtered_nodes.count as string)) + " " + state_label + " object(s).")
+
+
+        filtered_nodes
         -- return
     )
 

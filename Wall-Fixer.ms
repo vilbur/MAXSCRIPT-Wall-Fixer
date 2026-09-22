@@ -1,6 +1,6 @@
 ﻿/*
-Wall-Fixer Bundled Loader 0.69
-Project version 0.75.
+Wall-Fixer Bundled Loader 0.72
+Project version 0.78.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.69"
-global wall_fixer_loader_tool_version = 0.75
+global wall_fixer_loader_file_version = "0.72"
+global wall_fixer_loader_tool_version = 0.78
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -1924,7 +1924,7 @@ struct WMCWallSlicePipeline
 
 
 /*
-Wall-Fixer Core 0.27
+Wall-Fixer Core 0.28
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -1934,8 +1934,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.27"
-global wall_fixer_core_tool_version = 0.73
+global wall_fixer_core_file_version = "0.28"
+global wall_fixer_core_tool_version = 0.78
 
 
 /*
@@ -2001,7 +2001,7 @@ global WallFixer
 
 struct WallFixer_v
 (
-    version = "0.25",
+    version = "0.26",
     processed_slice_nodes = #(),
     processed_vertical_planes = #(),
     processed_horizontal_planes = #(),
@@ -2396,6 +2396,101 @@ struct WallFixer_v
         (findItem slice_modifier_names modifier_name) > 0
         -- return
     ),
+    /*
+    Returns true when the requested slicing Edit Poly already owns the active Modify-panel context.
+    Used to avoid redundant command-panel refreshes during batch slicing.
+    */
+    function hasSliceModifyContext node modifier =
+    (
+        if node == undefined or modifier == undefined then return false
+        if not (isValidNode node) then return false
+
+        panel_mode = undefined
+        current_object = undefined
+
+        try
+        (
+            panel_mode = getCommandPanelTaskMode()
+        )
+        catch
+        (
+            panel_mode = undefined
+        )
+
+        if panel_mode != #modify then return false
+
+        try
+        (
+            current_object = modPanel.getCurrentObject()
+        )
+        catch
+        (
+            current_object = undefined
+        )
+
+        selection_matches = (selection.count == 1 and selection[1] == node)
+        selection_matches and current_object == modifier
+        -- return
+    ),
+
+    /*
+    Activates only the Modify-panel context required by Edit Poly topology commands.
+    If the correct node and modifier are already active, the command panel is left untouched.
+    */
+    function ensureSliceModifyContext node modifier =
+    (
+        if node == undefined or modifier == undefined then return false
+        if not (isValidNode node) then return false
+
+        context_changed = false
+
+        if not (hasSliceModifyContext node modifier) then
+        (
+            if selection.count != 1 or selection[1] != node then
+            (
+                select node
+                context_changed = true
+            )
+
+            panel_mode = undefined
+            try
+            (
+                panel_mode = getCommandPanelTaskMode()
+            )
+            catch
+            (
+                panel_mode = undefined
+            )
+
+            if panel_mode != #modify then
+            (
+                max modify mode
+                context_changed = true
+            )
+
+            current_object = undefined
+            try
+            (
+                current_object = modPanel.getCurrentObject()
+            )
+            catch
+            (
+                current_object = undefined
+            )
+
+            if current_object != modifier then
+            (
+                modPanel.setCurrentObject modifier
+                context_changed = true
+            )
+        )
+
+        modifier.SetPrimaryNode node
+        context_changed
+        -- return
+    ),
+
+
 
 
     /*
@@ -8038,7 +8133,7 @@ struct WallFixer_v
     Repairs every precision candidate from the latest Make 1 Slice while preserving all original pre-slice anchors.
     Manual mode captures and repairs immediately; batch mode can keep the same capture across sliced-edge cleanup.
     */
-    function cleanupMassSlicePrecisionVerts node precision_threshold:0.01 preserve_base_ids:false =
+    function cleanupMassSlicePrecisionVerts node precision_threshold:0.01 preserve_base_ids:false keep_modify_context:false =
     (
         if preserve_base_ids then
         (
@@ -8086,10 +8181,7 @@ struct WallFixer_v
             local unresolved_vertices = #{}
 
 
-            select node
-            max modify mode
-            modPanel.setCurrentObject modifier
-            modifier.SetPrimaryNode node
+            ensureSliceModifyContext node modifier
             modifier.useStackSelection = false
 
 
@@ -8436,11 +8528,8 @@ struct WallFixer_v
             addModifier node modifier
 
 
-            select node
-            max modify mode
-            modPanel.setCurrentObject modifier
-            modifier.SetPrimaryNode node
-            modifier.split = false
+            ensureSliceModifyContext node modifier
+modifier.split = false
             modifier.useStackSelection = false
             modifier.useSoftSel = false
             modifier.remveEdgeCtrlKey = false
@@ -8550,7 +8639,8 @@ struct WallFixer_v
                         local precision_cleanup = ::WallFixer.cleanupMassSlicePrecisionVerts \
                             node \
                             precision_threshold:precision_threshold \
-                            preserve_base_ids:true
+                            preserve_base_ids:true \
+                            keep_modify_context:true
                         precision_ok = precision_cleanup[1]
                         if not batch_quiet then format "Wall-Fixer Batch Fix Slice Precision: node:% modifier:% baseVert:% direction:% candidates:% fixed:% success:%\n" \
                             node.name modifier_name base_vertex slice_kind precision_candidates precision_cleanup[2] precision_ok
@@ -8594,11 +8684,8 @@ struct WallFixer_v
                     )
 
 
-                    /* Return to this pass modifier and continue directly to the next stored base-object task. */
-                    select node
-                    max modify mode
-                    modPanel.setCurrentObject modifier
-                    modifier.SetPrimaryNode node
+                    /* Keep the required Edit Poly context without refreshing the command panel when it is already correct. */
+                    ensureSliceModifyContext node modifier
                     modifier.split = false
                     modifier.useStackSelection = false
                     modifier.useSoftSel = false
@@ -8644,7 +8731,31 @@ struct WallFixer_v
     (
         local all_selected_nodes = selection as array
         local selected_nodes = getBatchSliceProcessNodes all_selected_nodes
+        local original_panel_mode = undefined
+        local original_current_object = undefined
+        local original_subobject_level = subObjectLevel
         local processed_count = 0
+
+        try
+        (
+            original_panel_mode = getCommandPanelTaskMode()
+        )
+        catch
+        (
+            original_panel_mode = undefined
+        )
+
+        if original_panel_mode == #modify then
+        (
+            try
+            (
+                original_current_object = modPanel.getCurrentObject()
+            )
+            catch
+            (
+                original_current_object = undefined
+            )
+        )
         local skipped_count = all_selected_nodes.count - selected_nodes.count
         last_slice_report = ""
         last_slice_error = undefined
@@ -8826,10 +8937,6 @@ struct WallFixer_v
                     automation_report += node_error + "\n"
                 )
 
-
-                max create mode
-
-
                 processed_count += 1
             )
         )
@@ -8842,11 +8949,59 @@ struct WallFixer_v
 
 
         select all_selected_nodes
+
+        if original_panel_mode == #modify then
+        (
+            max modify mode
+
+            if original_current_object != undefined then
+            (
+                try
+                (
+                    modPanel.setCurrentObject original_current_object
+                )
+                catch
+                (
+                )
+            )
+
+            if original_subobject_level != undefined then
+            (
+                try
+                (
+                    subObjectLevel = original_subobject_level
+                )
+                catch
+                (
+                )
+            )
+        )
+        else if original_panel_mode != undefined then
+        (
+            setCommandPanelTaskMode original_panel_mode
+        )
+        else
+        (
+            max create mode
+        )
+
         completeRedraw()
         last_slice_report = automation_report
 
 
         all_ok
+        -- return
+    ),
+
+
+    /*
+    Tests the slice Modify-context helper's non-scene guard path.
+    Returns true without changing selection or command-panel mode.
+    */
+    function testSliceModifyContextGuards =
+    (
+        test_passed = not (ensureSliceModifyContext undefined undefined)
+        test_passed
         -- return
     ),
 
@@ -10092,12 +10247,9 @@ struct WallFixer_v
         (
             disableSceneRedraw()
             redraw_disabled = true
-            select node
-                max modify mode
-                modPanel.setCurrentObject modifier
-                modifier.SetPrimaryNode node
-                modifier.useStackSelection = false
-                modifier.remveEdgeCtrlKey = false
+            ensureSliceModifyContext node modifier
+            modifier.useStackSelection = false
+            modifier.remveEdgeCtrlKey = false
             -- Redundant edges are always removed and verified before any cleanup vertex is touched.
             local unresolved_edges = #{}
             for edge_data in edge_descriptors do
@@ -13507,7 +13659,7 @@ WallFixer = WallFixer_v()
 
 
 /*
-Straight Edge Fixer 0.22
+Straight Edge Fixer 0.23
 Detects repeated horizontal edge levels and aligns nearby horizontal edges to them.
 */
 
@@ -13515,8 +13667,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.22"
-global straight_edge_fixer_tool_version = 0.69
+global straight_edge_fixer_file_version = "0.23"
+global straight_edge_fixer_tool_version = 0.77
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -14655,21 +14807,16 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Returns true when a non-horizontal edge is still close enough to horizontal to be checked.
-    Opposite vertical-like edges are ignored.
+    Returns true when an edge direction exceeds the maximum allowed angular deviation.
+    The threshold itself is allowed; only angles above it are violations.
     */
-    function isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold =
+    function isDirectionAngleViolation angle_from_target angle_threshold =
     (
         result_value = false
 
-        if (not (isHorizontalEdge node adapter edge_id tolerance)) then
+        if (angle_from_target != undefined) then
         (
-            angle_value = getEdgeAngleFromHorizontal node adapter edge_id
-
-            if (angle_value != undefined) then
-            (
-                result_value = (angle_value <= angle_threshold)
-            )
+            result_value = (angle_from_target > angle_threshold)
         )
 
         result_value
@@ -14677,25 +14824,58 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Returns true when a non-vertical edge is still close enough to vertical to be checked.
-    Opposite horizontal-like edges are ignored.
+    Returns true when an edge exceeds the maximum allowed deviation from horizontal.
+    At zero degrees every non-horizontal edge is a violation; at 45 degrees vertical-like edges are violations.
+    */
+    function isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold =
+    (
+        result_value = false
+        angle_from_horizontal = getEdgeAngleFromHorizontal node adapter edge_id
+
+        if (angle_from_horizontal != undefined) then
+        (
+            result_value = isDirectionAngleViolation angle_from_horizontal angle_threshold
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Returns true when an edge exceeds the maximum allowed deviation from vertical.
+    At zero degrees every non-vertical edge is a violation; at 45 degrees horizontal-like edges are violations.
     */
     function isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold =
     (
         result_value = false
+        angle_from_horizontal = getEdgeAngleFromHorizontal node adapter edge_id
 
-        if (not (isVerticalEdge node adapter edge_id tolerance)) then
+        if (angle_from_horizontal != undefined) then
         (
-            angle_from_horizontal = getEdgeAngleFromHorizontal node adapter edge_id
-
-            if (angle_from_horizontal != undefined) then
-            (
-                angle_from_vertical = 90.0 - angle_from_horizontal
-                result_value = (angle_from_vertical <= angle_threshold)
-            )
+            angle_from_vertical = 90.0 - angle_from_horizontal
+            result_value = isDirectionAngleViolation angle_from_vertical angle_threshold
         )
 
         result_value
+        -- return
+    ),
+
+    /*
+    Tests the maximum allowed direction-angle rule at key threshold boundaries.
+    Returns true when zero, one-degree and forty-five-degree behavior is correct.
+    */
+    function testDirectionAngleThreshold =
+    (
+        test_passed = true
+
+        test_passed = test_passed and (not (isDirectionAngleViolation 0.0 0.0))
+        test_passed = test_passed and (isDirectionAngleViolation 0.001 0.0)
+        test_passed = test_passed and (not (isDirectionAngleViolation 1.0 1.0))
+        test_passed = test_passed and (isDirectionAngleViolation 1.001 1.0)
+        test_passed = test_passed and (not (isDirectionAngleViolation 45.0 45.0))
+        test_passed = test_passed and (isDirectionAngleViolation 90.0 45.0)
+
+        test_passed
         -- return
     ),
 
@@ -15308,11 +15488,11 @@ struct StraightEdgeFixer_v
 
                 if (check_type == #horizontal) then
                 (
-                    format "Check Horizontal Edges: selected % near-horizontal error edge(s), angle threshold: % deg.\n" total_bad_edges angle_threshold
+                    format "Check Horizontal Edges: selected % edge(s) above the allowed horizontal deviation, max angle: % deg.\n" total_bad_edges angle_threshold
                 )
                 else
                 (
-                    format "Check Vertical Edges: selected % near-vertical error edge(s), angle threshold: % deg.\n" total_bad_edges angle_threshold
+                    format "Check Vertical Edges: selected % edge(s) above the allowed vertical deviation, max angle: % deg.\n" total_bad_edges angle_threshold
                 )
             )
         )
@@ -15843,11 +16023,11 @@ rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
 
     groupBox grp_checks "EDGE CHECKS" pos:[8,148] width:284 height:144
 
-    label lbl_angle_threshold "Angle:" pos:[20,172] width:46 height:18 tooltip:"Maximum angle away from the requested axis that is still considered a candidate error edge. Range is limited to 0-45 degrees so the opposite axis is ignored."
-    spinner spn_angle_threshold "" pos:[64,170] width:58 height:18 range:[0.0,45.0,45.0] type:#float scale:1.0 tooltip:"Candidate angle threshold in degrees. Horizontal Check ignores edges farther than this from horizontal. Vertical Check ignores edges farther than this from vertical."
+    label lbl_angle_threshold "Angle:" pos:[20,172] width:46 height:18 tooltip:"Maximum allowed angle away from the requested direction. Edges above this angle are selected as direction errors. At 0 degrees every non-matching edge is selected; 45 degrees is the horizontal/vertical crossover."
+    spinner spn_angle_threshold "" pos:[64,170] width:58 height:18 range:[0.0,45.0,45.0] type:#float scale:1.0 tooltip:"Maximum allowed direction deviation in degrees. CHECK HORIZONTAL selects edges above this deviation from horizontal. CHECK VERTICAL selects edges above this deviation from vertical."
 
-    button btn_check_horizontal "CHECK HORIZONTAL" pos:[18,198] width:127 height:42 tooltip:"LMB: select visible near-horizontal error edges.\n\nRMB: straighten currently selected visible near-horizontal edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
-    button btn_check_vertical "CHECK VERTICAL" pos:[155,198] width:127 height:42 tooltip:"LMB: select visible near-vertical error edges.\n\nRMB: straighten currently selected visible near-vertical edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
+    button btn_check_horizontal "CHECK HORIZONTAL" pos:[18,198] width:127 height:42 tooltip:"LMB: select visible edges whose deviation from horizontal is greater than Angle.\n\nRMB: straighten currently selected horizontal-direction error edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
+    button btn_check_vertical "CHECK VERTICAL" pos:[155,198] width:127 height:42 tooltip:"LMB: select visible edges whose deviation from vertical is greater than Angle.\n\nRMB: straighten currently selected vertical-direction error edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
 
     button btn_border_check "BORDER CHECK" pos:[18,248] width:264 height:28 tooltip:"Select visible border edges with an unwelded/overlapping local-Z seam, a reflex corner above 180 degrees, or a 360-degree backtracking border. Backtracking does not require the remote vertices to share position."
 
@@ -15943,7 +16123,7 @@ createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #
 
 
 /*
-Wall-Fixer UI 0.64
+Wall-Fixer UI 0.66
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -15953,8 +16133,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.64"
-global wall_fixer_ui_tool_version = 0.75
+global wall_fixer_ui_file_version = "0.66"
+global wall_fixer_ui_tool_version = 0.77
 
 
 /*
@@ -17171,7 +17351,7 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:112
     label edge_angle_label "Angle:" pos:[148,86] width:42 height:18
     spinner edge_angle_spinner "" pos:[192,83] width:80 height:20 \
         range:[0.0,45.0,45.0] type:#float scale:1.0 \
-        tooltip:"Candidate direction angle threshold in degrees."
+        tooltip:"Maximum allowed deviation from the requested horizontal or vertical direction. Edges above this angle are selected as errors; 45 degrees is the crossover."
 
 
     on WallFixerEdgeFixerOptionsRollout open do
@@ -17241,9 +17421,9 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:236
 
 
     button check_horizontal_button "CHECK HORIZONTAL" pos:[18,30] width:127 height:34 \
-        tooltip:"LMB: select visible near-horizontal error edges.\n\nRMB: straighten currently selected near-horizontal edges."
+        tooltip:"LMB: select visible edges whose deviation from horizontal is greater than Angle.\n\nRMB: straighten the currently selected horizontal-direction error edges."
     button check_vertical_button "CHECK VERTICAL" pos:[155,30] width:127 height:34 \
-        tooltip:"LMB: select visible near-vertical error edges.\n\nRMB: straighten currently selected near-vertical edges."
+        tooltip:"LMB: select visible edges whose deviation from vertical is greater than Angle.\n\nRMB: straighten the currently selected vertical-direction error edges."
 
 
     button border_check_button "BORDER CHECK" pos:[18,70] width:264 height:30 \
@@ -17350,8 +17530,12 @@ rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
         tooltip:"Suppress verbose Listener output during the inherited batch slicing operation."
 
 
-    button slice_selected_walls_button "9. SLICE SELECTED WALLS" pos:[4,42] width:302 height:38 \
+    button slice_selected_walls_button "9. SLICE SELECTED WALLS" pos:[4,42] width:226 height:38 \
         tooltip:"LMB: Slice selected walls using the active Vertical/Horizontal mode.\n\nRMB: Run both modes; active mode first, then the other mode."
+
+
+    button select_slice_state_button "Select" pos:[234,42] width:72 height:38 \
+        tooltip:"LMB: Filter only SLICED objects. If nothing is selected, use all visible geometry.\n\nRMB: Filter only UNSLICED objects. If nothing is selected, use all visible geometry."
 
 
     groupBox slice_check_result_group "CHECK RESULT" pos:[4,84] width:302 height:40
@@ -17379,6 +17563,18 @@ rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
     on slice_selected_walls_button rightclick do
     (
         ::WallFixerRollout.runSliceSelectedWallsBothModes()
+    )
+
+
+    on select_slice_state_button pressed do
+    (
+        ::WallFixerRollout.selectSliceWallObjects sliced_state:true
+    )
+
+
+    on select_slice_state_button rightclick do
+    (
+        ::WallFixerRollout.selectSliceWallObjects sliced_state:false
     )
 )
 
@@ -22822,6 +23018,27 @@ function testEdgeFixerOptionsLayout =
 Verifies full-row parent controls and parent group boxes use 4px side padding.
 The test checks width equals parent rollout width minus 8 and left position equals 4.
 */
+/*
+Tests Wall-Fixer slice-modifier name classification without changing scene geometry.
+Current directional names and the legacy combined name must classify as sliced.
+*/
+function testSliceWallModifierNameClassification =
+(
+    horizontal_ok = WallFixerRollout.isSliceWallModifierName "SLICE HORIZONTAL"
+    vertical_ok = WallFixerRollout.isSliceWallModifierName "SLICE VERTICAL"
+    legacy_ok = WallFixerRollout.isSliceWallModifierName "SLICE ALL"
+    unrelated_ok = not (WallFixerRollout.isSliceWallModifierName "Edit Poly")
+    passed = horizontal_ok and vertical_ok and legacy_ok and unrelated_ok
+
+
+    format "Slice wall modifier classification | horizontal:% | vertical:% | legacy:% | unrelated:% | passed:%\n" horizontal_ok vertical_ok legacy_ok unrelated_ok passed
+
+
+    passed
+    -- return
+)
+
+
 function testParentControlWidths =
 (
     local width_ok = true
@@ -27036,6 +27253,101 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
 
 
         completed
+        -- return
+    )
+
+
+    /*
+    Returns true when a modifier name belongs to a Wall-Fixer slicing pass.
+    Supports both current directional modifiers and the legacy combined slice modifier.
+    */
+    function isSliceWallModifierName modifier_name =
+    (
+        normalized_name = toUpper (modifier_name as string)
+        is_slice_modifier = (
+            normalized_name == "SLICE HORIZONTAL" or
+            normalized_name == "SLICE VERTICAL" or
+            normalized_name == "SLICE ALL"
+        )
+
+
+        is_slice_modifier
+        -- return
+    )
+
+
+    /*
+    Returns true when the object contains at least one Wall-Fixer slicing modifier.
+    Slice state is detected without evaluating or changing object topology.
+    */
+    function isSliceWallObjectSliced object_node =
+    (
+        sliced_state = false
+
+
+        if object_node != undefined and isValidNode object_node then
+        (
+            for modifier in object_node.modifiers while not sliced_state do
+            (
+                sliced_state = isSliceWallModifierName modifier.name
+            )
+        )
+
+
+        sliced_state
+        -- return
+    )
+
+
+    /*
+    Filters the current selection by Wall-Fixer slice state.
+    When nothing is selected, all visible geometry is used as the source set.
+    */
+    function selectSliceWallObjects sliced_state:true =
+    (
+        source_nodes = if selection.count > 0 then
+        (
+            selection as array
+        )
+        else
+        (
+            for object_node in geometry where not object_node.isHidden collect object_node
+        )
+
+
+        filtered_nodes = #()
+
+
+        for object_node in source_nodes do
+        (
+            if object_node != undefined and isValidNode object_node then
+            (
+                object_is_sliced = isSliceWallObjectSliced object_node
+
+
+                if object_is_sliced == sliced_state then
+                (
+                    append filtered_nodes object_node
+                )
+            )
+        )
+
+
+        if filtered_nodes.count > 0 then
+        (
+            select filtered_nodes
+        )
+        else
+        (
+            clearSelection()
+        )
+
+
+        state_label = if sliced_state then "SLICED" else "UNSLICED"
+        setStatus #message (("Selected " + (filtered_nodes.count as string)) + " " + state_label + " object(s).")
+
+
+        filtered_nodes
         -- return
     )
 
