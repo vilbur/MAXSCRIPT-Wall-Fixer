@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.34"
-global wall_fixer_core_tool_version = 0.90
+global wall_fixer_core_file_version = "0.35"
+global wall_fixer_core_tool_version = 0.92
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -3943,7 +3943,23 @@ struct WallFixer_v
                 local modifier_selection = #{}
                 try
                 (
-                    modifier_selection = current_object.GetSelection #Vertex node:node
+                    if subObjectLevel == 2 then
+                    (
+                        local selected_edges = current_object.GetSelection #Edge node:node
+
+                        for edge_index in selected_edges do
+                        (
+                            local edge_a = current_object.GetEdgeVertex edge_index 1 node:node
+                            local edge_b = current_object.GetEdgeVertex edge_index 2 node:node
+
+                            if edge_a != undefined and edge_a > 0 then modifier_selection[edge_a] = true
+                            if edge_b != undefined and edge_b > 0 then modifier_selection[edge_b] = true
+                        )
+                    )
+                    else
+                    (
+                        modifier_selection = current_object.GetSelection #Vertex node:node
+                    )
                 )
                 catch
                 (
@@ -5779,6 +5795,180 @@ struct WallFixer_v
     ),
 
     /*
+    Captures selected live Edit Poly slice planes that cannot be represented by unchanged base-object vertex IDs.
+    Vertex mode uses selected vertices; Edge mode uses selected edge endpoints and prefers the selected edge itself.
+    */
+    function captureSelectedLiveSliceTasks node cut_mode:#all slice_plane_mode:#nextVert match_tolerance:0.01 =
+    (
+        local result = #()
+        if node == undefined or not(isValidNode node) then return result
+        if classOf node.baseObject != Editable_Poly then return result
+
+        local current_object = undefined
+        try
+        (
+            current_object = modPanel.getCurrentObject()
+        )
+        catch
+        (
+            current_object = undefined
+        )
+
+        if current_object == undefined or classOf current_object != Edit_Poly then return result
+
+        local belongs_to_node = false
+        for modifier in node.modifiers while not belongs_to_node do
+        (
+            if modifier == current_object then belongs_to_node = true
+        )
+        if not belongs_to_node then return result
+
+        local source_records = #()
+
+        if subObjectLevel == 2 then
+        (
+            local selected_edges = #{}
+            try
+            (
+                selected_edges = current_object.GetSelection #Edge node:node
+            )
+            catch
+            (
+                selected_edges = #{}
+            )
+
+            for edge_index in selected_edges do
+            (
+                local edge_a = current_object.GetEdgeVertex edge_index 1 node:node
+                local edge_b = current_object.GetEdgeVertex edge_index 2 node:node
+
+                if edge_a != undefined and edge_a > 0 then append source_records #(edge_a, edge_index)
+                if edge_b != undefined and edge_b > 0 then append source_records #(edge_b, edge_index)
+            )
+        )
+        else
+        (
+            local selected_vertices = #{}
+            try
+            (
+                selected_vertices = current_object.GetSelection #Vertex node:node
+            )
+            catch
+            (
+                selected_vertices = #{}
+            )
+
+            for vertex_index in selected_vertices do
+            (
+                append source_records #(vertex_index, 0)
+            )
+        )
+
+        if source_records.count == 0 then return result
+
+        local base_obj = node.baseObject
+        local base_vertex_count = polyop.getNumVerts base_obj
+        local object_tm = node.objectTransform
+        local search_tolerance = amax epsilon match_tolerance
+        local slice_kinds = #()
+
+        if cut_mode == #all or cut_mode == #vertical then append slice_kinds #vertical
+        if cut_mode == #all or cut_mode == #horizontal then append slice_kinds #horizontal
+
+        local pipeline = WMCWallSlicePipeline \
+            node:node \
+            ep:current_object \
+            uiSelection:false
+
+        local captured_planes = #()
+
+        for source_record in source_records do
+        (
+            local source_vertex = source_record[1]
+            local preferred_edge = source_record[2]
+            local modifier_position = undefined
+
+            try
+            (
+                modifier_position = current_object.GetVertex source_vertex node:node
+            )
+            catch
+            (
+                modifier_position = undefined
+            )
+
+            if modifier_position != undefined then
+            (
+                local modifier_world = modifier_position * object_tm
+                local maps_to_base = false
+
+                for base_vertex = 1 to base_vertex_count while not maps_to_base do
+                (
+                    local base_position = polyop.getVert base_obj base_vertex
+                    if base_position != undefined then
+                    (
+                        local base_world = base_position * object_tm
+                        maps_to_base = distance modifier_world base_world <= search_tolerance
+                    )
+                )
+
+                if not maps_to_base then
+                (
+                    for slice_kind in slice_kinds do
+                    (
+                        local seed = pipeline.getLiveSlicePlaneSeed \
+                            source_vertex \
+                            slice_kind \
+                            planeMode:slice_plane_mode \
+                            allow_internal_edges:true \
+                            preferred_edge:preferred_edge
+
+                        if seed != undefined then
+                        (
+                            local seed_anchor = seed[3]
+                            local seed_axis = seed[4]
+                            local duplicate_plane = false
+
+                            for plane_item in captured_planes while not duplicate_plane do
+                            (
+                                local same_kind = plane_item[1] == slice_kind
+                                local parallel = abs(dot plane_item[2] seed_axis) >= cos 0.1
+                                local same_plane = abs(dot(seed_anchor - plane_item[3]) seed_axis) <= 0.01
+
+                                if same_kind and parallel and same_plane then duplicate_plane = true
+                            )
+
+                            if not duplicate_plane then
+                            (
+                                append captured_planes #(slice_kind, seed_axis, seed_anchor)
+                                append result #(
+                                    0,
+                                    slice_kind,
+                                    0,
+                                    seed_anchor,
+                                    seed_axis,
+                                    #{},
+                                    #{},
+                                    seed_anchor.z,
+                                    undefined,
+                                    undefined,
+                                    0
+                                )
+
+                                if not batch_quiet then format "Wall-Fixer Selected Live Slice Seed: node:% sourceVert:% preferredEdge:% direction:% anchor:% axis:%\n" \
+                                    node.name source_vertex preferred_edge slice_kind seed_anchor seed_axis
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        result
+        -- return
+    ),
+
+    /*
     Builds one fixed slice-task queue from unchanged base-object INNER VERTS.
     Horizontal tasks are grouped only inside the same planar wall region so cuts stop at wall corners.
     */
@@ -6082,7 +6272,7 @@ modifier.split = false
                 local region_id = if slice_task.count >= 11 then slice_task[11] else 0
 
                 if task_base_edges.numberSet == 0 and base_edge > 0 then task_base_edges[base_edge] = true
-                if task_base_vertices.numberSet == 0 then task_base_vertices[base_vertex] = true
+                if task_base_vertices.numberSet == 0 and base_vertex > 0 then task_base_vertices[base_vertex] = true
 
                 if batch_quiet then
                 (
@@ -6293,6 +6483,7 @@ modifier.split = false
         local original_subobject_level = subObjectLevel
         local restrict_to_selected_vertices = (original_subobject_level != undefined and original_subobject_level > 0)
         local selected_vertex_filters = #()
+        local selected_live_task_filters = #()
         local final_sliced_node = undefined
         local processed_count = 0
         local processed_vertex_count = 0
@@ -6324,7 +6515,14 @@ modifier.split = false
             (
                 local selection_data = getActiveMakeOneSliceVertexSelection node
                 local mapped_vertices = if selection_data != undefined and selection_data.count >= 1 then copy selection_data[1] else #{}
+                local live_tasks = captureSelectedLiveSliceTasks \
+                    node \
+                    cut_mode:cut_mode \
+                    slice_plane_mode:slice_plane_mode \
+                    match_tolerance:0.01
+
                 append selected_vertex_filters #(node, mapped_vertices)
+                append selected_live_task_filters #(node, live_tasks)
             )
         )
 
@@ -6430,6 +6628,33 @@ modifier.split = false
                             slice_plane_mode:slice_plane_mode \
                             angle_threshold:angle_threshold \
                             planar_tolerance:planar_tolerance
+
+                        if restrict_to_selected_vertices then
+                        (
+                            local selected_live_tasks = #()
+
+                            for live_filter_item in selected_live_task_filters do
+                            (
+                                if live_filter_item[1] == node then
+                                (
+                                    selected_live_tasks = live_filter_item[2]
+                                    exit
+                                )
+                            )
+
+                            for live_task in selected_live_tasks do
+                            (
+                                local live_kind = live_task[2]
+
+                                for slice_pass in slice_passes do
+                                (
+                                    if slice_pass[1] == live_kind or slice_pass[1] == #all then
+                                    (
+                                        append slice_pass[3] live_task
+                                    )
+                                )
+                            )
+                        )
 
                         for slice_pass in slice_passes do
                         (
@@ -6593,6 +6818,18 @@ modifier.split = false
         all_ok
         -- return
     ),
+
+    /*
+    Tests synthetic selected-live slice task structure used for modifier-created vertices.
+    */
+    function testSelectedLiveSliceTaskStructure =
+    (
+        local sample_task = #(0, #vertical, 0, [1,2,3], [1,0,0], #{}, #{}, 3.0, undefined, undefined, 0)
+
+        sample_task.count == 11 and sample_task[1] == 0 and sample_task[2] == #vertical and sample_task[3] == 0
+        -- return
+    ),
+
 
     /*
     Tests whether Slice Selected Walls should restrict source vertices while any subobject level is active.

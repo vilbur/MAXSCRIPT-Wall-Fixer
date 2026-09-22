@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer Pipeline 0.23
+Wall-Fixer Pipeline 0.24
 Native Edit Poly topology snapshot and wall slicing pipeline.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_pipeline_file_version = "0.23"
-global wall_fixer_pipeline_tool_version = 0.83
+global wall_fixer_pipeline_file_version = "0.24"
+global wall_fixer_pipeline_tool_version = 0.92
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -1099,7 +1099,7 @@ struct WMCWallSlicePipeline
     Builds one slice-plane definition from either the global wall frame or a corner plus its next border vertex.
     Returns plane normal axis, defining vertex selection and the optional second defining vertex.
     */
-    function getSlicePlaneDefinition t source_vertex slice_kind planeMode:#nextVert =
+    function getSlicePlaneDefinition t source_vertex slice_kind planeMode:#nextVert allow_internal_edges:false preferred_edge:0 =
     (
         if source_vertex < 1 or source_vertex > t.points.count or not t.validVertices[source_vertex] then return undefined
 
@@ -1123,22 +1123,35 @@ struct WMCWallSlicePipeline
         )
         else
         (
-            local border_edges = (t.vertexEdges[source_vertex] * t.border) as array
+            local direction_edges = if allow_internal_edges then
+            (
+                t.vertexEdges[source_vertex] as array
+            )
+            else
+            (
+                (t.vertexEdges[source_vertex] * t.border) as array
+            )
             local matching_edges = #()
 
             /*
-            Edge Direction must be defined by one real border edge.
-            Accept only the adjacent border edge whose classified direction matches the requested slice direction.
+            Edge Direction normally uses one border edge.
+            Selected live topology may explicitly use an internal edge created by an earlier slice.
             */
-            for edge_index in border_edges do
+            if preferred_edge > 0 and findItem direction_edges preferred_edge > 0 and edgeKind t preferred_edge == slice_kind then
             (
-                if edgeKind t edge_index == slice_kind then
+                append matching_edges preferred_edge
+            )
+            else
+            (
+                for edge_index in direction_edges do
                 (
-                    append matching_edges edge_index
+                    if edgeKind t edge_index == slice_kind then
+                    (
+                        append matching_edges edge_index
+                    )
                 )
             )
 
-            /* A clean orthogonal corner has exactly one horizontal and one vertical border edge. */
             if matching_edges.count != 1 then return undefined
 
             local defining_edge = matching_edges[1]
@@ -1156,6 +1169,76 @@ struct WMCWallSlicePipeline
             local aligned_vertices = #{source_vertex,best_vertex}
             #(plane_axis,aligned_vertices,best_vertex,defining_edge)
         )
+        -- return
+    ),
+
+    /*
+    Captures one current live-topology slice plane before a slicing modifier is rebuilt.
+    Selected modifier-created internal edges may define the direction when explicitly allowed.
+    */
+    function getLiveSlicePlaneSeed source_vertex slice_kind planeMode:#nextVert allow_internal_edges:false preferred_edge:0 =
+    (
+        local t = refreshTopology()
+        if t == undefined then return undefined
+        if source_vertex < 1 or source_vertex > t.points.count or not t.validVertices[source_vertex] then return undefined
+
+        setFrame t
+
+        local plane_definition = getSlicePlaneDefinition \
+            t \
+            source_vertex \
+            slice_kind \
+            planeMode:planeMode \
+            allow_internal_edges:allow_internal_edges \
+            preferred_edge:preferred_edge
+
+        if plane_definition == undefined then return undefined
+
+        local anchor = t.points[source_vertex]
+        local axis = plane_definition[1]
+        local region = componentAt t anchor
+        if region.numberSet == 0 then return undefined
+
+        local region_low = 1e30
+        local region_high = -1e30
+        local region_vertices = #{}
+
+        for face_index in region do
+        (
+            if t.validFaces[face_index] then
+            (
+                for vertex_index in t.faces[face_index] do
+                (
+                    if vertex_index >= 1 and vertex_index <= t.points.count and t.validVertices[vertex_index] then
+                    (
+                        region_vertices[vertex_index] = true
+                    )
+                )
+            )
+        )
+
+        for vertex_index in region_vertices do
+        (
+            local region_value = dot(t.points[vertex_index] - anchor) axis
+            region_low = amin region_low region_value
+            region_high = amax region_high region_value
+        )
+
+        if not (region_low < -tolerance and region_high > tolerance) then return undefined
+
+        #(source_vertex, slice_kind, anchor + referenceWorld, axis, plane_definition[4], copy plane_definition[2])
+        -- return
+    ),
+
+    /*
+    Tests selected-live internal-edge mode bookkeeping.
+    */
+    function testSelectedLiveInternalEdgeMode =
+    (
+        local allow_internal_edges = true
+        local preferred_edge = 7
+
+        allow_internal_edges and preferred_edge == 7
         -- return
     ),
 

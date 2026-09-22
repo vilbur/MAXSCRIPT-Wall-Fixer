@@ -1,9 +1,16 @@
 ## NEXT
 
+HELPERS > Material button: LMB: assign a Multi/Sub-Object (multi-ID) material to the current selection. RMB: remove material from the current selection.
 
 ## IN PROGRESS
 
 ## QUEUE
+
+HELPERS > Align Camera: align the camera to walls rotated around the Z axis while keeping the camera-view horizon horizontal; do not introduce camera roll.
+
+ROLLOUT 1 > 2. WELD > RMB: when subObjectLevel 1 (vertex) is active, weld only the currently selected vertices.
+
+HELPERS > SPLIT > LMB: apply Editable Poly, edit the selected edges and run Split, then explode the object by elements into separate objects.
 
 
 

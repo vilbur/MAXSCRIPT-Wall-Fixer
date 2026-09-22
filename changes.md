@@ -1,5 +1,11 @@
 ﻿# Changes
 
+2026-09-22 — `Straight-Edge-Fixer.ms`, `Wall-Fixer.ms`: replaced direction-angle `atan2` calculation with explicit vector-length geometry using `acos(abs(dz) / edge_length)`. This makes angle-from-vertical and angle-from-horizontal unambiguous; the reported edge 6–13 case evaluates to about 2.67° from vertical and falls inside an Angle=40 check. Extended `testDirectionAngleThreshold` with matching vertical/horizontal regression vectors; project version 0.922.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: Smart Explode confirmed-split failures now fall back to the source Editable Poly element groups; when a higher-priority NORMALS / FACE DIRECTION / XY POSITION detach fails but multiple mesh elements remain, those elements are detached instead of returning the source as failed; fallback logs the detected element count and counts as a successful split; project version 0.921.
+
+2026-09-22 — `Wall-Fixer-Pipeline.ms`, `Wall-Fixer-Core.ms`, `Wall-Fixer.ms`: fixed `SLICE SELECTED WALLS` for selected topology created by a previous slice; selected Edit Poly vertices that do not map to base-object vertices are captured as live world-space slice planes before old slice modifiers are rebuilt, Edge subobject selection uses its edge endpoints and prefers the selected edge as the direction source, and selected-live slicing may use internal slice edges such as vertex pairs `12-14` and `8-13`; base-mapped selected vertices keep the existing fast path; added selected-live slice tests; project version 0.92.
+
 2026-09-22 — `Straight-Edge-Fixer.ms`, `Wall-Fixer.ms`: corrected EDGE FIXER direction-angle selection semantics. CHECK HORIZONTAL now selects only edges within 0..Angle degrees of horizontal; CHECK VERTICAL selects only edges within 0..Angle degrees of vertical. The threshold is inclusive and `testDirectionAngleThreshold` now validates 0°, boundary, and just-over-boundary behavior; project version 0.89.
 
 2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added Slice Walls `H \ V` button between the main Slice and Select controls; LMB/RMB activate `SLICE HORIZONTAL` / `SLICE VERTICAL`, and CTRL variants also enter Edge sub-object level 2; project version 0.91.

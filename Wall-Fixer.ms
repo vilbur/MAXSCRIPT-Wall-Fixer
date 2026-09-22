@@ -1,6 +1,6 @@
 ﻿/*
-Wall-Fixer Bundled Loader 0.83
-Project version 0.89.
+Wall-Fixer Bundled Loader 0.86
+Project version 0.922.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.83"
-global wall_fixer_loader_tool_version = 0.89
+global wall_fixer_loader_file_version = "0.86"
+global wall_fixer_loader_tool_version = 0.922
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -119,7 +119,7 @@ Bundled dependency order:
 
 
 /*
-Wall-Fixer Pipeline 0.23
+Wall-Fixer Pipeline 0.24
 Native Edit Poly topology snapshot and wall slicing pipeline.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -128,8 +128,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_pipeline_file_version = "0.23"
-global wall_fixer_pipeline_tool_version = 0.83
+global wall_fixer_pipeline_file_version = "0.24"
+global wall_fixer_pipeline_tool_version = 0.92
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -1219,7 +1219,7 @@ struct WMCWallSlicePipeline
     Builds one slice-plane definition from either the global wall frame or a corner plus its next border vertex.
     Returns plane normal axis, defining vertex selection and the optional second defining vertex.
     */
-    function getSlicePlaneDefinition t source_vertex slice_kind planeMode:#nextVert =
+    function getSlicePlaneDefinition t source_vertex slice_kind planeMode:#nextVert allow_internal_edges:false preferred_edge:0 =
     (
         if source_vertex < 1 or source_vertex > t.points.count or not t.validVertices[source_vertex] then return undefined
 
@@ -1243,22 +1243,35 @@ struct WMCWallSlicePipeline
         )
         else
         (
-            local border_edges = (t.vertexEdges[source_vertex] * t.border) as array
+            local direction_edges = if allow_internal_edges then
+            (
+                t.vertexEdges[source_vertex] as array
+            )
+            else
+            (
+                (t.vertexEdges[source_vertex] * t.border) as array
+            )
             local matching_edges = #()
 
             /*
-            Edge Direction must be defined by one real border edge.
-            Accept only the adjacent border edge whose classified direction matches the requested slice direction.
+            Edge Direction normally uses one border edge.
+            Selected live topology may explicitly use an internal edge created by an earlier slice.
             */
-            for edge_index in border_edges do
+            if preferred_edge > 0 and findItem direction_edges preferred_edge > 0 and edgeKind t preferred_edge == slice_kind then
             (
-                if edgeKind t edge_index == slice_kind then
+                append matching_edges preferred_edge
+            )
+            else
+            (
+                for edge_index in direction_edges do
                 (
-                    append matching_edges edge_index
+                    if edgeKind t edge_index == slice_kind then
+                    (
+                        append matching_edges edge_index
+                    )
                 )
             )
 
-            /* A clean orthogonal corner has exactly one horizontal and one vertical border edge. */
             if matching_edges.count != 1 then return undefined
 
             local defining_edge = matching_edges[1]
@@ -1276,6 +1289,76 @@ struct WMCWallSlicePipeline
             local aligned_vertices = #{source_vertex,best_vertex}
             #(plane_axis,aligned_vertices,best_vertex,defining_edge)
         )
+        -- return
+    ),
+
+    /*
+    Captures one current live-topology slice plane before a slicing modifier is rebuilt.
+    Selected modifier-created internal edges may define the direction when explicitly allowed.
+    */
+    function getLiveSlicePlaneSeed source_vertex slice_kind planeMode:#nextVert allow_internal_edges:false preferred_edge:0 =
+    (
+        local t = refreshTopology()
+        if t == undefined then return undefined
+        if source_vertex < 1 or source_vertex > t.points.count or not t.validVertices[source_vertex] then return undefined
+
+        setFrame t
+
+        local plane_definition = getSlicePlaneDefinition \
+            t \
+            source_vertex \
+            slice_kind \
+            planeMode:planeMode \
+            allow_internal_edges:allow_internal_edges \
+            preferred_edge:preferred_edge
+
+        if plane_definition == undefined then return undefined
+
+        local anchor = t.points[source_vertex]
+        local axis = plane_definition[1]
+        local region = componentAt t anchor
+        if region.numberSet == 0 then return undefined
+
+        local region_low = 1e30
+        local region_high = -1e30
+        local region_vertices = #{}
+
+        for face_index in region do
+        (
+            if t.validFaces[face_index] then
+            (
+                for vertex_index in t.faces[face_index] do
+                (
+                    if vertex_index >= 1 and vertex_index <= t.points.count and t.validVertices[vertex_index] then
+                    (
+                        region_vertices[vertex_index] = true
+                    )
+                )
+            )
+        )
+
+        for vertex_index in region_vertices do
+        (
+            local region_value = dot(t.points[vertex_index] - anchor) axis
+            region_low = amin region_low region_value
+            region_high = amax region_high region_value
+        )
+
+        if not (region_low < -tolerance and region_high > tolerance) then return undefined
+
+        #(source_vertex, slice_kind, anchor + referenceWorld, axis, plane_definition[4], copy plane_definition[2])
+        -- return
+    ),
+
+    /*
+    Tests selected-live internal-edge mode bookkeeping.
+    */
+    function testSelectedLiveInternalEdgeMode =
+    (
+        local allow_internal_edges = true
+        local preferred_edge = 7
+
+        allow_internal_edges and preferred_edge == 7
         -- return
     ),
 
@@ -1878,8 +1961,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.34"
-global wall_fixer_core_tool_version = 0.90
+global wall_fixer_core_file_version = "0.35"
+global wall_fixer_core_tool_version = 0.92
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -5813,7 +5896,23 @@ struct WallFixer_v
                 local modifier_selection = #{}
                 try
                 (
-                    modifier_selection = current_object.GetSelection #Vertex node:node
+                    if subObjectLevel == 2 then
+                    (
+                        local selected_edges = current_object.GetSelection #Edge node:node
+
+                        for edge_index in selected_edges do
+                        (
+                            local edge_a = current_object.GetEdgeVertex edge_index 1 node:node
+                            local edge_b = current_object.GetEdgeVertex edge_index 2 node:node
+
+                            if edge_a != undefined and edge_a > 0 then modifier_selection[edge_a] = true
+                            if edge_b != undefined and edge_b > 0 then modifier_selection[edge_b] = true
+                        )
+                    )
+                    else
+                    (
+                        modifier_selection = current_object.GetSelection #Vertex node:node
+                    )
                 )
                 catch
                 (
@@ -7649,6 +7748,180 @@ struct WallFixer_v
     ),
 
     /*
+    Captures selected live Edit Poly slice planes that cannot be represented by unchanged base-object vertex IDs.
+    Vertex mode uses selected vertices; Edge mode uses selected edge endpoints and prefers the selected edge itself.
+    */
+    function captureSelectedLiveSliceTasks node cut_mode:#all slice_plane_mode:#nextVert match_tolerance:0.01 =
+    (
+        local result = #()
+        if node == undefined or not(isValidNode node) then return result
+        if classOf node.baseObject != Editable_Poly then return result
+
+        local current_object = undefined
+        try
+        (
+            current_object = modPanel.getCurrentObject()
+        )
+        catch
+        (
+            current_object = undefined
+        )
+
+        if current_object == undefined or classOf current_object != Edit_Poly then return result
+
+        local belongs_to_node = false
+        for modifier in node.modifiers while not belongs_to_node do
+        (
+            if modifier == current_object then belongs_to_node = true
+        )
+        if not belongs_to_node then return result
+
+        local source_records = #()
+
+        if subObjectLevel == 2 then
+        (
+            local selected_edges = #{}
+            try
+            (
+                selected_edges = current_object.GetSelection #Edge node:node
+            )
+            catch
+            (
+                selected_edges = #{}
+            )
+
+            for edge_index in selected_edges do
+            (
+                local edge_a = current_object.GetEdgeVertex edge_index 1 node:node
+                local edge_b = current_object.GetEdgeVertex edge_index 2 node:node
+
+                if edge_a != undefined and edge_a > 0 then append source_records #(edge_a, edge_index)
+                if edge_b != undefined and edge_b > 0 then append source_records #(edge_b, edge_index)
+            )
+        )
+        else
+        (
+            local selected_vertices = #{}
+            try
+            (
+                selected_vertices = current_object.GetSelection #Vertex node:node
+            )
+            catch
+            (
+                selected_vertices = #{}
+            )
+
+            for vertex_index in selected_vertices do
+            (
+                append source_records #(vertex_index, 0)
+            )
+        )
+
+        if source_records.count == 0 then return result
+
+        local base_obj = node.baseObject
+        local base_vertex_count = polyop.getNumVerts base_obj
+        local object_tm = node.objectTransform
+        local search_tolerance = amax epsilon match_tolerance
+        local slice_kinds = #()
+
+        if cut_mode == #all or cut_mode == #vertical then append slice_kinds #vertical
+        if cut_mode == #all or cut_mode == #horizontal then append slice_kinds #horizontal
+
+        local pipeline = WMCWallSlicePipeline \
+            node:node \
+            ep:current_object \
+            uiSelection:false
+
+        local captured_planes = #()
+
+        for source_record in source_records do
+        (
+            local source_vertex = source_record[1]
+            local preferred_edge = source_record[2]
+            local modifier_position = undefined
+
+            try
+            (
+                modifier_position = current_object.GetVertex source_vertex node:node
+            )
+            catch
+            (
+                modifier_position = undefined
+            )
+
+            if modifier_position != undefined then
+            (
+                local modifier_world = modifier_position * object_tm
+                local maps_to_base = false
+
+                for base_vertex = 1 to base_vertex_count while not maps_to_base do
+                (
+                    local base_position = polyop.getVert base_obj base_vertex
+                    if base_position != undefined then
+                    (
+                        local base_world = base_position * object_tm
+                        maps_to_base = distance modifier_world base_world <= search_tolerance
+                    )
+                )
+
+                if not maps_to_base then
+                (
+                    for slice_kind in slice_kinds do
+                    (
+                        local seed = pipeline.getLiveSlicePlaneSeed \
+                            source_vertex \
+                            slice_kind \
+                            planeMode:slice_plane_mode \
+                            allow_internal_edges:true \
+                            preferred_edge:preferred_edge
+
+                        if seed != undefined then
+                        (
+                            local seed_anchor = seed[3]
+                            local seed_axis = seed[4]
+                            local duplicate_plane = false
+
+                            for plane_item in captured_planes while not duplicate_plane do
+                            (
+                                local same_kind = plane_item[1] == slice_kind
+                                local parallel = abs(dot plane_item[2] seed_axis) >= cos 0.1
+                                local same_plane = abs(dot(seed_anchor - plane_item[3]) seed_axis) <= 0.01
+
+                                if same_kind and parallel and same_plane then duplicate_plane = true
+                            )
+
+                            if not duplicate_plane then
+                            (
+                                append captured_planes #(slice_kind, seed_axis, seed_anchor)
+                                append result #(
+                                    0,
+                                    slice_kind,
+                                    0,
+                                    seed_anchor,
+                                    seed_axis,
+                                    #{},
+                                    #{},
+                                    seed_anchor.z,
+                                    undefined,
+                                    undefined,
+                                    0
+                                )
+
+                                if not batch_quiet then format "Wall-Fixer Selected Live Slice Seed: node:% sourceVert:% preferredEdge:% direction:% anchor:% axis:%\n" \
+                                    node.name source_vertex preferred_edge slice_kind seed_anchor seed_axis
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        result
+        -- return
+    ),
+
+    /*
     Builds one fixed slice-task queue from unchanged base-object INNER VERTS.
     Horizontal tasks are grouped only inside the same planar wall region so cuts stop at wall corners.
     */
@@ -7952,7 +8225,7 @@ modifier.split = false
                 local region_id = if slice_task.count >= 11 then slice_task[11] else 0
 
                 if task_base_edges.numberSet == 0 and base_edge > 0 then task_base_edges[base_edge] = true
-                if task_base_vertices.numberSet == 0 then task_base_vertices[base_vertex] = true
+                if task_base_vertices.numberSet == 0 and base_vertex > 0 then task_base_vertices[base_vertex] = true
 
                 if batch_quiet then
                 (
@@ -8163,6 +8436,7 @@ modifier.split = false
         local original_subobject_level = subObjectLevel
         local restrict_to_selected_vertices = (original_subobject_level != undefined and original_subobject_level > 0)
         local selected_vertex_filters = #()
+        local selected_live_task_filters = #()
         local final_sliced_node = undefined
         local processed_count = 0
         local processed_vertex_count = 0
@@ -8194,7 +8468,14 @@ modifier.split = false
             (
                 local selection_data = getActiveMakeOneSliceVertexSelection node
                 local mapped_vertices = if selection_data != undefined and selection_data.count >= 1 then copy selection_data[1] else #{}
+                local live_tasks = captureSelectedLiveSliceTasks \
+                    node \
+                    cut_mode:cut_mode \
+                    slice_plane_mode:slice_plane_mode \
+                    match_tolerance:0.01
+
                 append selected_vertex_filters #(node, mapped_vertices)
+                append selected_live_task_filters #(node, live_tasks)
             )
         )
 
@@ -8300,6 +8581,33 @@ modifier.split = false
                             slice_plane_mode:slice_plane_mode \
                             angle_threshold:angle_threshold \
                             planar_tolerance:planar_tolerance
+
+                        if restrict_to_selected_vertices then
+                        (
+                            local selected_live_tasks = #()
+
+                            for live_filter_item in selected_live_task_filters do
+                            (
+                                if live_filter_item[1] == node then
+                                (
+                                    selected_live_tasks = live_filter_item[2]
+                                    exit
+                                )
+                            )
+
+                            for live_task in selected_live_tasks do
+                            (
+                                local live_kind = live_task[2]
+
+                                for slice_pass in slice_passes do
+                                (
+                                    if slice_pass[1] == live_kind or slice_pass[1] == #all then
+                                    (
+                                        append slice_pass[3] live_task
+                                    )
+                                )
+                            )
+                        )
 
                         for slice_pass in slice_passes do
                         (
@@ -8463,6 +8771,18 @@ modifier.split = false
         all_ok
         -- return
     ),
+
+    /*
+    Tests synthetic selected-live slice task structure used for modifier-created vertices.
+    */
+    function testSelectedLiveSliceTaskStructure =
+    (
+        local sample_task = #(0, #vertical, 0, [1,2,3], [1,0,0], #{}, #{}, 3.0, undefined, undefined, 0)
+
+        sample_task.count == 11 and sample_task[1] == 0 and sample_task[2] == #vertical and sample_task[3] == 0
+        -- return
+    ),
+
 
     /*
     Tests whether Slice Selected Walls should restrict source vertices while any subobject level is active.
@@ -12762,7 +13082,7 @@ WallFixer = WallFixer_v()
 
 
 /*
-Straight Edge Fixer 0.24
+Straight Edge Fixer 0.25
 Detects repeated horizontal edge levels and aligns nearby horizontal edges to them.
 */
 
@@ -12770,8 +13090,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.24"
-global straight_edge_fixer_tool_version = 0.89
+global straight_edge_fixer_file_version = "0.25"
+global straight_edge_fixer_tool_version = 0.922
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -13883,6 +14203,31 @@ struct StraightEdgeFixer_v
 
 
     /*
+    Returns horizontal/vertical direction angles from edge component lengths.
+    The result is #(angle_from_horizontal, angle_from_vertical) in degrees.
+    */
+    function getDirectionAngles horizontal_length vertical_length =
+    (
+        result_value = #(undefined, undefined)
+        edge_length = sqrt ((horizontal_length * horizontal_length) + (vertical_length * vertical_length))
+
+        if (edge_length > 0.0000001) then
+        (
+            vertical_ratio = vertical_length / edge_length
+            vertical_ratio = amin 1.0 (amax 0.0 vertical_ratio)
+
+            angle_from_vertical = acos vertical_ratio
+            angle_from_horizontal = 90.0 - angle_from_vertical
+
+            result_value = #(angle_from_horizontal, angle_from_vertical)
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
     Returns the edge angle from the horizontal world plane in degrees.
     Zero degrees is horizontal and ninety degrees is vertical.
     */
@@ -13898,11 +14243,9 @@ struct StraightEdgeFixer_v
             edge_vector = point_b - point_a
             horizontal_length = sqrt ((edge_vector.x * edge_vector.x) + (edge_vector.y * edge_vector.y))
             vertical_length = abs edge_vector.z
+            direction_angles = getDirectionAngles horizontal_length vertical_length
 
-            if ((horizontal_length > 0.0000001) or (vertical_length > 0.0000001)) then
-            (
-                angle_value = atan2 vertical_length horizontal_length
-            )
+            angle_value = direction_angles[1]
         )
 
         angle_value
@@ -13978,6 +14321,14 @@ struct StraightEdgeFixer_v
         test_passed = test_passed and (isDirectionAngleMatch 5.0 5.0)
         test_passed = test_passed and (not (isDirectionAngleMatch 5.001 5.0))
         test_passed = test_passed and (not (isDirectionAngleMatch 90.0 5.0))
+
+        vertical_test_angles = getDirectionAngles 0.0466476 1.0
+        horizontal_test_angles = getDirectionAngles 1.0 0.0466476
+
+        test_passed = test_passed and ((abs (vertical_test_angles[2] - 2.6704)) < 0.01)
+        test_passed = test_passed and (isDirectionAngleMatch vertical_test_angles[2] 40.0)
+        test_passed = test_passed and ((abs (horizontal_test_angles[1] - 2.6704)) < 0.01)
+        test_passed = test_passed and (isDirectionAngleMatch horizontal_test_angles[1] 40.0)
 
         test_passed
         -- return
@@ -15227,7 +15578,7 @@ createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #
 
 
 /*
-Wall-Fixer UI 0.72
+Wall-Fixer UI 0.77
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -15237,8 +15588,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.76"
-global wall_fixer_ui_tool_version = 0.91
+global wall_fixer_ui_file_version = "0.77"
+global wall_fixer_ui_tool_version = 0.921
 
 
 /*
@@ -25945,6 +26296,58 @@ result_groups
 
 
     /*
+    Falls back to splitting a still-valid Smart Explode source by its actual Editable Poly elements.
+    Returns success, result nodes and the detected element count while leaving the source intact on failure.
+    */
+    function executeSmartExplodeElementFallback source_node =
+    (
+        result_data = #(false, #(), 0)
+        conversion_success = false
+
+
+        if source_node != undefined and isValidNode source_node and superClassOf source_node == GeometryClass then
+        (
+            try
+            (
+                if classOf source_node.baseObject != Editable_Poly then
+                (
+                    convertToPoly source_node
+                )
+
+
+                conversion_success = isValidNode source_node and classOf source_node.baseObject == Editable_Poly
+            )
+            catch
+            (
+                conversion_success = false
+            )
+
+
+            if conversion_success then
+            (
+                element_groups = getSmartExplodePolyElementGroups source_node
+                element_count = element_groups.count
+
+
+                if element_count > 1 then
+                (
+                    split_result = detachSmartExplodePolyGroups source_node element_groups name_suffix:"_Element_"
+                    result_data = #(split_result[1], split_result[2], element_count)
+                )
+                else
+                (
+                    result_data = #(false, #(), element_count)
+                )
+            )
+        )
+
+
+        result_data
+        -- return
+    )
+
+
+    /*
     Appends one valid scene node to an output array only once.
     This keeps untouched originals and newly detached walls together in the final selection.
     */
@@ -26173,9 +26576,28 @@ result_groups
                     )
                     else
                     (
-                        failed_count += 1
-                        if isValidNode source_node then appendSmartExplodeOutputNode output_nodes source_node
-                        setStatus #error (source_name + ": confirmed " + (operation_type as string) + " split could not be completed.")
+                        fallback_result = if operation_type != #elements then executeSmartExplodeElementFallback source_node else #(false, #(), 0)
+
+
+                        if fallback_result[1] then
+                        (
+                            split_count += 1
+
+
+                            for result_node in fallback_result[2] do
+                            (
+                                appendSmartExplodeOutputNode output_nodes result_node
+                            )
+
+
+                            format "FALLBACK: % confirmed % split failed; exploded to % mesh elements.\n" source_name operation_type fallback_result[3]
+                        )
+                        else
+                        (
+                            failed_count += 1
+                            if isValidNode source_node then appendSmartExplodeOutputNode output_nodes source_node
+                            setStatus #error (source_name + ": confirmed " + (operation_type as string) + " split could not be completed.")
+                        )
                     )
                 )
                 else
@@ -26279,14 +26701,35 @@ result_groups
                         )
                         else
                         (
-                            failed_count += 1
+                            fallback_result = if operation_type != #elements then executeSmartExplodeElementFallback source_node else #(false, #(), 0)
 
 
-                            if isValidNode source_node then
+                            if fallback_result[1] then
                             (
-                                appendSmartExplodeOutputNode final_nodes source_node
+                                split_count += 1
+
+
+                                for result_node in fallback_result[2] do
+                                (
+                                    appendSmartExplodeOutputNode final_nodes result_node
+                                )
+
+
+                                format "FALLBACK: % confirmed % split failed; exploded to % mesh elements.\n" source_name operation_type fallback_result[3]
                             )
-format "ERROR: % confirmed split could not be completed.\n" source_name
+                            else
+                            (
+                                failed_count += 1
+
+
+                                if isValidNode source_node then
+                                (
+                                    appendSmartExplodeOutputNode final_nodes source_node
+                                )
+
+
+                                format "ERROR: % confirmed split could not be completed.\n" source_name
+                            )
                         )
                     )
                     else

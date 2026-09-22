@@ -1,5 +1,5 @@
-﻿/*
-Wall-Fixer UI 0.72
+/*
+Wall-Fixer UI 0.77
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.76"
-global wall_fixer_ui_tool_version = 0.91
+global wall_fixer_ui_file_version = "0.77"
+global wall_fixer_ui_tool_version = 0.921
 
 
 /*
@@ -10717,6 +10717,58 @@ result_groups
 
 
     /*
+    Falls back to splitting a still-valid Smart Explode source by its actual Editable Poly elements.
+    Returns success, result nodes and the detected element count while leaving the source intact on failure.
+    */
+    function executeSmartExplodeElementFallback source_node =
+    (
+        result_data = #(false, #(), 0)
+        conversion_success = false
+
+
+        if source_node != undefined and isValidNode source_node and superClassOf source_node == GeometryClass then
+        (
+            try
+            (
+                if classOf source_node.baseObject != Editable_Poly then
+                (
+                    convertToPoly source_node
+                )
+
+
+                conversion_success = isValidNode source_node and classOf source_node.baseObject == Editable_Poly
+            )
+            catch
+            (
+                conversion_success = false
+            )
+
+
+            if conversion_success then
+            (
+                element_groups = getSmartExplodePolyElementGroups source_node
+                element_count = element_groups.count
+
+
+                if element_count > 1 then
+                (
+                    split_result = detachSmartExplodePolyGroups source_node element_groups name_suffix:"_Element_"
+                    result_data = #(split_result[1], split_result[2], element_count)
+                )
+                else
+                (
+                    result_data = #(false, #(), element_count)
+                )
+            )
+        )
+
+
+        result_data
+        -- return
+    )
+
+
+    /*
     Appends one valid scene node to an output array only once.
     This keeps untouched originals and newly detached walls together in the final selection.
     */
@@ -10945,9 +10997,28 @@ result_groups
                     )
                     else
                     (
-                        failed_count += 1
-                        if isValidNode source_node then appendSmartExplodeOutputNode output_nodes source_node
-                        setStatus #error (source_name + ": confirmed " + (operation_type as string) + " split could not be completed.")
+                        fallback_result = if operation_type != #elements then executeSmartExplodeElementFallback source_node else #(false, #(), 0)
+
+
+                        if fallback_result[1] then
+                        (
+                            split_count += 1
+
+
+                            for result_node in fallback_result[2] do
+                            (
+                                appendSmartExplodeOutputNode output_nodes result_node
+                            )
+
+
+                            format "FALLBACK: % confirmed % split failed; exploded to % mesh elements.\n" source_name operation_type fallback_result[3]
+                        )
+                        else
+                        (
+                            failed_count += 1
+                            if isValidNode source_node then appendSmartExplodeOutputNode output_nodes source_node
+                            setStatus #error (source_name + ": confirmed " + (operation_type as string) + " split could not be completed.")
+                        )
                     )
                 )
                 else
@@ -11051,14 +11122,35 @@ result_groups
                         )
                         else
                         (
-                            failed_count += 1
+                            fallback_result = if operation_type != #elements then executeSmartExplodeElementFallback source_node else #(false, #(), 0)
 
 
-                            if isValidNode source_node then
+                            if fallback_result[1] then
                             (
-                                appendSmartExplodeOutputNode final_nodes source_node
+                                split_count += 1
+
+
+                                for result_node in fallback_result[2] do
+                                (
+                                    appendSmartExplodeOutputNode final_nodes result_node
+                                )
+
+
+                                format "FALLBACK: % confirmed % split failed; exploded to % mesh elements.\n" source_name operation_type fallback_result[3]
                             )
-format "ERROR: % confirmed split could not be completed.\n" source_name
+                            else
+                            (
+                                failed_count += 1
+
+
+                                if isValidNode source_node then
+                                (
+                                    appendSmartExplodeOutputNode final_nodes source_node
+                                )
+
+
+                                format "ERROR: % confirmed split could not be completed.\n" source_name
+                            )
                         )
                     )
                     else

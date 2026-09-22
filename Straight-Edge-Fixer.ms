@@ -1,5 +1,5 @@
 ﻿/*
-Straight Edge Fixer 0.24
+Straight Edge Fixer 0.25
 Detects repeated horizontal edge levels and aligns nearby horizontal edges to them.
 */
 
@@ -7,8 +7,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.24"
-global straight_edge_fixer_tool_version = 0.89
+global straight_edge_fixer_file_version = "0.25"
+global straight_edge_fixer_tool_version = 0.922
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -1120,6 +1120,31 @@ struct StraightEdgeFixer_v
 
 
     /*
+    Returns horizontal/vertical direction angles from edge component lengths.
+    The result is #(angle_from_horizontal, angle_from_vertical) in degrees.
+    */
+    function getDirectionAngles horizontal_length vertical_length =
+    (
+        result_value = #(undefined, undefined)
+        edge_length = sqrt ((horizontal_length * horizontal_length) + (vertical_length * vertical_length))
+
+        if (edge_length > 0.0000001) then
+        (
+            vertical_ratio = vertical_length / edge_length
+            vertical_ratio = amin 1.0 (amax 0.0 vertical_ratio)
+
+            angle_from_vertical = acos vertical_ratio
+            angle_from_horizontal = 90.0 - angle_from_vertical
+
+            result_value = #(angle_from_horizontal, angle_from_vertical)
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
     Returns the edge angle from the horizontal world plane in degrees.
     Zero degrees is horizontal and ninety degrees is vertical.
     */
@@ -1135,11 +1160,9 @@ struct StraightEdgeFixer_v
             edge_vector = point_b - point_a
             horizontal_length = sqrt ((edge_vector.x * edge_vector.x) + (edge_vector.y * edge_vector.y))
             vertical_length = abs edge_vector.z
+            direction_angles = getDirectionAngles horizontal_length vertical_length
 
-            if ((horizontal_length > 0.0000001) or (vertical_length > 0.0000001)) then
-            (
-                angle_value = atan2 vertical_length horizontal_length
-            )
+            angle_value = direction_angles[1]
         )
 
         angle_value
@@ -1215,6 +1238,14 @@ struct StraightEdgeFixer_v
         test_passed = test_passed and (isDirectionAngleMatch 5.0 5.0)
         test_passed = test_passed and (not (isDirectionAngleMatch 5.001 5.0))
         test_passed = test_passed and (not (isDirectionAngleMatch 90.0 5.0))
+
+        vertical_test_angles = getDirectionAngles 0.0466476 1.0
+        horizontal_test_angles = getDirectionAngles 1.0 0.0466476
+
+        test_passed = test_passed and ((abs (vertical_test_angles[2] - 2.6704)) < 0.01)
+        test_passed = test_passed and (isDirectionAngleMatch vertical_test_angles[2] 40.0)
+        test_passed = test_passed and ((abs (horizontal_test_angles[1] - 2.6704)) < 0.01)
+        test_passed = test_passed and (isDirectionAngleMatch horizontal_test_angles[1] 40.0)
 
         test_passed
         -- return
