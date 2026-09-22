@@ -1,5 +1,5 @@
 /*
-Wall-Fixer Core 0.23
+Wall-Fixer Core 0.25
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.24"
-global wall_fixer_core_tool_version = 0.54
+global wall_fixer_core_file_version = "0.25"
+global wall_fixer_core_tool_version = 0.56
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -66,7 +66,7 @@ global WallFixer
 
 struct WallFixer_v
 (
-    version = "0.23",
+    version = "0.25",
     processed_slice_nodes = #(),
     processed_vertical_planes = #(),
     processed_horizontal_planes = #(),
@@ -2949,11 +2949,11 @@ struct WallFixer_v
 
     /*
     Runs the Helpers Attach RMB workflow on the current geometry selection.
-    The merged target is welded at 0.0, centered, and quadrified only when its triangle count is within the supplied limit.
+    The merged target is welded with the supplied threshold, centered, and quadrified only when its triangle count is within the supplied limit.
     */
-    function attachCenterWeldQuadrifySelection triangle_limit:12 =
+    function attachCenterWeldQuadrifySelection weld_threshold triangle_limit:12 =
     (
-        local attach_success = attachAndWeldSelection 0.0
+        local attach_success = attachAndWeldSelection weld_threshold
         local target_node = if selection.count == 1 then selection[1] else undefined
         local pivot_success = false
         local triangle_count = 0
@@ -3015,7 +3015,8 @@ struct WallFixer_v
         completeRedraw()
 
 
-        last_slice_report = "Attach RMB: attached selection, centered pivot, welded all vertices at 0.0; triangles: " + \
+        last_slice_report = "Attach RMB: attached selection, centered pivot, welded all vertices with threshold " + \
+            (weld_threshold as string) + "; triangles: " + \
             (triangle_count as string) + "; quadrify: " + \
             (if quadrify_attempted then (if quadrify_success then "applied" else "failed") else "skipped (> " + (triangle_limit as string) + ")") + "."
 

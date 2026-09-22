@@ -1,6 +1,6 @@
 /*
-Wall-Fixer Bundled Loader 0.44
-Project version 0.50.
+Wall-Fixer Bundled Loader 0.56
+Project version 0.62.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.48"
-global wall_fixer_loader_tool_version = 0.54
+global wall_fixer_loader_file_version = "0.56"
+global wall_fixer_loader_tool_version = 0.62
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -1924,7 +1924,7 @@ struct WMCWallSlicePipeline
 
 
 /*
-Wall-Fixer Core 0.23
+Wall-Fixer Core 0.25
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -1934,8 +1934,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.24"
-global wall_fixer_core_tool_version = 0.54
+global wall_fixer_core_file_version = "0.25"
+global wall_fixer_core_tool_version = 0.56
 
 
 /*
@@ -2001,7 +2001,7 @@ global WallFixer
 
 struct WallFixer_v
 (
-    version = "0.23",
+    version = "0.25",
     processed_slice_nodes = #(),
     processed_vertical_planes = #(),
     processed_horizontal_planes = #(),
@@ -5239,11 +5239,11 @@ struct WallFixer_v
 
     /*
     Runs the Helpers Attach RMB workflow on the current geometry selection.
-    The merged target is welded at 0.0, centered, and quadrified only when its triangle count is within the supplied limit.
+    The merged target is welded with the supplied threshold, centered, and quadrified only when its triangle count is within the supplied limit.
     */
-    function attachCenterWeldQuadrifySelection triangle_limit:12 =
+    function attachCenterWeldQuadrifySelection weld_threshold triangle_limit:12 =
     (
-        local attach_success = attachAndWeldSelection 0.0
+        local attach_success = attachAndWeldSelection weld_threshold
         local target_node = if selection.count == 1 then selection[1] else undefined
         local pivot_success = false
         local triangle_count = 0
@@ -5305,7 +5305,8 @@ struct WallFixer_v
         completeRedraw()
 
 
-        last_slice_report = "Attach RMB: attached selection, centered pivot, welded all vertices at 0.0; triangles: " + \
+        last_slice_report = "Attach RMB: attached selection, centered pivot, welded all vertices with threshold " + \
+            (weld_threshold as string) + "; triangles: " + \
             (triangle_count as string) + "; quadrify: " + \
             (if quadrify_attempted then (if quadrify_success then "applied" else "failed") else "skipped (> " + (triangle_limit as string) + ")") + "."
 
@@ -16159,7 +16160,7 @@ createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #
 
 
 /*
-Wall-Fixer UI 0.41
+Wall-Fixer UI 0.53
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -16169,8 +16170,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.45"
-global wall_fixer_ui_tool_version = 0.54
+global wall_fixer_ui_file_version = "0.53"
+global wall_fixer_ui_tool_version = 0.62
 
 
 /*
@@ -16240,7 +16241,21 @@ global WallFixerHelpersRollout
 global wallFaceClassifierRollout
 global wall_face_classifier_cache = #()
 global wall_face_classifier_last_nodes = #()
+global wall_face_debug_enabled
+global wall_face_debug_run_id
 global wall_fixer_weld_threshold_syncing = false
+
+
+if wall_face_debug_enabled == undefined then
+(
+    wall_face_debug_enabled = false
+)
+
+
+if wall_face_debug_run_id == undefined then
+(
+    wall_face_debug_run_id = 0
+)
 global wall_fixer_explode_wire_color_counter = 0
 
 
@@ -17379,13 +17394,13 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:112
     )
 
 
-    on WallFixerEdgeFixerOptionsRollout rolledUp options_open do
+    on WallFixerEdgeFixerOptionsRollout rolledUp options_rolled_up do
     (
         try
         (
             if WallFixerEdgeFixerRollout != undefined then
             (
-                WallFixerEdgeFixerRollout.setOptionsLayout options_open
+                WallFixerEdgeFixerRollout.setOptionsLayout (not options_rolled_up)
             )
         )
         catch
@@ -17426,63 +17441,43 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:112
 
 
 /*
-EDGE FIXER contains geometry-fix workflow steps 5 through 8.
-The Straight Edge Fixer action callbacks are inherited without changing their geometry logic.
+EDGE FIXER contains geometry-fix workflow step 6 and its result check.
+Straight Edge Fixer tuning controls are kept in the OPTIONS subrollout at the bottom.
 */
-rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:350
+rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:236
 (
-    subRollout edge_fixer_options_subrollout "" pos:[0,48] width:302 height:24
+    groupBox edge_z_group "6. EDGE Z-LEVEL FIXING AND BORDER EDGES CHECK" pos:[4,8] width:302 height:150
 
 
-    groupBox edge_z_group "6. EDGE Z-LEVEL FIXING AND BORDER EDGES CHECK" pos:[4,78] width:302 height:150
-
-
-    button check_horizontal_button "CHECK HORIZONTAL" pos:[18,100] width:127 height:34 \
+    button check_horizontal_button "CHECK HORIZONTAL" pos:[18,30] width:127 height:34 \
         tooltip:"LMB: select visible near-horizontal error edges.\n\nRMB: straighten currently selected near-horizontal edges."
-    button check_vertical_button "CHECK VERTICAL" pos:[155,100] width:127 height:34 \
+    button check_vertical_button "CHECK VERTICAL" pos:[155,30] width:127 height:34 \
         tooltip:"LMB: select visible near-vertical error edges.\n\nRMB: straighten currently selected near-vertical edges."
 
 
-    button border_check_button "BORDER CHECK" pos:[18,140] width:264 height:30 \
+    button border_check_button "BORDER CHECK" pos:[18,70] width:264 height:30 \
         tooltip:"Select visible border edges with unwelded/overlapping local-Z seams, reflex corners above 180 degrees or 360-degree backtracking borders."
 
 
-    button straight_edge_fixer_button "STRAIGHT EDGE FIXER" pos:[18,176] width:264 height:36 \
+    button straight_edge_fixer_button "STRAIGHT EDGE FIXER" pos:[18,106] width:264 height:36 \
         tooltip:"Detect repeated horizontal edge levels and align nearby horizontal edges to TOP, BOTTOM or CENTER target Z."
 
 
-    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[4,224] width:302 height:34 \
-        tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
+    groupBox check_result_group "8. CHECK RESULT" pos:[4,164] width:302 height:38
+    label check_result_label "Manual viewport check of geometry fixes." pos:[18,180] width:274 height:18
 
 
-    button fix_ngons_button "7. FIX N-GONS" pos:[4,264] width:302 height:34 \
-        tooltip:"Run the current Wall-Fixer Fix N-gons function before slicing."
-
-
-    groupBox check_result_group "8. CHECK RESULT" pos:[4,304] width:302 height:38
-    label check_result_label "Manual viewport check of geometry fixes." pos:[18,320] width:274 height:18
+    subRollout edge_fixer_options_subrollout "" pos:[0,208] width:310 height:24
 
 
     /*
-    Resizes the OPTIONS slot and shifts the remaining EDGE FIXER controls.
-    Collapsed OPTIONS leaves only its header; expanded OPTIONS restores the full controls area.
+    Resizes only the bottom OPTIONS slot and parent rollout.
+    EDGE FIXER action controls remain fixed while OPTIONS expands downward.
     */
     function setOptionsLayout options_open =
     (
-        local layout_offset = if options_open then 94 else 0
-
-
         edge_fixer_options_subrollout.height = if options_open then 118 else 24
-        edge_z_group.pos = [8, (78 + layout_offset)]
-        check_horizontal_button.pos = [18, (100 + layout_offset)]
-        check_vertical_button.pos = [155, (100 + layout_offset)]
-        border_check_button.pos = [18, (140 + layout_offset)]
-        straight_edge_fixer_button.pos = [18, (176 + layout_offset)]
-        two_edge_verts_button.pos = [8, (224 + layout_offset)]
-        fix_ngons_button.pos = [8, (264 + layout_offset)]
-        check_result_group.pos = [8, (304 + layout_offset)]
-        check_result_label.pos = [18, (320 + layout_offset)]
-        WallFixerEdgeFixerRollout.height = 350 + layout_offset
+        WallFixerEdgeFixerRollout.height = if options_open then 330 else 236
         -- return
     )
 
@@ -17533,25 +17528,6 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:350
     on straight_edge_fixer_button pressed do
     (
         ::WallFixerRollout.runStraightEdgeLevelFix()
-    )
-
-
-    on two_edge_verts_button pressed do
-    (
-        ::WallFixerRollout.runFindTwoEdgeVerts()
-    )
-
-
-    on two_edge_verts_button rightclick do
-    (
-        macros.run "Ribbon - Modeling" "VertexRemove"
-        ::WallFixerRollout.setStatus #success "Vertex Remove command executed on the current selection."
-    )
-
-
-    on fix_ngons_button pressed do
-    (
-        ::WallFixerRollout.runFixNgons #preprocess
     )
 
 
@@ -17614,33 +17590,50 @@ rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
 POST-PROCESS exposes current cleanup tools and reserves the new missing-loop/corner-completion actions.
 The two wall-completion buttons remain disabled until their detailed behavior is implemented.
 */
-rollout WallFixerPostProcessRollout "POST-PROCESS" width:310 height:268
+rollout WallFixerPostProcessRollout "POST-PROCESS" width:310 height:308
 (
-    button duplicated_vertices_button "10. DUPLICATED VERTICES" pos:[4,8] width:302 height:34 \
+    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[4,8] width:302 height:34 \
+        tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
+
+
+    button duplicated_vertices_button "10. DUPLICATED VERTICES" pos:[4,48] width:302 height:34 \
         tooltip:"LMB: select duplicate-position vertices at 0.01 tolerance.\n\nRMB: run the current duplicate-vertex fix at 0.01 tolerance."
 
 
-    button redundant_loops_button "11. REMOVE REDUNDANT LOOPS AND EDGES" pos:[4,48] width:302 height:34 \
+    button redundant_loops_button "11. REMOVE REDUNDANT LOOPS AND EDGES" pos:[4,88] width:302 height:34 \
         tooltip:"Reuse the current Redundant Loop Cleanup operation."
 
 
-    button repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" pos:[4,88] width:302 height:34 enabled:false \
+    button repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" pos:[4,128] width:302 height:34 enabled:false \
         tooltip:"Reserved for the new missing-loop completion tool."
 
 
-    button post_fix_ngons_button "13. FIX N-GONS" pos:[4,128] width:302 height:34 \
+    button post_fix_ngons_button "13. FIX N-GONS" pos:[4,168] width:302 height:34 \
         tooltip:"Run the current Wall-Fixer Fix N-gons function again after slicing cleanup."
 
 
-    groupBox walls_completion_group "WALLS COMPLETION" pos:[4,170] width:302 height:90
+    groupBox walls_completion_group "WALLS COMPLETION" pos:[4,210] width:302 height:90
 
 
-    button attach_walls_button "14. ATTACH WALLS TO OBJECTS" pos:[18,190] width:264 height:28 enabled:false \
+    button attach_walls_button "14. ATTACH WALLS TO OBJECTS" pos:[18,230] width:264 height:28 enabled:false \
         tooltip:"Reserved for the new Attach walls to objects function. Existing ATTACH AND WELD is intentionally not substituted because this step will have separate requirements."
 
 
-    button weld_corners_button "15. WELD AND CONNECT WALL CORNERS" pos:[18,224] width:264 height:28 enabled:false \
+    button weld_corners_button "15. WELD AND CONNECT WALL CORNERS" pos:[18,264] width:264 height:28 enabled:false \
         tooltip:"Reserved for welding wall corners and repairing continuous edge loops through the corners."
+
+
+    on two_edge_verts_button pressed do
+    (
+        ::WallFixerRollout.runFindTwoEdgeVerts()
+    )
+
+
+    on two_edge_verts_button rightclick do
+    (
+        macros.run "Ribbon - Modeling" "VertexRemove"
+        ::WallFixerRollout.setStatus #success "Vertex Remove command executed on the current selection."
+    )
 
 
     on duplicated_vertices_button pressed do
@@ -17675,7 +17668,7 @@ These actions operate on the current scene selection.
 rollout WallFixerHelpersRollout "HELPERS" width:310 height:48
 (
     button attach_button "Attach" pos:[8,8] width:143 height:30 \
-        tooltip:"LMB: Attach all selected geometry into the first selected object.\n\nRMB: Attach selection, center the merged pivot, weld all vertices at 0.0, then quadrify when the merged object has at most 12 triangular faces."
+        tooltip:"LMB: Attach all selected geometry into the first selected object.\n\nRMB: Attach selection, center the merged pivot, weld all vertices using Wall-Fixer > Options > Weld Threshold, then quadrify when the merged object has at most 12 triangular faces."
 
 
     button reset_pivot_button "Reset Pivot to Center" pos:[159,8] width:143 height:30 \
@@ -17760,7 +17753,7 @@ Main Wall-Fixer dialog owns shared progress, two-line message history and functi
 Child rollouts contain controls only and call these centralized handlers.
 */
 /*
-Embedded Inner-Outer Wall Finder 0.30
+Embedded Inner-Outer Wall Finder 0.31
 Runtime classifier implementation is embedded here so Wall-Fixer does not depend on a separately synced classifier file.
 Material ID 1 = OUTER, ID 2 = INNER, ID 3 = UP, ID 4 = DOWN.
 */
@@ -18436,6 +18429,14 @@ function resolveUnresolvedWallsByThickness object_data_array wall_thickness conf
                                     if (new_class == 1 or new_class == 2) and new_class != current_class then
                                     (
                                         face_classes[face_index] = new_class
+
+
+                                        if object_data.count >= 10 then
+                                        (
+                                            object_data[10][face_index] = #THICKNESS
+                                        )
+
+
                                         resolved_count += 1
                                     )
                                 )
@@ -18565,11 +18566,27 @@ function resolveUnresolvedWallFaces object_data_array neighbor_passes:3 =
                         if normalized_vote >= 0.34 then
                         (
                             face_classes[face_index] = 1
+
+
+                            if object_data.count >= 10 then
+                            (
+                                object_data[10][face_index] = #NEIGHBOR
+                            )
+
+
                             change_count += 1
                         )
                         else if normalized_vote <= -0.34 then
                         (
                             face_classes[face_index] = 2
+
+
+                            if object_data.count >= 10 then
+                            (
+                                object_data[10][face_index] = #NEIGHBOR
+                            )
+
+
                             change_count += 1
                         )
                     )
@@ -18611,6 +18628,12 @@ function finalizeUnresolvedWallFaces object_data_array =
                 else
                 (
                     face_classes[face_index] = 2
+                )
+
+
+                if object_data.count >= 10 then
+                (
+                    object_data[10][face_index] = #FALLBACK
                 )
 
 
@@ -19109,8 +19132,480 @@ function setForcedWallFaceBits object_node material_id face_bits =
 )
 
 
-/* Adds a manual FORCED class and removes the same faces from the opposite forced class.
-   This allows RMB/CTRL+RMB OUTER/INNER to replace a previous manual hint cleanly.
+/* Returns all user-property keys written by the wall-face debug tracer.
+   RESET uses the same list so an old analysis trace cannot survive classifier reset.
+*/
+function getWallFaceDebugPropertyNames =
+(
+    #(
+        "WallFaceDebugVersion",
+        "WallFaceDebugRunId",
+        "WallFaceDebugProjectVersion",
+        "WallFaceDebugNodeName",
+        "WallFaceDebugSourceType",
+        "WallFaceDebugSelectionCenter",
+        "WallFaceDebugAnalysisOrigin",
+        "WallFaceDebugWorkingPivot",
+        "WallFaceDebugUseEditPivot",
+        "WallFaceDebugEditPivot",
+        "WallFaceDebugWallThickness",
+        "WallFaceDebugConnectionThreshold",
+        "WallFaceDebugConfidenceThreshold",
+        "WallFaceDebugHorizontalThreshold",
+        "WallFaceDebugVertexCount",
+        "WallFaceDebugFaceCount",
+        "WallFaceDebugOriginalFaceSelection",
+        "WallFaceDebugForcedOuter",
+        "WallFaceDebugForcedInner",
+        "WallFaceDebugClasses",
+        "WallFaceDebugScores",
+        "WallFaceDebugReasons",
+        "WallFaceDebugClassCounts",
+        "WallFaceDebugResolutionCounts",
+        "WallFaceDebugObjectTransform"
+    )
+    -- return
+)
+
+
+/* Removes every persistent debug-trace property written by INNER/OUTTER analysis.
+   Manual FORCED OUTER/INNER user properties are intentionally preserved by this helper.
+*/
+function clearWallFaceDebugTrace object_node =
+(
+    for property_name in getWallFaceDebugPropertyNames() do
+    (
+        if doesUserPropExist object_node property_name then
+        (
+            deleteUserProp object_node property_name
+        )
+    )
+
+
+    true -- return
+)
+
+
+/* Converts a Point3 into a compact user-property value.
+   Undefined values are stored explicitly so missing pivot/origin data is visible in reports.
+*/
+function wallFaceDebugPointToString point_value =
+(
+    local value_string = "undefined"
+
+
+    if point_value != undefined then
+    (
+        value_string = ((point_value.x as string) + "," + (point_value.y as string) + "," + (point_value.z as string))
+    )
+
+
+    value_string -- return
+)
+
+
+/* Converts one classifier ID to a readable trace label.
+   Material IDs remain the authoritative current class when the debug report is printed.
+*/
+function wallFaceDebugClassName class_id =
+(
+    local class_name = "UNRESOLVED"
+
+
+    case class_id of
+    (
+        1: class_name = "OUTER"
+        2: class_name = "INNER"
+        3: class_name = "TOP"
+        4: class_name = "BOTTOM"
+        default: class_name = "UNRESOLVED"
+    )
+
+
+    class_name -- return
+)
+
+
+/* Converts one internal resolution source to a compact stable trace token.
+   These tokens make it possible to see which classifier stage produced each final face class.
+*/
+function wallFaceDebugReasonName reason_value =
+(
+    local reason_name = "UNRESOLVED"
+
+
+    case reason_value of
+    (
+        #FORCED_OUTER: reason_name = "FORCED_OUTER"
+        #FORCED_INNER: reason_name = "FORCED_INNER"
+        #FORCED_HIERARCHY: reason_name = "FORCED_HIERARCHY"
+        #DEGENERATE: reason_name = "DEGENERATE"
+        #TOP_NORMAL: reason_name = "TOP_NORMAL"
+        #BOTTOM_NORMAL: reason_name = "BOTTOM_NORMAL"
+        #RADIAL_OUTER: reason_name = "RADIAL_OUTER"
+        #RADIAL_INNER: reason_name = "RADIAL_INNER"
+        #RADIAL_UNRESOLVED: reason_name = "RADIAL_UNRESOLVED"
+        #THICKNESS: reason_name = "THICKNESS"
+        #HIERARCHY: reason_name = "HIERARCHY"
+        #NEIGHBOR: reason_name = "NEIGHBOR"
+        #FALLBACK: reason_name = "FALLBACK"
+        default: reason_name = "UNRESOLVED"
+    )
+
+
+    reason_name -- return
+)
+
+
+/* Serializes one ordinary MaxScript array into a comma-separated user-property value.
+   Values are converted with native string conversion so the trace stays compact.
+*/
+function wallFaceDebugArrayToString value_array =
+(
+    local value_string = ""
+
+
+    for value_index = 1 to value_array.count do
+    (
+        if value_index > 1 then
+        (
+            value_string += ","
+        )
+
+
+        value_string += (value_array[value_index] as string)
+    )
+
+
+    value_string -- return
+)
+
+
+/* Serializes the per-face reason array into readable comma-separated debug tokens.
+   The token order always matches face indices 1 through face count.
+*/
+function wallFaceDebugReasonsToString reason_array =
+(
+    local value_string = ""
+
+
+    for reason_index = 1 to reason_array.count do
+    (
+        if reason_index > 1 then
+        (
+            value_string += ","
+        )
+
+
+        value_string += wallFaceDebugReasonName reason_array[reason_index]
+    )
+
+
+    value_string -- return
+)
+
+
+/* Reads the current Working Pivot modes and position without changing them.
+   Result is #(UseMode, EditMode, position); unavailable pivot data returns undefined position.
+*/
+function getWallFaceDebugWorkingPivotState =
+(
+    local use_mode = false
+    local edit_mode = false
+    local pivot_position = undefined
+
+
+    try
+    (
+        use_mode = WorkingPivot.UseMode
+        edit_mode = WorkingPivot.EditMode
+        local pivot_tm = WorkingPivot.getTM()
+        pivot_position = pivot_tm.translation
+    )
+    catch
+    (
+        use_mode = false
+        edit_mode = false
+        pivot_position = undefined
+    )
+
+
+    #(use_mode, edit_mode, pivot_position) -- return
+)
+
+
+/* Writes a compact analysis snapshot into one object's user properties.
+   Live vertex/face geometry is printed later by debugWallFaceClassifierSelection so properties stay manageable.
+*/
+function writeWallFaceDebugTrace object_data run_data =
+(
+    local object_node = object_data[1]
+    local source_data = object_data[2]
+    local face_classes = object_data[6]
+    local face_scores = object_data[7]
+    local face_reasons = object_data[10]
+    local original_selection_bits = object_data[11]
+    local forced_outer_bits = getForcedWallFaceBits object_node source_data 1
+    local forced_inner_bits = getForcedWallFaceBits object_node source_data 2
+    local outer_count = 0
+    local inner_count = 0
+    local top_count = 0
+    local bottom_count = 0
+
+
+    clearWallFaceDebugTrace object_node
+
+
+    for class_id in face_classes do
+    (
+        if class_id == 1 then
+        (
+            outer_count += 1
+        )
+        else if class_id == 2 then
+        (
+            inner_count += 1
+        )
+        else if class_id == 3 then
+        (
+            top_count += 1
+        )
+        else if class_id == 4 then
+        (
+            bottom_count += 1
+        )
+    )
+
+
+    setUserProp object_node "WallFaceDebugVersion" "1"
+    setUserProp object_node "WallFaceDebugRunId" (run_data[1] as string)
+    setUserProp object_node "WallFaceDebugProjectVersion" (WallFixerVersion as string)
+    setUserProp object_node "WallFaceDebugNodeName" object_node.name
+    setUserProp object_node "WallFaceDebugSourceType" (source_data[1] as string)
+    setUserProp object_node "WallFaceDebugSelectionCenter" (wallFaceDebugPointToString run_data[2])
+    setUserProp object_node "WallFaceDebugAnalysisOrigin" (wallFaceDebugPointToString run_data[3])
+    setUserProp object_node "WallFaceDebugWorkingPivot" (wallFaceDebugPointToString run_data[4])
+    setUserProp object_node "WallFaceDebugUseEditPivot" (run_data[5] as string)
+    setUserProp object_node "WallFaceDebugEditPivot" (run_data[6] as string)
+    setUserProp object_node "WallFaceDebugWallThickness" (run_data[7] as string)
+    setUserProp object_node "WallFaceDebugConnectionThreshold" (run_data[8] as string)
+    setUserProp object_node "WallFaceDebugConfidenceThreshold" (run_data[9] as string)
+    setUserProp object_node "WallFaceDebugHorizontalThreshold" (run_data[10] as string)
+    setUserProp object_node "WallFaceDebugVertexCount" (object_data[8].count as string)
+    setUserProp object_node "WallFaceDebugFaceCount" (face_classes.count as string)
+    setUserProp object_node "WallFaceDebugOriginalFaceSelection" (wallFaceBitsToUserPropString original_selection_bits)
+    setUserProp object_node "WallFaceDebugForcedOuter" (wallFaceBitsToUserPropString forced_outer_bits)
+    setUserProp object_node "WallFaceDebugForcedInner" (wallFaceBitsToUserPropString forced_inner_bits)
+    setUserProp object_node "WallFaceDebugClasses" (wallFaceDebugArrayToString face_classes)
+    setUserProp object_node "WallFaceDebugScores" (wallFaceDebugArrayToString face_scores)
+    setUserProp object_node "WallFaceDebugReasons" (wallFaceDebugReasonsToString face_reasons)
+    setUserProp object_node "WallFaceDebugClassCounts" (("OUTER=" + outer_count as string) + ";INNER=" + inner_count as string + ";TOP=" + top_count as string + ";BOTTOM=" + bottom_count as string)
+    setUserProp object_node "WallFaceDebugResolutionCounts" (("THICKNESS=" + run_data[11] as string) + ";FORCED_HIERARCHY=" + run_data[12] as string + ";HIERARCHY=" + run_data[13] as string + ";NEIGHBOR=" + run_data[14] as string + ";FALLBACK=" + run_data[15] as string)
+    setUserProp object_node "WallFaceDebugObjectTransform" (object_node.transform as string)
+
+
+    true -- return
+)
+
+
+/* Returns one comma-separated trace token by face index.
+   Missing or stale user-property data returns an empty string instead of raising an error.
+*/
+function getWallFaceDebugToken value_string token_index =
+(
+    local token_value = ""
+
+
+    if value_string != undefined and value_string != "" then
+    (
+        local token_array = filterString (value_string as string) ","
+
+
+        if token_index >= 1 and token_index <= token_array.count then
+        (
+            token_value = token_array[token_index]
+        )
+    )
+
+
+    token_value -- return
+)
+
+
+/* Prints a complete INNER/OUTTER debug report for selected or last analyzed walls.
+   Report includes stored analysis inputs, user properties, live vertices, face centers/normals, Material IDs and force state.
+*/
+function debugWallFaceClassifierSelection verbose_vertices:true verbose_faces:true use_last_if_empty:true =
+(
+    local debug_nodes = for object_node in selection where isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+    local pivot_state = getWallFaceDebugWorkingPivotState()
+
+
+    if debug_nodes.count == 0 and use_last_if_empty then
+    (
+        for object_node in wall_face_classifier_last_nodes do
+        (
+            if isValidNode object_node then
+            (
+                if getFaceGeometrySource object_node != undefined then
+                (
+                    append debug_nodes object_node
+                )
+            )
+        )
+    )
+
+
+    format "\n======================================================================\n"
+    format "WALL-FIXER GET OUTER WALLS DEBUG\n"
+    format "Project version: % | trace mode: % | objects: %\n" WallFixerVersion wall_face_debug_enabled debug_nodes.count
+    format "Current selection center: %\n" (wallFaceDebugPointToString (getWallFaceSelectionCenter debug_nodes))
+    format "Current Working Pivot: % | Use Edit Pivot: % | Edit Edit Pivot: %\n" (wallFaceDebugPointToString pivot_state[3]) pivot_state[1] pivot_state[2]
+    format "======================================================================\n"
+
+
+    for object_node in debug_nodes do
+    (
+        local source_data = getFaceGeometrySource object_node
+
+
+        if source_data != undefined then
+        (
+            local vertex_count = getSourceNumVertices object_node source_data
+            local face_count = getSourceNumFaces object_node source_data
+            local selected_face_bits = getSourceFaceSelection object_node source_data
+            local forced_outer_bits = getForcedWallFaceBits object_node source_data 1
+            local forced_inner_bits = getForcedWallFaceBits object_node source_data 2
+            local stored_classes = getUserProp object_node "WallFaceDebugClasses"
+            local stored_scores = getUserProp object_node "WallFaceDebugScores"
+            local stored_reasons = getUserProp object_node "WallFaceDebugReasons"
+            local debug_version = getUserProp object_node "WallFaceDebugVersion"
+            local user_property_buffer = ""
+
+
+            try
+            (
+                user_property_buffer = getUserPropBuffer object_node
+            )
+            catch
+            (
+                user_property_buffer = ""
+            )
+
+
+            format "\n----------------------------------------------------------------------\n"
+            format "OBJECT: % | source: % | vertices: % | faces: %\n" object_node.name source_data[1] vertex_count face_count
+            format "Current transform: %\n" object_node.transform
+            format "Current face selection: %\n" (wallFaceBitsToUserPropString selected_face_bits)
+            format "Current FORCED OUTER: % | FORCED INNER: %\n" (wallFaceBitsToUserPropString forced_outer_bits) (wallFaceBitsToUserPropString forced_inner_bits)
+            format "Trace present: % | run: % | trace project: %\n" (debug_version != undefined) (getUserProp object_node "WallFaceDebugRunId") (getUserProp object_node "WallFaceDebugProjectVersion")
+            format "Trace selection center: %\n" (getUserProp object_node "WallFaceDebugSelectionCenter")
+            format "Trace analysis origin: %\n" (getUserProp object_node "WallFaceDebugAnalysisOrigin")
+            format "Trace Working Pivot: % | Use: % | Edit: %\n" (getUserProp object_node "WallFaceDebugWorkingPivot") (getUserProp object_node "WallFaceDebugUseEditPivot") (getUserProp object_node "WallFaceDebugEditPivot")
+            format "Trace Wall thickness: % | Connect threshold: % | Confidence: % | Horizontal threshold: %\n" (getUserProp object_node "WallFaceDebugWallThickness") (getUserProp object_node "WallFaceDebugConnectionThreshold") (getUserProp object_node "WallFaceDebugConfidenceThreshold") (getUserProp object_node "WallFaceDebugHorizontalThreshold")
+            format "Trace classes: %\n" (getUserProp object_node "WallFaceDebugClassCounts")
+            format "Trace resolution counts: %\n" (getUserProp object_node "WallFaceDebugResolutionCounts")
+            format "Trace original face selection: %\n" (getUserProp object_node "WallFaceDebugOriginalFaceSelection")
+            format "USER PROPERTIES:\n%\n" user_property_buffer
+
+
+            if verbose_vertices then
+            (
+                format "VERTICES (world):\n"
+
+
+                for vertex_index = 1 to vertex_count do
+                (
+                    format "  VERT % = %\n" vertex_index (getSourceVertexWorld object_node source_data vertex_index)
+                )
+            )
+
+
+            if verbose_faces then
+            (
+                format "FACES:\n"
+
+
+                for face_index = 1 to face_count do
+                (
+                    local face_degree = getSourceFaceDegree object_node source_data face_index
+                    local face_vertices = #()
+                    local face_indices = #()
+
+
+                    for corner_index = 1 to face_degree do
+                    (
+                        local vertex_index = getSourceFaceVertex object_node source_data face_index corner_index
+                        append face_indices vertex_index
+                        append face_vertices (getSourceVertexWorld object_node source_data vertex_index)
+                    )
+
+
+                    local face_center = calculatePolygonCenter face_vertices
+                    local face_normal = calculatePolygonNormal face_vertices epsilon:0.0000001
+                    local material_id = getSourceFaceMaterialId object_node source_data face_index
+                    local force_label = "NONE"
+
+
+                    if forced_outer_bits[face_index] then
+                    (
+                        force_label = "OUTER"
+                    )
+                    else if forced_inner_bits[face_index] then
+                    (
+                        force_label = "INNER"
+                    )
+
+
+                    format "  FACE % | material=% % | selected=% | forced=% | traceClass=% | score=% | reason=%\n" face_index material_id (wallFaceDebugClassName material_id) selected_face_bits[face_index] force_label (getWallFaceDebugToken stored_classes face_index) (getWallFaceDebugToken stored_scores face_index) (getWallFaceDebugToken stored_reasons face_index)
+                    format "       center=% | normal=% | verts=%\n" face_center face_normal face_indices
+                )
+            )
+        )
+    )
+
+
+    format "======================================================================\n\n"
+    debug_nodes.count -- return
+)
+
+
+/* Tests trace capture on the current wall selection and prints the resulting report.
+   This runs the normal classifier with debug mode temporarily enabled, then restores the previous debug toggle.
+*/
+function testWallFaceDebugTrace wall_thickness:(units.decodeValue "1m") connection_threshold:((units.decodeValue "1m") * 0.1) =
+(
+    local debug_enabled_before = wall_face_debug_enabled
+    local result_data = #()
+    local traced_object_count = 0
+
+
+    wall_face_debug_enabled = true
+    result_data = classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:wall_thickness connection_threshold:connection_threshold
+
+
+    for object_node in wall_face_classifier_last_nodes do
+    (
+        if isValidNode object_node then
+        (
+            if doesUserPropExist object_node "WallFaceDebugVersion" then
+            (
+                traced_object_count += 1
+            )
+        )
+    )
+
+
+    wall_face_debug_enabled = debug_enabled_before
+
+
+    format "Wall-face debug trace test | classifier result items: % | traced objects: %\n" result_data.count traced_object_count
+    #(result_data.count, traced_object_count) -- return
+)
+
+
+/* Adds a persistent FORCED class for OUTER/INNER and removes the same faces from the opposite forced class.
+   TOP/BOTTOM manual assignments clear conflicting wall-side FORCED hints but are not stored as persistent forced wall types.
 */
 function forceWallFaceClass object_node source_data material_id mark_bits =
 (
@@ -19127,6 +19622,11 @@ function forceWallFaceClass object_node source_data material_id mark_bits =
     (
         forced_inner_bits = forced_inner_bits + mark_bits
         forced_outer_bits = forced_outer_bits - mark_bits
+    )
+    else if material_id == 3 or material_id == 4 then
+    (
+        forced_outer_bits = forced_outer_bits - mark_bits
+        forced_inner_bits = forced_inner_bits - mark_bits
     )
 
 
@@ -19374,6 +19874,7 @@ function resetSelectedWallFaceClassification =
             setSourceFaceMaterialId object_node source_data all_face_bits 1
             setForcedWallFaceBits object_node 1 #{}
             setForcedWallFaceBits object_node 2 #{}
+            clearWallFaceDebugTrace object_node
             setSourceFaceSelection object_node source_data original_bits
 
 
@@ -19839,6 +20340,197 @@ function wallFaceGrowthElementsBlockedByThickness element_a element_b wall_thick
 )
 
 
+/* Returns every live scene object that currently carries Wall-Fixer classifier material.
+   AUTO GROW discovers neighbors from live scene state instead of requiring a prior runtime-cache entry.
+*/
+function getWallFaceGrowthSceneNodes =
+(
+    local scene_nodes = #()
+
+
+    for object_node in objects where superclassof object_node == GeometryClass do
+    (
+        if isValidNode object_node then
+        (
+            local source_data = getFaceGeometrySource object_node
+
+
+            if source_data != undefined and hasWallClassifierMaterial object_node then
+            (
+                append scene_nodes object_node
+            )
+        )
+    )
+
+
+    scene_nodes -- return
+)
+
+
+/* Builds the face geometry cache used only by AUTO GROW opposite-wall ray tests.
+   The data shape matches the face and normal fields used by the classifier ray helpers.
+*/
+function buildWallFaceGrowthRayData scene_nodes =
+(
+    local object_data_array = #()
+
+
+    for object_node in scene_nodes do
+    (
+        local source_data = getFaceGeometrySource object_node
+
+
+        if source_data != undefined then
+        (
+            local face_count = getSourceNumFaces object_node source_data
+            local cached_faces = #()
+            local face_normals = #()
+
+
+            for face_index = 1 to face_count do
+            (
+                local face_degree = getSourceFaceDegree object_node source_data face_index
+                local face_vertices = #()
+
+
+                for corner_index = 1 to face_degree do
+                (
+                    local vertex_index = getSourceFaceVertex object_node source_data face_index corner_index
+                    append face_vertices (getSourceVertexWorld object_node source_data vertex_index)
+                )
+
+
+                append cached_faces face_vertices
+                append face_normals (calculatePolygonNormal face_vertices epsilon:0.0000001)
+            )
+
+
+            append object_data_array #(object_node, source_data, cached_faces, #(), face_normals)
+        )
+    )
+
+
+    object_data_array -- return
+)
+
+
+/* Finds the nearest parallel wall hit on another object only.
+   Ignoring the whole source object prevents a normal solid wall from blocking itself because of its own opposite side.
+*/
+function getNearestOtherObjectWallHit ray_origin ray_direction source_normal object_data_array ignore_node max_distance parallel_threshold:0.90 epsilon:0.0000001 =
+(
+    local nearest_data = undefined
+
+
+    for object_data in object_data_array do
+    (
+        local object_node = object_data[1]
+
+
+        if object_node != ignore_node then
+        (
+            local cached_faces = object_data[3]
+            local face_normals = object_data[5]
+
+
+            for face_index = 1 to cached_faces.count do
+            (
+                local candidate_normal = face_normals[face_index]
+
+
+                if (length candidate_normal) > epsilon then
+                (
+                    local parallel_value = abs (dot source_normal candidate_normal)
+
+
+                    if parallel_value >= parallel_threshold then
+                    (
+                        local face_vertices = cached_faces[face_index]
+
+
+                        if face_vertices.count >= 3 then
+                        (
+                            for triangle_index = 2 to (face_vertices.count - 1) do
+                            (
+                                local hit_distance = getRayTriangleDistance ray_origin ray_direction face_vertices[1] face_vertices[triangle_index] face_vertices[triangle_index + 1] epsilon:epsilon
+
+
+                                if hit_distance != undefined and hit_distance <= max_distance then
+                                (
+                                    if nearest_data == undefined or hit_distance < nearest_data[1] then
+                                    (
+                                        nearest_data = #(hit_distance, object_node, face_index, parallel_value)
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+
+    nearest_data -- return
+)
+
+
+/* Returns true when a candidate AUTO GROW island has another wall object across either face-normal direction within Wall Thickness.
+   The candidate is tested after seam connectivity is established; the opposite wall itself does not need to share the seam.
+*/
+function wallFaceGrowthElementHasOppositeWall candidate_element object_data_array wall_thickness connection_threshold parallel_threshold:0.90 epsilon:0.0000001 =
+(
+    local barrier_result = false
+
+
+    if wall_thickness > epsilon then
+    (
+        local object_node = candidate_element[1]
+        local source_data = candidate_element[2]
+        local face_bits = candidate_element[3]
+        local ray_offset = connection_threshold * 0.01
+
+
+        if ray_offset < (epsilon * 10.0) then
+        (
+            ray_offset = epsilon * 10.0
+        )
+
+
+        if ray_offset > (wall_thickness * 0.01) then
+        (
+            ray_offset = wall_thickness * 0.01
+        )
+
+
+        for face_index in face_bits while not barrier_result do
+        (
+            local face_data = getWallFaceGrowthFaceCenterNormal object_node source_data face_index epsilon:epsilon
+
+
+            if face_data != undefined and (length face_data[2]) > epsilon then
+            (
+                local face_center = face_data[1]
+                local face_normal = normalize face_data[2]
+                local forward_origin = face_center + (face_normal * ray_offset)
+                local backward_origin = face_center - (face_normal * ray_offset)
+                local forward_hit = getNearestOtherObjectWallHit forward_origin face_normal face_normal object_data_array object_node wall_thickness parallel_threshold:parallel_threshold epsilon:epsilon
+                local backward_hit = getNearestOtherObjectWallHit backward_origin (-face_normal) face_normal object_data_array object_node wall_thickness parallel_threshold:parallel_threshold epsilon:epsilon
+
+
+                if forward_hit != undefined or backward_hit != undefined then
+                (
+                    barrier_result = true
+                )
+            )
+        )
+    )
+
+
+    barrier_result -- return
+)
+
+
 /* Captures CTRL+RMB growth seeds before any manual class overwrite occurs.
    Face mode uses selected non-cap faces; object mode uses every existing wall-side face so the forced object can grow from any side.
 */
@@ -19907,14 +20599,15 @@ function getWallFaceGrowthSeedData material_id =
 )
 
 
-/* Recursively propagates one forced wall class through cached processed neighbor walls.
-   Candidate wall-side islands may currently be OUTER or INNER; a connected island is overwritten to the forced ID.
-   Objects that already carry manual FORCED OUTER/INNER data are hard blockers and are never entered or traversed.
+/* Recursively propagates one forced wall class through live classified neighbor walls.
+   Forced faces are local barriers: they are removed from candidate islands instead of blocking the whole object.
+   A connected candidate is also rejected when another wall object exists across it within Wall Thickness.
    Auto-grown neighbors only change Material ID and do not become persistent FORCED hints. TOP/DOWN faces remain barriers.
 */
 function growCachedWallFaceClass seed_data_array material_id connection_threshold wall_thickness =
 (
-    local processed_nodes = getWallFaceProcessedCacheNodes()
+    local scene_nodes = getWallFaceGrowthSceneNodes()
+    local ray_object_data = buildWallFaceGrowthRayData scene_nodes
     local seed_nodes = #()
     local candidate_set_array = #()
     local frontier_elements = #()
@@ -19945,7 +20638,7 @@ function growCachedWallFaceClass seed_data_array material_id connection_threshol
     )
 
 
-    for candidate_node in processed_nodes do
+    for candidate_node in scene_nodes do
     (
         if (findItem seed_nodes candidate_node) == 0 then
         (
@@ -19954,32 +20647,34 @@ function growCachedWallFaceClass seed_data_array material_id connection_threshol
 
             if source_data != undefined then
             (
-                if not hasForcedWallFaceType candidate_node source_data then
+                local cache_entry = cacheWallFaceClassesFromMaterialIds candidate_node source_data
+                local wall_side_bits = copy cache_entry[3]
+                local inner_bits = copy cache_entry[4]
+                local forced_outer_bits = getForcedWallFaceBits candidate_node source_data 1
+                local forced_inner_bits = getForcedWallFaceBits candidate_node source_data 2
+
+
+                wall_side_bits = wall_side_bits + inner_bits
+
+
+                for face_index in forced_outer_bits do
                 (
-                    local cache_entry = cacheWallFaceClassesFromMaterialIds candidate_node source_data
-                    local outer_bits = copy cache_entry[3]
-                    local inner_bits = copy cache_entry[4]
-                    local element_array = #()
-                    local outer_elements = buildWallFaceElementsFromBits candidate_node source_data outer_bits
-                    local inner_elements = buildWallFaceElementsFromBits candidate_node source_data inner_bits
+                    wall_side_bits[face_index] = false
+                )
 
 
-                    for candidate_element in outer_elements do
-                    (
-                        append element_array candidate_element
-                    )
+                for face_index in forced_inner_bits do
+                (
+                    wall_side_bits[face_index] = false
+                )
 
 
-                    for candidate_element in inner_elements do
-                    (
-                        append element_array candidate_element
-                    )
+                local element_array = buildWallFaceElementsFromBits candidate_node source_data wall_side_bits
 
 
-                    if element_array.count > 0 then
-                    (
-                        append candidate_set_array #(candidate_node, source_data, element_array, #{})
-                    )
+                if element_array.count > 0 then
+                (
+                    append candidate_set_array #(candidate_node, source_data, element_array, #{})
                 )
             )
         )
@@ -20011,13 +20706,11 @@ function growCachedWallFaceClass seed_data_array material_id connection_threshol
 
                     if wallFaceGrowthElementsConnect frontier_element candidate_element connection_threshold then
                     (
-                        if wallFaceGrowthElementsBlockedByThickness frontier_element candidate_element wall_thickness connection_threshold then
+                        visited_elements[element_index] = true
+
+
+                        if not wallFaceGrowthElementHasOppositeWall candidate_element ray_object_data wall_thickness connection_threshold then
                         (
-                            visited_elements[element_index] = true
-                        )
-                        else
-                        (
-                            visited_elements[element_index] = true
                             append frontier_elements candidate_element
 
 
@@ -20071,7 +20764,7 @@ function growCachedWallFaceClass seed_data_array material_id connection_threshol
     )
 
 
-    #(growth_data_array.count, grown_face_count, processed_nodes.count) -- return
+    #(growth_data_array.count, grown_face_count, scene_nodes.count) -- return
 )
 
 
@@ -20127,8 +20820,8 @@ function testWallFaceGrowthThicknessBarrier wall_thickness:100.0 connection_thre
 
 
 
-/* Reports whether selected processed objects are manual FORCE blockers for CTRL+RMB auto-grow.
-   Use after forcing OUTER/INNER to verify that the object will stop neighbor propagation.
+/* Reports manual FORCED face counts on selected objects for CTRL+RMB auto-grow.
+   Forced faces are local barriers; unforced wall-side faces on the same object remain eligible.
 */
 function testWallFaceGrowthForcedBlockers =
 (
@@ -20154,7 +20847,7 @@ function testWallFaceGrowthForcedBlockers =
     )
 
 
-    format "RMB forced blockers | tested: % | blockers: %\n" tested_count blocker_count
+    format "RMB forced barriers | tested objects: % | objects containing forced faces: %\n" tested_count blocker_count
 
 
     #(tested_count, blocker_count) -- return
@@ -20261,8 +20954,8 @@ function selectWallFacesByMaterialId material_id =
 )
 
 
-/* FORCES selected faces or selected-object wall-side faces as OUTER or INNER.
-   Object mode excludes UP/DOWN caps so horizontal barriers remain intact for later CTRL+RMB growth.
+/* Manually assigns selected faces, or the matching class family on selected objects, to one classifier Material ID.
+   OUTER/INNER object mode targets wall-side faces only; TOP/BOTTOM object mode targets cap faces only.
 */
 function markSelectedWallFaces material_id =
 (
@@ -20308,9 +21001,19 @@ function markSelectedWallFaces material_id =
                     local current_material_id = getSourceFaceMaterialId object_node source_data face_index
 
 
-                    if current_material_id == 1 or current_material_id == 2 then
+                    if material_id == 1 or material_id == 2 then
                     (
-                        mark_bits[face_index] = true
+                        if current_material_id == 1 or current_material_id == 2 then
+                        (
+                            mark_bits[face_index] = true
+                        )
+                    )
+                    else if material_id == 3 or material_id == 4 then
+                    (
+                        if current_material_id == 3 or current_material_id == 4 then
+                        (
+                            mark_bits[face_index] = true
+                        )
                     )
                 )
             )
@@ -20686,6 +21389,14 @@ function resolveWallHierarchyByElements object_data_array connection_threshold c
                 if face_classes[face_index] != seed_class then
                 (
                     face_classes[face_index] = seed_class
+
+
+                    if object_data_array[element_data[1]].count >= 10 then
+                    (
+                        object_data_array[element_data[1]][10][face_index] = if prefer_outer_seed then #FORCED_HIERARCHY else #HIERARCHY
+                    )
+
+
                     resolved_count += 1
                 )
             )
@@ -20809,6 +21520,14 @@ function resolveWallHierarchyByElements object_data_array connection_threshold c
                                 if face_classes[face_index] != network_class then
                                 (
                                     face_classes[face_index] = network_class
+
+
+                                    if object_data_array[element_data[1]].count >= 10 then
+                                    (
+                                        object_data_array[element_data[1]][10][face_index] = if prefer_outer_seed then #FORCED_HIERARCHY else #HIERARCHY
+                                    )
+
+
                                     resolved_count += 1
                                 )
                             )
@@ -20850,6 +21569,9 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
     local forced_face_count = 0
     local neighbor_resolved = 0
     local fallback_resolved = 0
+    local debug_selection_center = undefined
+    local debug_pivot_state = #()
+    local debug_run_data = undefined
 
 
     if selected_nodes.count == 0 then
@@ -20925,6 +21647,14 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
             analysis_origin = getWallFaceAnalysisOrigin valid_nodes
 
 
+            if wall_face_debug_enabled then
+            (
+                wall_face_debug_run_id += 1
+                debug_selection_center = getWallFaceSelectionCenter valid_nodes
+                debug_pivot_state = getWallFaceDebugWorkingPivotState()
+            )
+
+
             local bbox_diagonal = length (bbox_max - bbox_min)
             local geometry_epsilon = bbox_diagonal * 0.00000001
             local ray_offset = bbox_diagonal * 0.00001
@@ -20954,6 +21684,8 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
                 local face_classes = #()
                 local face_scores = #()
                 local face_vertex_indices = #()
+                local face_debug_reasons = #()
+                local original_selection_bits = getSourceFaceSelection object_node source_data
                 local forced_outer_bits = getForcedWallFaceBits object_node source_data 1
                 local forced_inner_bits = getForcedWallFaceBits object_node source_data 2
 
@@ -20986,17 +21718,20 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
 
                     local initial_class = 0
                     local initial_score = 0.0
+                    local initial_reason = #RADIAL_UNRESOLVED
 
 
                     if forced_outer_bits[face_index] then
                     (
                         initial_class = 1
                         initial_score = 1.0
+                        initial_reason = #FORCED_OUTER
                     )
                     else if forced_inner_bits[face_index] then
                     (
                         initial_class = 2
                         initial_score = -1.0
+                        initial_reason = #FORCED_INNER
                     )
 
 
@@ -21006,10 +21741,11 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
                     append face_classes initial_class
                     append face_scores initial_score
                     append face_vertex_indices face_indices
+                    append face_debug_reasons initial_reason
                 )
 
 
-                append object_data_array #(object_node, source_data, cached_faces, face_centers, face_normals, face_classes, face_scores, vertex_world_cache, face_vertex_indices)
+                append object_data_array #(object_node, source_data, cached_faces, face_centers, face_normals, face_classes, face_scores, vertex_world_cache, face_vertex_indices, face_debug_reasons, original_selection_bits)
             )
 
 
@@ -21027,6 +21763,7 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
                 local face_normals = object_data[5]
                 local face_classes = object_data[6]
                 local face_scores = object_data[7]
+                local face_debug_reasons = object_data[10]
 
 
                 for face_index = 1 to face_classes.count do
@@ -21037,19 +21774,22 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
 
                     if face_classes[face_index] == 1 or face_classes[face_index] == 2 then
                     (
-                        /* FORCED or force-propagated wall class: preserve it. */
+                        /* FORCED or force-propagated wall class: preserve its existing debug source. */
                     )
                     else if (length face_normal) <= geometry_epsilon then
                     (
                         face_classes[face_index] = 0
+                        face_debug_reasons[face_index] = #DEGENERATE
                     )
                     else if face_normal.z >= horizontal_normal_threshold then
                     (
                         face_classes[face_index] = 3
+                        face_debug_reasons[face_index] = #TOP_NORMAL
                     )
                     else if face_normal.z <= -horizontal_normal_threshold then
                     (
                         face_classes[face_index] = 4
+                        face_debug_reasons[face_index] = #BOTTOM_NORMAL
                     )
                     else
                     (
@@ -21067,14 +21807,17 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
                         if spatial_score >= confidence_threshold then
                         (
                             face_classes[face_index] = 1
+                            face_debug_reasons[face_index] = #RADIAL_OUTER
                         )
                         else if spatial_score <= -confidence_threshold then
                         (
                             face_classes[face_index] = 2
+                            face_debug_reasons[face_index] = #RADIAL_INNER
                         )
                         else
                         (
                             face_classes[face_index] = 0
+                            face_debug_reasons[face_index] = #RADIAL_UNRESOLVED
                         )
                     )
                 )
@@ -21093,6 +21836,12 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
 
 
             assignWallClassifierMaterial valid_nodes
+
+
+            if wall_face_debug_enabled then
+            (
+                debug_run_data = #(wall_face_debug_run_id, debug_selection_center, analysis_origin, debug_pivot_state[3], debug_pivot_state[1], debug_pivot_state[2], wall_thickness, connection_threshold, confidence_threshold, horizontal_normal_threshold, thickness_resolved, forced_hierarchy_resolved, hierarchy_resolved, neighbor_resolved, fallback_resolved)
+            )
 
 
             for object_data in object_data_array do
@@ -21117,6 +21866,12 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
                 setSourceFaceMaterialId object_node source_data up_bits 3
                 setSourceFaceMaterialId object_node source_data down_bits 4
                 cacheWallFaceClasses object_node face_classes.count outer_bits inner_bits up_bits down_bits
+
+
+                if wall_face_debug_enabled then
+                (
+                    writeWallFaceDebugTrace object_data debug_run_data
+                )
             )
 
 
@@ -21174,7 +21929,13 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
             redrawViews()
 
 
-            format "Inner-Outer Wall Finder 0.30: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
+            if wall_face_debug_enabled then
+            (
+                debugWallFaceClassifierSelection verbose_vertices:true verbose_faces:true use_last_if_empty:true
+            )
+
+
+            format "Inner-Outer Wall Finder 0.31: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
 
 
             #(valid_nodes.count, total_faces, outer_count, inner_count, up_count, down_count, selection_type, thickness_resolved, hierarchy_resolved, neighbor_resolved, fallback_resolved) -- return
@@ -22012,14 +22773,29 @@ function testWallFaceForceModifier =
 
 /*
 Verifies compact/expanded Get Outer Walls OPTIONS sizing without changing the final layout.
-The test checks parent-width-minus-8 slot sizing plus collapsed and expanded heights.
+The test checks full parent-width slot sizing plus collapsed and expanded heights.
 */
 function testWallFaceOptionsLayout =
 (
     local slot_control = wallFaceClassifierRollout.wall_face_options_subrollout
     local original_rollout_height = wallFaceClassifierRollout.height
     local original_slot_height = slot_control.height
-    local width_ok = slot_control.width == (wallFaceClassifierRollout.width - 8)
+    local width_ok = (
+        (wallFaceClassifierRollout.width == 310) and
+        (slot_control.pos.x == 0) and
+        (slot_control.width == wallFaceClassifierRollout.width) and
+        (wallFaceClassifierOptionsRollout.width == 286)
+    )
+    local controls_ok = (
+        (wallFaceClassifierRollout.btn_classify.pos == [4,8]) and
+        (wallFaceClassifierRollout.btn_classify.width == 149) and
+        (wallFaceClassifierRollout.btn_explode.pos == [157,8]) and
+        (wallFaceClassifierRollout.btn_explode.width == 149) and
+        (wallFaceClassifierRollout.btn_select_outer.pos == [4,46]) and
+        (wallFaceClassifierRollout.btn_select_inner.pos == [80,46]) and
+        (wallFaceClassifierRollout.btn_select_up.pos == [156,46]) and
+        (wallFaceClassifierRollout.btn_select_down.pos == [232,46])
+    )
     local collapsed_ok = false
     local expanded_ok = false
 
@@ -22036,8 +22812,8 @@ function testWallFaceOptionsLayout =
     wallFaceClassifierRollout.height = original_rollout_height
 
 
-    local test_passed = width_ok and collapsed_ok and expanded_ok
-    format "Get Outer Walls OPTIONS layout test | width:% collapsed:% expanded:% | result:%\n" width_ok collapsed_ok expanded_ok test_passed
+    local test_passed = width_ok and controls_ok and collapsed_ok and expanded_ok
+    format "Get Outer Walls OPTIONS layout test | width:% controls:% collapsed:% expanded:% | result:%\n" width_ok controls_ok collapsed_ok expanded_ok test_passed
 
 
     test_passed -- return
@@ -22045,31 +22821,31 @@ function testWallFaceOptionsLayout =
 
 
 /*
-Verifies compact/expanded EDGE FIXER OPTIONS sizing without changing the final layout.
-The test checks parent-width-minus-8 slot sizing, control shifting and parent rollout height.
+Verifies bottom-mounted EDGE FIXER OPTIONS sizing without changing the final layout.
+The test checks full parent-width slot sizing, fixed action positions and parent rollout height.
 */
 function testEdgeFixerOptionsLayout =
 (
     local slot_control = WallFixerEdgeFixerRollout.edge_fixer_options_subrollout
     local original_rollout_height = WallFixerEdgeFixerRollout.height
-    local width_ok = slot_control.width == (WallFixerEdgeFixerRollout.width - 8)
+    local width_ok = ((slot_control.pos == [0,208]) and (slot_control.width == WallFixerEdgeFixerRollout.width))
     local collapsed_ok = false
     local expanded_ok = false
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout false
-    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 350) and (slot_control.height == 24) and (WallFixerEdgeFixerRollout.edge_z_group.pos.y == 78))
+    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 236) and (slot_control.height == 24) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout true
-    expanded_ok = ((WallFixerEdgeFixerRollout.height == 444) and (slot_control.height == 118) and (WallFixerEdgeFixerRollout.edge_z_group.pos.y == 172))
+    expanded_ok = ((WallFixerEdgeFixerRollout.height == 330) and (slot_control.height == 118) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
 
 
-    WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 350)
+    WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 236)
 
 
     local test_passed = width_ok and collapsed_ok and expanded_ok
-    format "EDGE FIXER OPTIONS layout test | width:% collapsed:% expanded:% | result:%\n" width_ok collapsed_ok expanded_ok test_passed
+    format "EDGE FIXER OPTIONS bottom layout test | width:% collapsed:% expanded:% | result:%\n" width_ok collapsed_ok expanded_ok test_passed
 
 
     test_passed -- return
@@ -22085,14 +22861,14 @@ function testParentControlWidths =
     local width_ok = true
 
 
+    width_ok = width_ok and (WallFixerRollout.workflow_subrollout.pos.x == 0) and (WallFixerRollout.workflow_subrollout.width == WallFixerRollout.width)
     width_ok = width_ok and (WallFixerPreProcessRollout.planar_button.pos.x == 4) and (WallFixerPreProcessRollout.planar_button.width == (WallFixerPreProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPreProcessRollout.explode_walls_button.pos.x == 4) and (WallFixerPreProcessRollout.explode_walls_button.width == (WallFixerPreProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerEdgeFixerRollout.edge_z_group.pos.x == 4) and (WallFixerEdgeFixerRollout.edge_z_group.width == (WallFixerEdgeFixerRollout.width - 8))
-    width_ok = width_ok and (WallFixerEdgeFixerRollout.two_edge_verts_button.pos.x == 4) and (WallFixerEdgeFixerRollout.two_edge_verts_button.width == (WallFixerEdgeFixerRollout.width - 8))
-    width_ok = width_ok and (WallFixerEdgeFixerRollout.fix_ngons_button.pos.x == 4) and (WallFixerEdgeFixerRollout.fix_ngons_button.width == (WallFixerEdgeFixerRollout.width - 8))
     width_ok = width_ok and (WallFixerEdgeFixerRollout.check_result_group.pos.x == 4) and (WallFixerEdgeFixerRollout.check_result_group.width == (WallFixerEdgeFixerRollout.width - 8))
     width_ok = width_ok and (WallFixerSliceWallsRollout.slice_selected_walls_button.pos.x == 4) and (WallFixerSliceWallsRollout.slice_selected_walls_button.width == (WallFixerSliceWallsRollout.width - 8))
     width_ok = width_ok and (WallFixerSliceWallsRollout.slice_check_result_group.pos.x == 4) and (WallFixerSliceWallsRollout.slice_check_result_group.width == (WallFixerSliceWallsRollout.width - 8))
+    width_ok = width_ok and (WallFixerPostProcessRollout.two_edge_verts_button.pos.x == 4) and (WallFixerPostProcessRollout.two_edge_verts_button.width == (WallFixerPostProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.duplicated_vertices_button.pos.x == 4) and (WallFixerPostProcessRollout.duplicated_vertices_button.width == (WallFixerPostProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.redundant_loops_button.pos.x == 4) and (WallFixerPostProcessRollout.redundant_loops_button.width == (WallFixerPostProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.repair_missing_loops_button.pos.x == 4) and (WallFixerPostProcessRollout.repair_missing_loops_button.width == (WallFixerPostProcessRollout.width - 8))
@@ -22107,31 +22883,58 @@ function testParentControlWidths =
 )
 
 
-rollout wallFaceClassifierOptionsRollout "OPTIONS" width:252 height:138
+/* Verifies class-row RMB modifier routing without changing scene geometry.
+   AUTO GROW must be available only for OUTER/INNER when CTRL is held.
+*/
+function testWallFaceClassRmbRouting =
+(
+    local outer_ctrl = (1 == 1 or 1 == 2)
+    local inner_ctrl = (2 == 1 or 2 == 2)
+    local top_ctrl = (3 == 1 or 3 == 2)
+    local bottom_ctrl = (4 == 1 or 4 == 2)
+    local passed = outer_ctrl and inner_ctrl and not top_ctrl and not bottom_ctrl
+
+
+    format "Class RMB routing | OUTER:% | INNER:% | TOP:% | BOTTOM:% | passed:%\n" outer_ctrl inner_ctrl top_ctrl bottom_ctrl passed
+
+
+    passed -- return
+)
+
+
+rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
 (
     local working_pivot_syncing = false
 
 
-    checkbutton use_working_pivot_checkbutton "Use Edit Pivot" pos:[8,8] width:114 height:30 \
+    checkbutton use_working_pivot_checkbutton "Use Edit Pivot" pos:[8,8] width:131 height:30 \
         tooltip:"LMB: Use the manually positioned Working Pivot as the INNER \\ OUTTER classification origin.\n\nRMB: Center the Working Pivot to the current geometry selection."
 
 
-    checkbutton edit_working_pivot_checkbutton "Edit Edit Pivot" pos:[130,8] width:114 height:30 \
+    checkbutton edit_working_pivot_checkbutton "Edit Edit Pivot" pos:[147,8] width:131 height:30 \
         tooltip:"LMB: Enable or disable Working Pivot editing in 3ds Max."
 
 
-    spinner spn_wall_thickness "Wall thickness:" pos:[8,46] width:180 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:62 \
+    spinner spn_wall_thickness "Wall thickness:" pos:[8,46] width:214 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:76 \
         tooltip:"Maximum distance to search for the opposite wall. Default: 1 m."
-    label lbl_wall_units "units" pos:[194,50] width:48 height:18 align:#left tooltip:"Current display unit."
+    label lbl_wall_units "units" pos:[228,50] width:50 height:18 align:#left tooltip:"Current display unit."
 
 
-    spinner spn_connection_threshold "Connect threshold:" pos:[8,72] width:180 height:20 range:[0.001,1000000.0,((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:62 \
+    spinner spn_connection_threshold "Connect threshold:" pos:[8,72] width:214 height:20 range:[0.001,1000000.0,((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:76 \
         tooltip:"Matches neighbor vertices; at least 2 must match. Default is 10% of Wall thickness, and changing Wall thickness resets this value."
-    label lbl_connect_units "units" pos:[194,76] width:48 height:18 align:#left tooltip:"Current display unit."
+    label lbl_connect_units "units" pos:[228,76] width:50 height:18 align:#left tooltip:"Current display unit."
 
 
-    button btn_reset "RESET" pos:[8,100] width:236 height:30 \
-        tooltip:"LMB: Reset face classification, remove the classifier material, clear FORCED OUTER/INNER hints, and clear cached class data."
+    button btn_reset "RESET" pos:[8,100] width:270 height:30 \
+        tooltip:"LMB: Reset face classification, remove the classifier material, clear FORCED OUTER/INNER hints, cached class data, and debug trace."
+
+
+    checkbutton debug_trace_checkbutton "DEBUG TRACE" pos:[8,138] width:131 height:30 \
+        tooltip:"Record classifier inputs, per-face scores, resolution reasons, and class snapshots in object user properties."
+
+
+    button btn_print_debug "PRINT DEBUG" pos:[147,138] width:131 height:30 \
+        tooltip:"Print selected or last analyzed wall geometry, trace properties, vertices, faces, normals, Material IDs, scores, and resolution reasons to the MAXScript Listener."
 
 
     /*
@@ -22165,17 +22968,18 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:252 height:138
         local unit_label = getWallFaceDisplayUnitLabel()
         lbl_wall_units.text = unit_label
         lbl_connect_units.text = unit_label
+        debug_trace_checkbutton.checked = wall_face_debug_enabled
         syncWorkingPivotControls()
     )
 
 
-    on wallFaceClassifierOptionsRollout rolledUp options_open do
+    on wallFaceClassifierOptionsRollout rolledUp options_rolled_up do
     (
         try
         (
             if wallFaceClassifierRollout != undefined then
             (
-                wallFaceClassifierRollout.setOptionsLayout options_open
+                wallFaceClassifierRollout.setOptionsLayout options_rolled_up
             )
         )
         catch
@@ -22244,6 +23048,18 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:252 height:138
     )
 
 
+    on debug_trace_checkbutton changed control_state do
+    (
+        wall_face_debug_enabled = control_state
+    )
+
+
+    on btn_print_debug pressed do
+    (
+        debugWallFaceClassifierSelection verbose_vertices:true verbose_faces:true use_last_if_empty:true
+    )
+
+
     on btn_reset pressed do
     (
         local result_data = #()
@@ -22263,23 +23079,23 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:252 height:138
 )
 
 
-rollout wallFaceClassifierRollout "GET OUTER WALLS" width:276 height:110
+rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
 (
-    button btn_classify "INNER \\ OUTTER" pos:[8,8] width:128 height:32 \
+    button btn_classify "INNER \\ OUTTER" pos:[4,8] width:149 height:32 \
         tooltip:"LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
 
 
-    button btn_explode "EXPLODE" pos:[140,8] width:128 height:32 \
+    button btn_explode "EXPLODE" pos:[157,8] width:149 height:32 \
         tooltip:"LMB: Split each selected classified object into separate OUTER, INNER, TOP, and BOTTOM objects."
 
 
-    button btn_select_outer "OUTER" pos:[8,46] width:61 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing OUTER faces or face mode selects OUTER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces OUTER without AUTO GROW.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. A parallel opposite wall within Wall thickness also stops growth. Auto-grown walls are not marked FORCED. TOP/BOTTOM seams stop growth."
-    button btn_select_inner "INNER" pos:[73,46] width:61 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing INNER faces or face mode selects INNER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces INNER without AUTO GROW.\n\nCTRL+RMB: FORCE INNER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. A parallel opposite wall within Wall thickness also stops growth. Auto-grown walls are not marked FORCED. TOP/BOTTOM seams stop growth."
-    button btn_select_up "TOP" pos:[138,46] width:61 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing TOP faces or face mode selects TOP faces."
-    button btn_select_down "BOTTOM" pos:[203,46] width:65 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing BOTTOM faces or face mode selects BOTTOM faces."
+    button btn_select_outer "OUTER" pos:[4,46] width:72 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing OUTER faces or face mode selects OUTER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces OUTER without AUTO GROW.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. A parallel opposite wall within Wall thickness also stops growth. Auto-grown walls are not marked FORCED. TOP/BOTTOM seams stop growth."
+    button btn_select_inner "INNER" pos:[80,46] width:72 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing INNER faces or face mode selects INNER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces INNER without AUTO GROW.\n\nCTRL+RMB: FORCE INNER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. A parallel opposite wall within Wall thickness also stops growth. Auto-grown walls are not marked FORCED. TOP/BOTTOM seams stop growth."
+    button btn_select_up "TOP" pos:[156,46] width:72 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing TOP faces or face mode selects TOP faces.\n\nRMB: Assign selected faces, or selected-object cap faces, to TOP.\n\nCTRL+RMB: Same TOP assignment; AUTO GROW is intentionally limited to OUTER/INNER wall sides."
+    button btn_select_down "BOTTOM" pos:[232,46] width:74 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing BOTTOM faces or face mode selects BOTTOM faces.\n\nRMB: Assign selected faces, or selected-object cap faces, to BOTTOM.\n\nCTRL+RMB: Same BOTTOM assignment; AUTO GROW is intentionally limited to OUTER/INNER wall sides."
 
 
-    subRollout wall_face_options_subrollout "" pos:[0,78] width:268 height:24
+    subRollout wall_face_options_subrollout "" pos:[0,78] width:310 height:24
 
 
     /*
@@ -22290,8 +23106,8 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:276 height:110
     (
         if options_open then
         (
-            wallFaceClassifierRollout.height = 230
-            wall_face_options_subrollout.height = 144
+            wallFaceClassifierRollout.height = 268
+            wall_face_options_subrollout.height = 182
         )
         else
         (
@@ -22299,6 +23115,47 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:276 height:110
             wallFaceClassifierRollout.height = 110
         )
         -- return
+    )
+
+
+    /* Handles RMB for all four class buttons.
+       CTRL+RMB AUTO GROW is valid only for OUTER/INNER; TOP/BOTTOM remain cap barriers.
+    */
+    function handleClassRightClick material_id =
+    (
+        local wall_thickness_value = wallFaceClassifierOptionsRollout.spn_wall_thickness.value
+        local connection_threshold_value = wallFaceClassifierOptionsRollout.spn_connection_threshold.value
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:wall_thickness_value connection_threshold:connection_threshold_value
+        local auto_grow = keyboard.controlPressed and (material_id == 1 or material_id == 2)
+        local seed_data_array = #()
+        local result_data = #()
+        local growth_result = #()
+
+
+        if auto_grow then
+        (
+            seed_data_array = getWallFaceGrowthSeedData material_id
+        )
+
+
+        if auto_grow then
+        (
+            undo "Force And Grow Wall Faces" on
+            (
+                result_data = markSelectedWallFaces material_id
+                growth_result = growCachedWallFaceClass seed_data_array material_id connection_threshold_value wall_thickness_value
+            )
+        )
+        else
+        (
+            undo "Assign Wall Face Class" on
+            (
+                result_data = markSelectedWallFaces material_id
+            )
+        )
+
+
+        #(result_data, growth_result, auto_grow, analyze_result) -- return
     )
 
 
@@ -22375,42 +23232,7 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:276 height:110
 
     on btn_select_outer rightclick do
     (
-        local result_data = #()
-        local growth_result = #()
-        local auto_grow = keyboard.controlPressed
-
-
-        if auto_grow then
-        (
-            local seed_data_array = getWallFaceGrowthSeedData 1
-
-
-            undo "Force And Grow Wall Faces OUTER" on
-            (
-                result_data = markSelectedWallFaces 1
-                growth_result = growCachedWallFaceClass seed_data_array 1 wallFaceClassifierOptionsRollout.spn_connection_threshold.value wallFaceClassifierOptionsRollout.spn_wall_thickness.value
-            )
-        )
-        else
-        (
-            undo "Force Wall Faces OUTER" on
-            (
-                result_data = markSelectedWallFaces 1
-            )
-        )
-
-
-        if result_data.count == 3 then
-        (
-            if auto_grow and growth_result.count == 3 then
-            (
-                undefined
-            )
-            else
-            (
-                undefined
-            )
-        )
+        handleClassRightClick 1
     )
 
 
@@ -22436,42 +23258,7 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:276 height:110
 
     on btn_select_inner rightclick do
     (
-        local result_data = #()
-        local growth_result = #()
-        local auto_grow = keyboard.controlPressed
-
-
-        if auto_grow then
-        (
-            local seed_data_array = getWallFaceGrowthSeedData 2
-
-
-            undo "Force And Grow Wall Faces INNER" on
-            (
-                result_data = markSelectedWallFaces 2
-                growth_result = growCachedWallFaceClass seed_data_array 2 wallFaceClassifierOptionsRollout.spn_connection_threshold.value wallFaceClassifierOptionsRollout.spn_wall_thickness.value
-            )
-        )
-        else
-        (
-            undo "Force Wall Faces INNER" on
-            (
-                result_data = markSelectedWallFaces 2
-            )
-        )
-
-
-        if result_data.count == 3 then
-        (
-            if auto_grow and growth_result.count == 3 then
-            (
-                undefined
-            )
-            else
-            (
-                undefined
-            )
-        )
+        handleClassRightClick 2
     )
 
 
@@ -22495,6 +23282,12 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:276 height:110
     )
 
 
+    on btn_select_up rightclick do
+    (
+        handleClassRightClick 3
+    )
+
+
     on btn_select_down pressed do
     (
         local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:wallFaceClassifierOptionsRollout.spn_wall_thickness.value connection_threshold:wallFaceClassifierOptionsRollout.spn_connection_threshold.value
@@ -22512,6 +23305,12 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:276 height:110
                 undefined
             )
         )
+    )
+
+
+    on btn_select_down rightclick do
+    (
+        handleClassRightClick 4
     )
 
 
@@ -22536,7 +23335,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
     dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,6] width:76 height:40
     dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:19
     dotNetControl status_line_bottom "System.Windows.Forms.RichTextBox" pos:[88,28] width:248 height:19
-    subRollout workflow_subrollout "" pos:[0,54] width:336 height:686
+    subRollout workflow_subrollout "" pos:[0,54] width:344 height:686
 
 
     local status_texts = #("Ready.", "")
@@ -22855,7 +23654,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Runs the Helpers Attach RMB workflow: attach, center pivot, weld at 0.0 and conditionally quadrify.
+    Runs the Helpers Attach RMB workflow: attach, center pivot, weld using Options > Weld Threshold and conditionally quadrify.
     Quadrify is attempted only when the merged target contains at most 12 triangular faces.
     */
     function runAttachSelectedObjectsRmb =
@@ -22863,11 +23662,12 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         setProgress 0
         setStatus #message "Attaching, centering, welding and checking quadrify..."
         operation_success = false
+        weld_threshold = WallFixerOptionsRollout.weld_threshold_spinner.value
 
 
         undo "Wall-Fixer - Attach RMB" on
         (
-            operation_success = WallFixer.attachCenterWeldQuadrifySelection triangle_limit:12
+            operation_success = WallFixer.attachCenterWeldQuadrifySelection weld_threshold triangle_limit:12
         )
 
 
