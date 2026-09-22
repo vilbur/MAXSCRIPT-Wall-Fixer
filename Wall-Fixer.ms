@@ -1,6 +1,6 @@
 ﻿/*
-Wall-Fixer Bundled Loader 0.82
-Project version 0.88.
+Wall-Fixer Bundled Loader 0.83
+Project version 0.89.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.82"
-global wall_fixer_loader_tool_version = 0.88
+global wall_fixer_loader_file_version = "0.83"
+global wall_fixer_loader_tool_version = 0.89
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -12762,7 +12762,7 @@ WallFixer = WallFixer_v()
 
 
 /*
-Straight Edge Fixer 0.23
+Straight Edge Fixer 0.24
 Detects repeated horizontal edge levels and aligns nearby horizontal edges to them.
 */
 
@@ -12770,8 +12770,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.23"
-global straight_edge_fixer_tool_version = 0.77
+global straight_edge_fixer_file_version = "0.24"
+global straight_edge_fixer_tool_version = 0.89
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -13910,16 +13910,16 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Returns true when an edge direction exceeds the maximum allowed angular deviation.
-    The threshold itself is allowed; only angles above it are violations.
+    Returns true when an edge direction is within the allowed angular deviation from the target direction.
+    Zero degrees and the threshold boundary are included.
     */
-    function isDirectionAngleViolation angle_from_target angle_threshold =
+    function isDirectionAngleMatch angle_from_target angle_threshold =
     (
         result_value = false
 
         if (angle_from_target != undefined) then
         (
-            result_value = (angle_from_target > angle_threshold)
+            result_value = ((angle_from_target >= 0.0) and (angle_from_target <= angle_threshold))
         )
 
         result_value
@@ -13927,8 +13927,8 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Returns true when an edge exceeds the maximum allowed deviation from horizontal.
-    At zero degrees every non-horizontal edge is a violation; at 45 degrees vertical-like edges are violations.
+    Returns true when an edge is within the configured angle from horizontal.
+    At 5 degrees only edges from 0 through 5 degrees from horizontal qualify.
     */
     function isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold =
     (
@@ -13937,7 +13937,7 @@ struct StraightEdgeFixer_v
 
         if (angle_from_horizontal != undefined) then
         (
-            result_value = isDirectionAngleViolation angle_from_horizontal angle_threshold
+            result_value = isDirectionAngleMatch angle_from_horizontal angle_threshold
         )
 
         result_value
@@ -13945,8 +13945,8 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Returns true when an edge exceeds the maximum allowed deviation from vertical.
-    At zero degrees every non-vertical edge is a violation; at 45 degrees horizontal-like edges are violations.
+    Returns true when an edge is within the configured angle from vertical.
+    At 5 degrees only edges from 0 through 5 degrees from vertical qualify.
     */
     function isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold =
     (
@@ -13956,7 +13956,7 @@ struct StraightEdgeFixer_v
         if (angle_from_horizontal != undefined) then
         (
             angle_from_vertical = 90.0 - angle_from_horizontal
-            result_value = isDirectionAngleViolation angle_from_vertical angle_threshold
+            result_value = isDirectionAngleMatch angle_from_vertical angle_threshold
         )
 
         result_value
@@ -13964,19 +13964,20 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Tests the maximum allowed direction-angle rule at key threshold boundaries.
-    Returns true when zero, one-degree and forty-five-degree behavior is correct.
+    Tests the inclusive target-direction angle rule at key threshold boundaries.
+    Returns true when 0..threshold matches and values above the threshold do not.
     */
     function testDirectionAngleThreshold =
     (
         test_passed = true
 
-        test_passed = test_passed and (not (isDirectionAngleViolation 0.0 0.0))
-        test_passed = test_passed and (isDirectionAngleViolation 0.001 0.0)
-        test_passed = test_passed and (not (isDirectionAngleViolation 1.0 1.0))
-        test_passed = test_passed and (isDirectionAngleViolation 1.001 1.0)
-        test_passed = test_passed and (not (isDirectionAngleViolation 45.0 45.0))
-        test_passed = test_passed and (isDirectionAngleViolation 90.0 45.0)
+        test_passed = test_passed and (isDirectionAngleMatch 0.0 0.0)
+        test_passed = test_passed and (not (isDirectionAngleMatch 0.001 0.0))
+        test_passed = test_passed and (isDirectionAngleMatch 1.0 1.0)
+        test_passed = test_passed and (not (isDirectionAngleMatch 1.001 1.0))
+        test_passed = test_passed and (isDirectionAngleMatch 5.0 5.0)
+        test_passed = test_passed and (not (isDirectionAngleMatch 5.001 5.0))
+        test_passed = test_passed and (not (isDirectionAngleMatch 90.0 5.0))
 
         test_passed
         -- return
