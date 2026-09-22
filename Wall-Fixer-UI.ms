@@ -1,5 +1,5 @@
 /*
-Wall-Fixer UI 0.77
+Wall-Fixer UI 0.83
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.77"
-global wall_fixer_ui_tool_version = 0.921
+global wall_fixer_ui_file_version = "0.83"
+global wall_fixer_ui_tool_version = 0.928
 
 
 /*
@@ -914,12 +914,29 @@ function testWallFixerRestartResolver =
 
 
 
+/*
+Tests that the direct Restart menu action has a valid launcher without reloading the tool.
+Returns true when Restart is ready to execute.
+*/
+function testWallFixerDirectRestartMenu =
+(
+    restart_script_path = wallFixerResolveRestartScriptPath source_script_path:wall_fixer_ui_source_path
+    restart_ready = restart_script_path != undefined
+
+
+    format "Wall-Fixer direct Restart menu ready: %\n" restart_ready
+
+
+    restart_ready
+    -- return
+)
+
+
+
+
 rcmenu wall_fixer_main_menu
 (
-    subMenu "Restart"
-    (
-        menuItem restart_tools_menu_item "Restart Tools"
-    )
+    menuItem restart_menu_item "Restart"
 
 
     subMenu "DOCK"
@@ -936,7 +953,7 @@ rcmenu wall_fixer_main_menu
     )
 
 
-    on restart_tools_menu_item picked do
+    on restart_menu_item picked do
     (
         restart_script_path = wallFixerResolveRestartScriptPath source_script_path:wall_fixer_ui_source_path
 
@@ -1180,7 +1197,14 @@ rollout WallFixerPreProcessRollout "1 PRE-PROCESS & FIX GEOMETRY" width:310 heig
 
     on duplicate_verts_button rightclick do
     (
-        ::WallFixerRollout.runDuplicateVerts fix_vertices:true
+        if subObjectLevel == 1 then
+        (
+            ::WallFixerRollout.runSelectedVertexWeld()
+        )
+        else
+        (
+            ::WallFixerRollout.runDuplicateVerts fix_vertices:true
+        )
     )
 
 
@@ -1306,9 +1330,9 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
 
 
     button check_horizontal_button "CHECK HORIZONTAL" pos:[18,30] width:127 height:34 \
-        tooltip:"LMB: select visible edges whose deviation from horizontal is greater than Angle.\n\nRMB: straighten the currently selected horizontal-direction error edges."
+        tooltip:"LMB: select exactly horizontal edges at zero tolerance.\n\nRMB: select skewed horizontal edges from above 0° through Angle.\n\nCTRL+RMB: fix selected edges horizontal while preserving the wall-face direction."
     button check_vertical_button "CHECK VERTICAL" pos:[155,30] width:127 height:34 \
-        tooltip:"LMB: select visible edges whose deviation from vertical is greater than Angle.\n\nRMB: straighten the currently selected vertical-direction error edges."
+        tooltip:"LMB: select exactly vertical edges at zero tolerance.\n\nRMB: select skewed vertical edges from above 0° through Angle.\n\nCTRL+RMB: fix selected edges to world vertical."
 
 
     button border_check_button "BORDER CHECK" pos:[18,70] width:264 height:30 \
@@ -1353,25 +1377,39 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
 
     on check_horizontal_button pressed do
     (
-        ::WallFixerRollout.runStraightEdgeDirection #horizontal fix_selected:false
+        ::WallFixerRollout.runStraightEdgeDirection #horizontal action:#exact
     )
 
 
     on check_horizontal_button rightclick do
     (
-        ::WallFixerRollout.runStraightEdgeDirection #horizontal fix_selected:true
+        if keyboard.controlPressed then
+        (
+            ::WallFixerRollout.runStraightEdgeDirection #horizontal action:#fix
+        )
+        else
+        (
+            ::WallFixerRollout.runStraightEdgeDirection #horizontal action:#skewed
+        )
     )
 
 
     on check_vertical_button pressed do
     (
-        ::WallFixerRollout.runStraightEdgeDirection #vertical fix_selected:false
+        ::WallFixerRollout.runStraightEdgeDirection #vertical action:#exact
     )
 
 
     on check_vertical_button rightclick do
     (
-        ::WallFixerRollout.runStraightEdgeDirection #vertical fix_selected:true
+        if keyboard.controlPressed then
+        (
+            ::WallFixerRollout.runStraightEdgeDirection #vertical action:#fix
+        )
+        else
+        (
+            ::WallFixerRollout.runStraightEdgeDirection #vertical action:#skewed
+        )
     )
 
 
@@ -1574,7 +1612,11 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
         tooltip:"Clear the Listener and print detailed diagnostics for the selected objects."
 
     button split_button "Split" pos:[8,80] width:143 height:30 \
-        tooltip:"LMB: Split the selected object by exactly one selected edge and explode the result into 2 objects."
+        tooltip:"LMB: Apply Editable Poly, split all selected edges, then explode the resulting elements into separate objects."
+
+
+    button material_button "Material" pos:[159,80] width:143 height:30 \
+        tooltip:"LMB: Assign one shared 10-ID Multi/Sub-Object material to selected geometry.\n\nRMB: Remove the material from selected geometry."
 
 
     on attach_button pressed do
@@ -1610,6 +1652,18 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
     on split_button pressed do
     (
         ::WallFixerRollout.runSplitSelectedEdge()
+    )
+
+
+    on material_button pressed do
+    (
+        ::WallFixerRollout.runAssignMultiMaterial()
+    )
+
+
+    on material_button rightclick do
+    (
+        ::WallFixerRollout.runRemoveMaterial()
     )
 )
 
@@ -2991,23 +3045,28 @@ function alignViewportToSelectedWallFaces =
         face_normal = alignment_data[2]
         face_count = alignment_data[3]
         reference_up = [0.0, 0.0, 1.0]
+        horizontal_normal = [face_normal.x, face_normal.y, 0.0]
 
 
-        if abs (dot face_normal reference_up) > 0.999 then
+        if (length horizontal_normal) > 0.0000001 then
         (
-            reference_up = [0.0, 1.0, 0.0]
+            view_normal = normalize horizontal_normal
+        )
+        else
+        (
+            view_normal = face_normal
         )
 
 
-        right_axis = cross reference_up face_normal
+        right_axis = cross reference_up view_normal
 
 
         if (length right_axis) > 0.0000001 then
         (
             right_axis = normalize right_axis
-            up_axis = normalize (cross face_normal right_axis)
-            camera_position = face_center + (face_normal * 1000.0)
-            camera_tm = matrix3 right_axis up_axis face_normal camera_position
+            up_axis = reference_up
+            camera_position = face_center + (view_normal * 1000.0)
+            camera_tm = matrix3 right_axis up_axis view_normal camera_position
 
 
             try
@@ -8249,8 +8308,71 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Splits the current object by its single selected edge and explodes the result into two objects.
-    Reports unsupported selections or splits that do not produce exactly two elements.
+    Assigns one shared 10-ID Multi/Sub-Object material to all selected geometry nodes.
+    The material is created once per button press and shared by the whole selection.
+    */
+    function runAssignMultiMaterial =
+    (
+        selected_nodes = for object_node in (selection as array) where object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #warning "Material: select one or more geometry objects."
+            false
+        )
+        else
+        (
+            multi_material = multimaterial numsubs:10 name:"WALL-FIXER MULTI"
+
+            for material_index = 1 to 10 do
+            (
+                multi_material.materialList[material_index] = standardMaterial name:("ID " + (material_index as string))
+            )
+            multi_material.materialIDList = #(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+            multi_material.names = #("ID 1", "ID 2", "ID 3", "ID 4", "ID 5", "ID 6", "ID 7", "ID 8", "ID 9", "ID 10")
+
+            undo "Wall-Fixer - Assign Multi Material" on
+            (
+                for object_node in selected_nodes do object_node.material = multi_material
+            )
+
+            setStatus #success ("Material: assigned 10-ID Multi/Sub-Object to " + (selected_nodes.count as string) + " object(s).")
+            true
+        )
+        -- return
+    )
+
+
+    /*
+    Removes material assignments from all selected geometry nodes.
+    Geometry and Material IDs remain unchanged.
+    */
+    function runRemoveMaterial =
+    (
+        selected_nodes = for object_node in (selection as array) where object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #warning "Material: select one or more geometry objects."
+            false
+        )
+        else
+        (
+            undo "Wall-Fixer - Remove Material" on
+            (
+                for object_node in selected_nodes do object_node.material = undefined
+            )
+
+            setStatus #success ("Material: removed from " + (selected_nodes.count as string) + " object(s).")
+            true
+        )
+        -- return
+    )
+
+
+    /*
+    Applies Editable Poly, splits all selected edges, and explodes the resulting elements into separate objects.
+    Reports unsupported selections or splits that do not produce separate elements.
     */
     function runSplitSelectedEdge =
     (
@@ -8494,6 +8616,91 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
         #(converted_count, failed_count)
+        -- return
+    )
+
+
+    /*
+    Welds only the currently selected vertices when Vertex sub-object mode is active.
+    Existing Edit Poly or Editable Poly vertex selections are preserved as the weld input.
+    */
+    function runSelectedVertexWeld =
+    (
+        weld_threshold = WallFixerPreProcessRollout.weld_threshold_spinner.value
+        selected_nodes = selection as array
+        welded_count = 0
+        failed_count = 0
+        processed_count = 0
+
+
+        if subObjectLevel != 1 then
+        (
+            setStatus #warning "Weld: Vertex sub-object mode is not active."
+            false
+        )
+        else if selected_nodes.count == 0 then
+        (
+            setStatus #warning "Weld: select one or more geometry objects with selected vertices."
+            false
+        )
+        else
+        (
+            setProgress 0
+            setStatus #message "Welding selected vertices..."
+
+
+            undo "Wall-Fixer - Weld Selected Vertices" on
+            (
+                for object_node in selected_nodes do
+                (
+                    if object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass then
+                    (
+                        top_edit_poly = undefined
+
+
+                        for modifier_index = object_node.modifiers.count to 1 by -1 while top_edit_poly == undefined do
+                        (
+                            if classOf object_node.modifiers[modifier_index] == Edit_Poly then top_edit_poly = object_node.modifiers[modifier_index]
+                        )
+
+
+                        weld_result = weldSelectedEPolyVerts object_node weld_threshold editPolyModifier:top_edit_poly
+
+
+                        if weld_result == false then
+                        (
+                            failed_count += 1
+                        )
+                        else
+                        (
+                            processed_count += 1
+                            welded_count += weld_result
+                        )
+                    )
+                )
+            )
+
+
+            cleanupRedundantVerticesAfterGeometryChange selected_nodes
+            setProgress 100
+
+
+            if failed_count > 0 then
+            (
+                setStatus #warning ((welded_count as string) + " vertices welded; " + (failed_count as string) + " object(s) could not be processed.")
+                false
+            )
+            else if processed_count == 0 then
+            (
+                setStatus #warning "Weld: no Editable Poly or Edit Poly objects with selected vertices were processed."
+                false
+            )
+            else
+            (
+                setStatus #success ((welded_count as string) + " selected vertices welded.")
+                true
+            )
+        )
         -- return
     )
 
@@ -11415,38 +11622,41 @@ result_groups
 
 
     /*
-    Runs the imported Straight Edge Fixer horizontal/vertical check or straighten action.
-    LMB checks and RMB straightens the currently selected candidate edges.
+    Runs exact selection, skewed selection or selected-edge fixing for one direction.
+    LMB is exact, RMB is skewed within Angle, and CTRL+RMB fixes the current edge selection.
     */
-    function runStraightEdgeDirection direction_type fix_selected:false =
+    function runStraightEdgeDirection direction_type action:#exact =
     (
         saveStraightEdgeSettings()
         setProgress 0
-        action_text = if fix_selected then "Straightening" else "Checking"
-        setStatus #message (action_text + " " + (direction_type as string) + " edges...")
 
-
-        if fix_selected then
+        if (action == #fix) then
         (
-            operation_result = StraightEdgeFixer.straightenSelectedEdges \
-                direction_type \
-                WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
-                WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value \
-                WallFixerEdgeFixerOptionsRollout.search_in_z_spinner.value
+            action_text = "Fixing"
+            setStatus #message ("Fixing selected " + (direction_type as string) + " edges...")
+            operation_result = StraightEdgeFixer.fixSelectedDirectionEdges direction_type
         )
         else
         (
+            selection_mode = if (action == #skewed) then #skewed else #exact
+            action_text = if (selection_mode == #exact) then "Selecting exact" else "Selecting skewed"
+            setStatus #message (action_text + " " + (direction_type as string) + " edges...")
+
             operation_result = StraightEdgeFixer.checkEdgeDirection \
                 direction_type \
                 WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
-                WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value
+                WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value \
+                selection_mode:selection_mode
         )
 
-
         completed = normalizeStraightEdgeResult operation_result
-        if completed and fix_selected then cleanupRedundantVerticesAfterGeometryChange (selection as array)
-        setProgress 100
 
+        if completed and (action == #fix) then
+        (
+            cleanupRedundantVerticesAfterGeometryChange (selection as array)
+        )
+
+        setProgress 100
 
         if completed then
         (
@@ -11456,7 +11666,6 @@ result_groups
         (
             setStatus #warning (action_text + " " + (direction_type as string) + " edges did not produce a completed result.")
         )
-
 
         completed
         -- return

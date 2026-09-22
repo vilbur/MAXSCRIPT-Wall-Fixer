@@ -1,6 +1,6 @@
 ﻿/*
-Wall-Fixer Bundled Loader 0.86
-Project version 0.922.
+Wall-Fixer Bundled Loader 0.904
+Project version 0.930.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.86"
-global wall_fixer_loader_tool_version = 0.922
+global wall_fixer_loader_file_version = "0.904"
+global wall_fixer_loader_tool_version = 0.930
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -1961,8 +1961,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.35"
-global wall_fixer_core_tool_version = 0.92
+global wall_fixer_core_file_version = "0.36"
+global wall_fixer_core_tool_version = 0.926
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -5512,8 +5512,8 @@ struct WallFixer_v
 
 
     /*
-    Splits one selected geometry object at exactly one selected edge and explodes the resulting elements.
-    Supports a top Edit Poly modifier and an Editable Poly base object; success requires exactly two resulting objects.
+    Applies the current geometry to Editable Poly, splits all currently selected edges, and explodes the resulting elements.
+    Supports edge selection coming from a top Edit Poly modifier or an Editable Poly base object.
     */
     function splitSelectedEdgeToObjects =
     (
@@ -5521,7 +5521,7 @@ struct WallFixer_v
 
         if selected_nodes.count != 1 then
         (
-            last_slice_report = "Split: select exactly one geometry object with exactly one edge selected."
+            last_slice_report = "Split: select exactly one geometry object with one or more edges selected."
             return false
         )
 
@@ -5533,14 +5533,12 @@ struct WallFixer_v
         )
 
         selected_edges = #{}
-        top_edit_poly = undefined
 
         if node.modifiers.count > 0 and classOf node.modifiers[1] == Edit_Poly then
         (
-            top_edit_poly = node.modifiers[1]
             try
             (
-                selected_edges = top_edit_poly.GetSelection #Edge node:node
+                selected_edges = node.modifiers[1].GetSelection #Edge node:node
             )
             catch
             (
@@ -5553,77 +5551,84 @@ struct WallFixer_v
         )
         else
         (
-            last_slice_report = "Split: use an Editable Poly object or an object with a top Edit Poly modifier."
+            try
+            (
+                convertToPoly node
+            )
+            catch
+            (
+            )
+
+            if classOf node.baseObject == Editable_Poly then selected_edges = polyop.getEdgeSelection node.baseObject
+        )
+
+        if selected_edges.numberSet == 0 then
+        (
+            last_slice_report = "Split: select one or more edges."
             return false
         )
 
-        if selected_edges.numberSet != 1 then
+        conversion_ok = true
+
+        try
         (
-            last_slice_report = "Split: select exactly one edge."
+            convertToPoly node
+        )
+        catch
+        (
+            conversion_ok = false
+        )
+
+        if (not conversion_ok) or classOf node.baseObject != Editable_Poly then
+        (
+            last_slice_report = "Split: could not apply Editable Poly to the selected object."
+            return false
+        )
+
+        base_obj = node.baseObject
+        max_edge_index = polyop.getNumEdges base_obj
+        valid_edges = #{}
+
+        for edge_index in selected_edges where edge_index >= 1 and edge_index <= max_edge_index do valid_edges[edge_index] = true
+
+        if valid_edges.numberSet == 0 then
+        (
+            last_slice_report = "Split: selected edges did not survive Editable Poly conversion."
             return false
         )
 
         split_ok = false
 
-        if top_edit_poly != undefined then
+        try
         (
-            try
-            (
-                top_edit_poly.SetPrimaryNode node
-                top_edit_poly.SetEPolySelLevel #Edge
-                top_edit_poly.SetSelection #Edge #{} node:node
-                top_edit_poly.Select #Edge selected_edges node:node
-
-                if (top_edit_poly.GetSelection #Edge node:node) != selected_edges then
-                (
-                    throw "Selected edge could not be restored on the top Edit Poly modifier."
-                )
-
-                top_edit_poly.SetOperation #SplitEdges
-                top_edit_poly.Commit()
-                update node
-                convertToPoly node
-                split_ok = (classOf node.baseObject == Editable_Poly)
-            )
-            catch
-            (
-                split_ok = false
-            )
+            polyop.setEdgeSelection base_obj valid_edges
+            polyop.splitEdges base_obj valid_edges
+            update node
+            split_ok = true
         )
-        else
+        catch
         (
-            try
-            (
-                polyop.splitEdges node.baseObject selected_edges
-                update node
-                split_ok = true
-            )
-            catch
-            (
-                split_ok = false
-            )
+            split_ok = false
         )
 
         if not split_ok then
         (
-            last_slice_report = "Split failed while separating the selected edge."
+            last_slice_report = "Split failed while separating the selected edges."
             return false
         )
 
         result_nodes = explodeNodeByElements node
         removeRedundantVerticesFromNodes result_nodes
+        select result_nodes
+        completeRedraw()
 
-        if result_nodes.count != 2 then
+        if result_nodes.count < 2 then
         (
-            select result_nodes
-            completeRedraw()
-            last_slice_report = "Split completed, but the selected edge did not produce exactly 2 objects. Result objects: " + (result_nodes.count as string)
+            last_slice_report = "Split completed, but the selected edges did not create separate elements."
             return false
         )
 
-        select result_nodes
-        completeRedraw()
-        last_slice_report = "Split complete. Created 2 objects from the selected edge."
+        last_slice_report = "Split complete. Created " + (result_nodes.count as string) + " objects from " + (valid_edges.numberSet as string) + " selected edge(s)."
         true
         -- return
     ),
@@ -13082,7 +13087,7 @@ WallFixer = WallFixer_v()
 
 
 /*
-Straight Edge Fixer 0.25
+Straight Edge Fixer 0.28
 Detects repeated horizontal edge levels and aligns nearby horizontal edges to them.
 */
 
@@ -13090,8 +13095,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.25"
-global straight_edge_fixer_tool_version = 0.922
+global straight_edge_fixer_file_version = "0.28"
+global straight_edge_fixer_tool_version = 0.930
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -14253,16 +14258,16 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Returns true when an edge direction is within the allowed angular deviation from the target direction.
-    Zero degrees and the threshold boundary are included.
+    Returns true when an edge is skewed from the target but remains inside Angle.
+    Exact zero-degree edges are excluded; the threshold boundary is included.
     */
-    function isDirectionAngleMatch angle_from_target angle_threshold =
+    function isDirectionAngleSkewed angle_from_target angle_threshold =
     (
         result_value = false
 
         if (angle_from_target != undefined) then
         (
-            result_value = ((angle_from_target >= 0.0) and (angle_from_target <= angle_threshold))
+            result_value = ((angle_from_target > 0.0) and (angle_from_target <= angle_threshold))
         )
 
         result_value
@@ -14280,7 +14285,7 @@ struct StraightEdgeFixer_v
 
         if (angle_from_horizontal != undefined) then
         (
-            result_value = isDirectionAngleMatch angle_from_horizontal angle_threshold
+            result_value = isDirectionAngleSkewed angle_from_horizontal angle_threshold
         )
 
         result_value
@@ -14299,7 +14304,7 @@ struct StraightEdgeFixer_v
         if (angle_from_horizontal != undefined) then
         (
             angle_from_vertical = 90.0 - angle_from_horizontal
-            result_value = isDirectionAngleMatch angle_from_vertical angle_threshold
+            result_value = isDirectionAngleSkewed angle_from_vertical angle_threshold
         )
 
         result_value
@@ -14307,32 +14312,31 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Tests the inclusive target-direction angle rule at key threshold boundaries.
-    Returns true when 0..threshold matches and values above the threshold do not.
+    Tests strict-zero versus skewed direction selection boundaries.
+    RMB accepts only angles greater than zero and up to Angle inclusive.
     */
     function testDirectionAngleThreshold =
     (
         test_passed = true
 
-        test_passed = test_passed and (isDirectionAngleMatch 0.0 0.0)
-        test_passed = test_passed and (not (isDirectionAngleMatch 0.001 0.0))
-        test_passed = test_passed and (isDirectionAngleMatch 1.0 1.0)
-        test_passed = test_passed and (not (isDirectionAngleMatch 1.001 1.0))
-        test_passed = test_passed and (isDirectionAngleMatch 5.0 5.0)
-        test_passed = test_passed and (not (isDirectionAngleMatch 5.001 5.0))
-        test_passed = test_passed and (not (isDirectionAngleMatch 90.0 5.0))
+        test_passed = test_passed and (not (isDirectionAngleSkewed 0.0 5.0))
+        test_passed = test_passed and (isDirectionAngleSkewed 0.001 5.0)
+        test_passed = test_passed and (isDirectionAngleSkewed 5.0 5.0)
+        test_passed = test_passed and (not (isDirectionAngleSkewed 5.001 5.0))
+        test_passed = test_passed and (not (isDirectionAngleSkewed 90.0 5.0))
 
         vertical_test_angles = getDirectionAngles 0.0466476 1.0
         horizontal_test_angles = getDirectionAngles 1.0 0.0466476
 
         test_passed = test_passed and ((abs (vertical_test_angles[2] - 2.6704)) < 0.01)
-        test_passed = test_passed and (isDirectionAngleMatch vertical_test_angles[2] 40.0)
+        test_passed = test_passed and (isDirectionAngleSkewed vertical_test_angles[2] 40.0)
         test_passed = test_passed and ((abs (horizontal_test_angles[1] - 2.6704)) < 0.01)
-        test_passed = test_passed and (isDirectionAngleMatch horizontal_test_angles[1] 40.0)
+        test_passed = test_passed and (isDirectionAngleSkewed horizontal_test_angles[1] 40.0)
 
         test_passed
         -- return
     ),
+
 
     /*
     Selects an edge BitArray on the current geometry source.
@@ -14376,6 +14380,54 @@ struct StraightEdgeFixer_v
         )
 
         edge_selection
+        -- return
+    ),
+
+    /*
+    Returns the current vertex selection from Editable Poly or Edit Poly.
+    */
+    function getVertexSelection node adapter =
+    (
+        vertex_selection = #{}
+        geometry_source = adapter[2]
+
+        if (adapter[1] == #editable_poly) then
+        (
+            vertex_selection = polyop.getVertSelection geometry_source
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            vertex_selection = EditPolyMod.GetSelection geometry_source #Vertex node:node
+        )
+
+        vertex_selection
+        -- return
+    ),
+
+    /*
+    Returns all edges incident to one vertex.
+    */
+    function getVertexIncidentEdges node adapter vertex_id =
+    (
+        incident_edges = #{}
+        geometry_source = adapter[2]
+
+        if (adapter[1] == #editable_poly) then
+        (
+            incident_edges = polyop.getEdgesUsingVert geometry_source #{vertex_id}
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            edge_count = EditPolyMod.GetVertexEdgeCount geometry_source vertex_id node:node
+
+            for edge_slot = 1 to edge_count do
+            (
+                edge_id = EditPolyMod.GetVertexEdge geometry_source vertex_id edge_slot node:node
+                if (edge_id != undefined and edge_id > 0) then incident_edges[edge_id] = true
+            )
+        )
+
+        incident_edges
         -- return
     ),
 
@@ -14445,6 +14497,194 @@ struct StraightEdgeFixer_v
         direction_value
         -- return
     ),
+
+    /*
+    Returns face IDs using one edge on the current geometry source.
+    Editable Poly reads the base object; Edit Poly reads the evaluated node.
+    */
+    function getEdgeFaceIds node adapter edge_id =
+    (
+        face_ids = #{}
+
+        try
+        (
+            if (adapter[1] == #editable_poly) then
+            (
+                face_ids = polyop.getFacesUsingEdge (adapter[2]) edge_id
+            )
+            else if (adapter[1] == #edit_poly) then
+            (
+                face_ids = polyop.getFacesUsingEdge node edge_id
+            )
+        )
+        catch
+        (
+            face_ids = #{}
+        )
+
+        face_ids
+        -- return
+    ),
+
+
+    /*
+    Returns ordered vertex IDs for one face on the current geometry source.
+    Unavailable topology returns an empty array.
+    */
+    function getFaceVertIds node adapter face_id =
+    (
+        face_verts = #()
+
+        try
+        (
+            if (adapter[1] == #editable_poly) then
+            (
+                face_verts = polyop.getFaceVerts (adapter[2]) face_id
+            )
+            else if (adapter[1] == #edit_poly) then
+            (
+                face_verts = polyop.getFaceVerts node face_id
+            )
+        )
+        catch
+        (
+            face_verts = #()
+        )
+
+        face_verts
+        -- return
+    ),
+
+
+    /*
+    Builds one face normal directly from world-space face vertices.
+    World-space construction preserves rotated wall orientation.
+    */
+    function getFaceNormalWorld node adapter face_id =
+    (
+        normal_value = undefined
+        face_verts = getFaceVertIds node adapter face_id
+
+        if (face_verts.count >= 3) then
+        (
+            point_a = getVertexWorldPosition node adapter face_verts[1]
+
+            for vert_index = 2 to (face_verts.count - 1) while (normal_value == undefined) do
+            (
+                point_b = getVertexWorldPosition node adapter face_verts[vert_index]
+                point_c = getVertexWorldPosition node adapter face_verts[vert_index + 1]
+                candidate_normal = cross (point_b - point_a) (point_c - point_a)
+
+                if ((length candidate_normal) > 0.0000001) then
+                (
+                    normal_value = normalize candidate_normal
+                )
+            )
+        )
+
+        normal_value
+        -- return
+    ),
+
+
+    /*
+    Returns a horizontal tangent perpendicular to one face normal.
+    The sign follows the current edge direction to preserve vertex order.
+    */
+    function getHorizontalDirectionFromFaceNormal face_normal current_direction =
+    (
+        tangent_direction = undefined
+
+        if ((face_normal != undefined) and (current_direction != undefined)) then
+        (
+            horizontal_normal = [face_normal.x, face_normal.y, 0.0]
+
+            if ((length horizontal_normal) > 0.0000001) then
+            (
+                horizontal_normal = normalize horizontal_normal
+                tangent_direction = normalize (cross horizontal_normal [0,0,1])
+
+                if ((dot tangent_direction current_direction) < 0.0) then
+                (
+                    tangent_direction = -tangent_direction
+                )
+            )
+        )
+
+        tangent_direction
+        -- return
+    ),
+
+
+    /*
+    Finds the adjacent wall-face tangent best aligned with the selected edge.
+    If no usable wall face exists, the current XY edge direction is retained.
+    */
+    function getHorizontalWallDirection node adapter edge_id =
+    (
+        result_direction = undefined
+        edge_direction = getEdgeDirectionWorld node adapter edge_id
+
+        if (edge_direction != undefined) then
+        (
+            current_xy = [edge_direction.x, edge_direction.y, 0.0]
+
+            if ((length current_xy) > 0.0000001) then
+            (
+                current_xy = normalize current_xy
+                best_alignment = -1.0
+                edge_faces = getEdgeFaceIds node adapter edge_id
+
+                for face_id in edge_faces do
+                (
+                    face_normal = getFaceNormalWorld node adapter face_id
+                    tangent_direction = getHorizontalDirectionFromFaceNormal face_normal current_xy
+
+                    if (tangent_direction != undefined) then
+                    (
+                        alignment = abs (dot tangent_direction current_xy)
+
+                        if (alignment > best_alignment) then
+                        (
+                            best_alignment = alignment
+                            result_direction = tangent_direction
+                        )
+                    )
+                )
+
+                if (result_direction == undefined) then
+                (
+                    result_direction = current_xy
+                )
+            )
+        )
+
+        result_direction
+        -- return
+    ),
+
+
+    /*
+    Verifies rotated-wall horizontal tangent construction without scene geometry.
+    The tangent must be horizontal and perpendicular to the wall face normal.
+    */
+    function testHorizontalFaceDirection =
+    (
+        face_normal = normalize [0.6, 0.8, 0.0]
+        current_direction = normalize [0.8, -0.6, 0.0]
+        tangent_direction = getHorizontalDirectionFromFaceNormal face_normal current_direction
+
+        test_passed = (
+            (tangent_direction != undefined) and
+            ((abs tangent_direction.z) < 0.000001) and
+            ((abs (dot tangent_direction face_normal)) < 0.000001) and
+            ((dot tangent_direction current_direction) > 0.9999)
+        )
+
+        test_passed
+        -- return
+    ),
+
 
     /*
     Returns the unsigned parallel angle between two edges in degrees.
@@ -14647,9 +14887,298 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Straightens one selected edge using a reference edge direction.
-    Neighbor reference keeps the shared vertex fixed.
-    Same-level reference rotates/projects the edge around its own midpoint.
+    Tests Vertical Vertex-mode endpoint alignment.
+    The selected vertex takes unselected XY and preserves its own Z.
+    */
+    function testVerticalSelectedVertexTarget =
+    (
+        selected_position = [10.0, 20.0, 3.0]
+        unselected_position = [30.0, 40.0, 9.0]
+        target_position = [unselected_position.x, unselected_position.y, selected_position.z]
+
+        target_position == [30.0, 40.0, 3.0]
+        -- return
+    ),
+
+
+    /*
+    Tests axis-specific alignment targets.
+    Horizontal changes only Z; Vertical changes only XY.
+    */
+    function testDirectionAlignmentTargets =
+    (
+        point_a = [10.0, 20.0, 3.0]
+        point_b = [14.0, 26.0, 9.0]
+        horizontal_reference = [100.0, 200.0, 7.0]
+        vertical_reference = [30.0, 40.0, 500.0]
+
+        horizontal_a = [point_a.x, point_a.y, horizontal_reference.z]
+        horizontal_b = [point_b.x, point_b.y, horizontal_reference.z]
+        vertical_a = [vertical_reference.x, vertical_reference.y, point_a.z]
+        vertical_b = [vertical_reference.x, vertical_reference.y, point_b.z]
+
+        test_passed = true
+        test_passed = test_passed and horizontal_a.x == point_a.x and horizontal_a.y == point_a.y
+        test_passed = test_passed and horizontal_b.x == point_b.x and horizontal_b.y == point_b.y
+        test_passed = test_passed and horizontal_a.z == horizontal_reference.z and horizontal_b.z == horizontal_reference.z
+        test_passed = test_passed and vertical_a.x == vertical_reference.x and vertical_a.y == vertical_reference.y
+        test_passed = test_passed and vertical_b.x == vertical_reference.x and vertical_b.y == vertical_reference.y
+        test_passed = test_passed and vertical_a.z == point_a.z and vertical_b.z == point_b.z
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Fixes one selected edge using the requested alignment axis.
+    Horizontal changes Z only and prefers a neighboring horizontal edge Z.
+    Vertical changes XY only and prefers a neighboring vertical edge XY.
+    */
+    function fixSelectedDirectionEdge node adapter edge_id check_type tolerance:0.01 angle_threshold:45.0 =
+    (
+        result_value = false
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexWorldPosition node adapter edge_verts[1]
+            point_b = getVertexWorldPosition node adapter edge_verts[2]
+            target_a = point_a
+            target_b = point_b
+            neighbor_reference = findNeighborReference node adapter edge_id check_type tolerance angle_threshold
+            can_fix = false
+
+            if (check_type == #horizontal) then
+            (
+                target_z = (point_a.z + point_b.z) * 0.5
+
+                if (neighbor_reference != undefined) then
+                (
+                    shared_vertex = neighbor_reference[2]
+                    if (shared_vertex > 0) then
+                    (
+                        reference_position = getVertexWorldPosition node adapter shared_vertex
+                        if (reference_position != undefined) then target_z = reference_position.z
+                    )
+                )
+
+                target_a = [point_a.x, point_a.y, target_z]
+                target_b = [point_b.x, point_b.y, target_z]
+                can_fix = true
+            )
+            else if (check_type == #vertical) then
+            (
+                target_x = (point_a.x + point_b.x) * 0.5
+                target_y = (point_a.y + point_b.y) * 0.5
+
+                if (neighbor_reference != undefined) then
+                (
+                    shared_vertex = neighbor_reference[2]
+                    if (shared_vertex > 0) then
+                    (
+                        reference_position = getVertexWorldPosition node adapter shared_vertex
+                        if (reference_position != undefined) then
+                        (
+                            target_x = reference_position.x
+                            target_y = reference_position.y
+                        )
+                    )
+                )
+
+                target_a = [target_x, target_y, point_a.z]
+                target_b = [target_x, target_y, point_b.z]
+                can_fix = true
+            )
+
+            if (can_fix) then
+            (
+                moved_a = setVertexWorldPosition node adapter edge_verts[1] target_a
+                moved_b = setVertexWorldPosition node adapter edge_verts[2] target_b
+
+                if (moved_a and moved_b) then
+                (
+                    if (check_type == #horizontal) then
+                    (
+                        result_value = isHorizontalEdge node adapter edge_id tolerance
+                    )
+                    else if (check_type == #vertical) then
+                    (
+                        result_value = isVerticalEdge node adapter edge_id tolerance
+                    )
+                )
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Aligns selected vertices vertically to the unselected endpoint XY of each incident edge.
+    Only the selected vertex moves; its Z is preserved.
+    */
+    function fixSelectedVerticalVertices node adapter selected_vertices tolerance:0.01 angle_threshold:45.0 =
+    (
+        fixed_count = 0
+        failed_vertices = #{}
+
+        for selected_vertex in selected_vertices do
+        (
+            incident_edges = getVertexIncidentEdges node adapter selected_vertex
+            vertex_fixed = false
+
+            for edge_id in incident_edges while not vertex_fixed do
+            (
+                edge_verts = getEdgeVertIds node adapter edge_id
+
+                if (edge_verts.count == 2) then
+                (
+                    other_vertex = if (edge_verts[1] == selected_vertex) then edge_verts[2] else edge_verts[1]
+                    other_is_selected = (other_vertex <= selected_vertices.count and selected_vertices[other_vertex])
+
+                    if not other_is_selected then
+                    (
+                        selected_position = getVertexWorldPosition node adapter selected_vertex
+                        other_position = getVertexWorldPosition node adapter other_vertex
+
+                        if (selected_position != undefined and other_position != undefined) then
+                        (
+                            horizontal_length = distance [selected_position.x, selected_position.y, 0.0] [other_position.x, other_position.y, 0.0]
+                            vertical_length = abs(selected_position.z - other_position.z)
+                            direction_angles = getDirectionAngles horizontal_length vertical_length
+                            vertical_angle = direction_angles[2]
+
+                            if (vertical_angle != undefined and vertical_angle < 45.0) then
+                            (
+                                target_position = [other_position.x, other_position.y, selected_position.z]
+
+                                if (setVertexWorldPosition node adapter selected_vertex target_position) then
+                                (
+                                    vertex_fixed = true
+                                    fixed_count += 1
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+
+            if not vertex_fixed then failed_vertices[selected_vertex] = true
+        )
+
+        #(fixed_count, failed_vertices)
+        -- return
+    ),
+
+
+    /*
+    Fixes every currently selected edge for the requested direction.
+    In Vertex sub-object mode, Vertical moves selected vertices to the unselected endpoint XY.
+    */
+    function fixSelectedDirectionEdges check_type tolerance:0.01 angle_threshold:45.0 =
+    (
+        selected_nodes = selection as array
+        object_results = #()
+        total_fixed_edges = 0
+        has_failed_edges = false
+        failure_report = ""
+        use_vertex_vertical_mode = (check_type == #vertical and subObjectLevel == 1)
+
+        if (selected_nodes.count == 0) then
+        (
+            messageBox "Select at least one geometry object." title:"Straight Edge Fixer"
+        )
+        else
+        (
+            undo "Fix Selected Direction Edges" on
+            (
+                for node in selected_nodes do
+                (
+                    if (isValidNode node and (superClassOf node == GeometryClass)) then
+                    (
+                        adapter = getGeometryAdapter node
+                        original_edge_selection = getEdgeSelection node adapter
+                        failed_vertices = #{}
+
+                        if use_vertex_vertical_mode then
+                        (
+                            original_vertex_selection = getVertexSelection node adapter
+                            vertex_result = fixSelectedVerticalVertices                                 node                                 adapter                                 original_vertex_selection                                 tolerance:tolerance                                 angle_threshold:angle_threshold
+
+                            total_fixed_edges += vertex_result[1]
+                            failed_vertices = vertex_result[2]
+                        )
+                        else
+                        (
+                            for edge_id in original_edge_selection do
+                            (
+                                if (fixSelectedDirectionEdge node adapter edge_id check_type tolerance:tolerance angle_threshold:angle_threshold) then
+                                (
+                                    total_fixed_edges += 1
+                                )
+                                else
+                                (
+                                    failed_edge_verts = getEdgeVertIds node adapter edge_id
+
+                                    if (failed_edge_verts.count == 2) then
+                                    (
+                                        failed_vertices[failed_edge_verts[1]] = true
+                                        failed_vertices[failed_edge_verts[2]] = true
+                                    )
+                                )
+                            )
+                        )
+
+                        if (failed_vertices.numberSet > 0) then
+                        (
+                            has_failed_edges = true
+                            failure_report += node.name + ": " + (bitIdsToString failed_vertices) + "\n"
+                        )
+
+                        append object_results #(node, adapter, original_edge_selection, failed_vertices)
+                    )
+                )
+            )
+
+            if (has_failed_edges) then
+            (
+                for object_result in object_results do
+                (
+                    setVertexSelection object_result[1] object_result[2] object_result[4]
+                )
+
+                setCommandPanelTaskMode mode:#modify
+                subObjectLevel = 1
+                completeRedraw()
+
+                messageBox ("Unable to fix selected edges with vertices:\n\n" + failure_report) title:"Straight Edge Fixer"
+            )
+            else
+            (
+                for object_result in object_results do
+                (
+                    setEdgeSelection object_result[1] object_result[2] object_result[3]
+                )
+
+                setCommandPanelTaskMode mode:#modify
+                subObjectLevel = 2
+                completeRedraw()
+
+                format "Straight Edge Fixer: fixed % selected % edge(s).\n" total_fixed_edges check_type
+            )
+        )
+
+        #(total_fixed_edges, has_failed_edges)
+        -- return
+    ),
+
+
+    /*
+    Straightens one selected edge using only the coordinate controlled by the requested direction.
+    Horizontal uses reference Z while preserving target XY.
+    Vertical uses reference XY while preserving target Z.
     */
     function straightenEdgeUsingReference node adapter target_edge reference_data check_type tolerance =
     (
@@ -14658,47 +15187,38 @@ struct StraightEdgeFixer_v
         reference_edge = reference_data[1]
         shared_vertex = reference_data[2]
         reference_method = reference_data[3]
-        reference_direction = getEdgeDirectionWorld node adapter reference_edge
 
-        if ((target_verts.count == 2) and (reference_direction != undefined)) then
+        if (target_verts.count == 2) then
         (
+            point_a = getVertexWorldPosition node adapter target_verts[1]
+            point_b = getVertexWorldPosition node adapter target_verts[2]
+            reference_position = undefined
+
             if ((reference_method == #neighbor) and (shared_vertex > 0)) then
             (
-                moving_vertex = if (target_verts[1] == shared_vertex) then target_verts[2] else target_verts[1]
-                anchor_position = getVertexWorldPosition node adapter shared_vertex
-                moving_position = getVertexWorldPosition node adapter moving_vertex
-                projection_distance = dot (moving_position - anchor_position) reference_direction
-
-                if ((abs projection_distance) > 0.0000001) then
-                (
-                    target_position = anchor_position + (reference_direction * projection_distance)
-                    result_value = setVertexWorldPosition node adapter moving_vertex target_position
-                )
+                reference_position = getVertexWorldPosition node adapter shared_vertex
             )
             else if (reference_method == #level) then
             (
-                point_a = getVertexWorldPosition node adapter target_verts[1]
-                point_b = getVertexWorldPosition node adapter target_verts[2]
-                target_center = (point_a + point_b) * 0.5
-                reference_center = getEdgeCenterWorld node adapter reference_edge
+                reference_position = getEdgeCenterWorld node adapter reference_edge
+            )
 
-                if ((check_type == #horizontal) and (reference_center != undefined)) then
+            if (reference_position != undefined) then
+            (
+                if (check_type == #horizontal) then
                 (
-                    target_center.z = reference_center.z
+                    target_a = [point_a.x, point_a.y, reference_position.z]
+                    target_b = [point_b.x, point_b.y, reference_position.z]
+                )
+                else if (check_type == #vertical) then
+                (
+                    target_a = [reference_position.x, reference_position.y, point_a.z]
+                    target_b = [reference_position.x, reference_position.y, point_b.z]
                 )
 
-                half_vector = (point_b - point_a) * 0.5
-                projected_half_length = dot half_vector reference_direction
-
-                if ((abs projected_half_length) > 0.0000001) then
-                (
-                    target_a = target_center - (reference_direction * projected_half_length)
-                    target_b = target_center + (reference_direction * projected_half_length)
-
-                    moved_a = setVertexWorldPosition node adapter target_verts[1] target_a
-                    moved_b = setVertexWorldPosition node adapter target_verts[2] target_b
-                    result_value = moved_a and moved_b
-                )
+                moved_a = setVertexWorldPosition node adapter target_verts[1] target_a
+                moved_b = setVertexWorldPosition node adapter target_verts[2] target_b
+                result_value = moved_a and moved_b
             )
         )
 
@@ -14888,13 +15408,13 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Checks one requested edge direction and selects every failing edge.
-    check_type accepts #horizontal or #vertical.
+    Selects exact or skewed edges for Horizontal / Vertical direction checks.
+    Exact mode uses zero coordinate tolerance; skewed mode uses 0 < deviation <= Angle.
     */
-    function checkEdgeDirection check_type tolerance angle_threshold =
+    function checkEdgeDirection check_type tolerance angle_threshold selection_mode:#skewed =
     (
         selected_nodes = selection as array
-        total_bad_edges = 0
+        total_selected_edges = 0
         processed_count = 0
 
         if (selected_nodes.count == 0) then
@@ -14910,28 +15430,43 @@ struct StraightEdgeFixer_v
                     processed_count += 1
                     adapter = getGeometryAdapter node
                     edge_count = getEdgeCount node adapter
-                    bad_edges = #{}
+                    matched_edges = #{}
 
                     for edge_id = 1 to edge_count do
                     (
-                        if (check_type == #horizontal) then
+                        edge_matches = false
+
+                        if (selection_mode == #exact) then
                         (
-                            if (isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold) then
+                            if (check_type == #horizontal) then
                             (
-                                bad_edges[edge_id] = true
+                                edge_matches = isHorizontalEdge node adapter edge_id 0.0
+                            )
+                            else if (check_type == #vertical) then
+                            (
+                                edge_matches = isVerticalEdge node adapter edge_id 0.0
                             )
                         )
-                        else if (check_type == #vertical) then
+                        else
                         (
-                            if (isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold) then
+                            if (check_type == #horizontal) then
                             (
-                                bad_edges[edge_id] = true
+                                edge_matches = isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold
                             )
+                            else if (check_type == #vertical) then
+                            (
+                                edge_matches = isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold
+                            )
+                        )
+
+                        if (edge_matches) then
+                        (
+                            matched_edges[edge_id] = true
                         )
                     )
 
-                    setEdgeSelection node adapter bad_edges
-                    total_bad_edges += countBits bad_edges
+                    setEdgeSelection node adapter matched_edges
+                    total_selected_edges += countBits matched_edges
                 )
             )
 
@@ -14941,20 +15476,21 @@ struct StraightEdgeFixer_v
                 subObjectLevel = 2
                 completeRedraw()
 
-                if (check_type == #horizontal) then
+                if (selection_mode == #exact) then
                 (
-                    format "Check Horizontal Edges: selected % edge(s) above the allowed horizontal deviation, max angle: % deg.\n" total_bad_edges angle_threshold
+                    format "Check %: selected % exact zero-deviation edge(s).\n" check_type total_selected_edges
                 )
                 else
                 (
-                    format "Check Vertical Edges: selected % edge(s) above the allowed vertical deviation, max angle: % deg.\n" total_bad_edges angle_threshold
+                    format "Check %: selected % skewed edge(s), deviation >0 and <= % deg.\n" check_type total_selected_edges angle_threshold
                 )
             )
         )
 
-        total_bad_edges
+        total_selected_edges
         -- return
     ),
+
 
     /*
     Reads all visible horizontal edge data used by level detection.
@@ -15578,7 +16114,7 @@ createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #
 
 
 /*
-Wall-Fixer UI 0.77
+Wall-Fixer UI 0.83
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -15588,8 +16124,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.77"
-global wall_fixer_ui_tool_version = 0.921
+global wall_fixer_ui_file_version = "0.83"
+global wall_fixer_ui_tool_version = 0.928
 
 
 /*
@@ -16493,12 +17029,29 @@ function testWallFixerRestartResolver =
 
 
 
+/*
+Tests that the direct Restart menu action has a valid launcher without reloading the tool.
+Returns true when Restart is ready to execute.
+*/
+function testWallFixerDirectRestartMenu =
+(
+    restart_script_path = wallFixerResolveRestartScriptPath source_script_path:wall_fixer_ui_source_path
+    restart_ready = restart_script_path != undefined
+
+
+    format "Wall-Fixer direct Restart menu ready: %\n" restart_ready
+
+
+    restart_ready
+    -- return
+)
+
+
+
+
 rcmenu wall_fixer_main_menu
 (
-    subMenu "Restart"
-    (
-        menuItem restart_tools_menu_item "Restart Tools"
-    )
+    menuItem restart_menu_item "Restart"
 
 
     subMenu "DOCK"
@@ -16515,7 +17068,7 @@ rcmenu wall_fixer_main_menu
     )
 
 
-    on restart_tools_menu_item picked do
+    on restart_menu_item picked do
     (
         restart_script_path = wallFixerResolveRestartScriptPath source_script_path:wall_fixer_ui_source_path
 
@@ -16759,7 +17312,14 @@ rollout WallFixerPreProcessRollout "1 PRE-PROCESS & FIX GEOMETRY" width:310 heig
 
     on duplicate_verts_button rightclick do
     (
-        ::WallFixerRollout.runDuplicateVerts fix_vertices:true
+        if subObjectLevel == 1 then
+        (
+            ::WallFixerRollout.runSelectedVertexWeld()
+        )
+        else
+        (
+            ::WallFixerRollout.runDuplicateVerts fix_vertices:true
+        )
     )
 
 
@@ -16885,9 +17445,9 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
 
 
     button check_horizontal_button "CHECK HORIZONTAL" pos:[18,30] width:127 height:34 \
-        tooltip:"LMB: select visible edges whose deviation from horizontal is greater than Angle.\n\nRMB: straighten the currently selected horizontal-direction error edges."
+        tooltip:"LMB: select exactly horizontal edges at zero tolerance.\n\nRMB: select skewed horizontal edges from above 0° through Angle.\n\nCTRL+RMB: fix selected edges horizontal while preserving the wall-face direction."
     button check_vertical_button "CHECK VERTICAL" pos:[155,30] width:127 height:34 \
-        tooltip:"LMB: select visible edges whose deviation from vertical is greater than Angle.\n\nRMB: straighten the currently selected vertical-direction error edges."
+        tooltip:"LMB: select exactly vertical edges at zero tolerance.\n\nRMB: select skewed vertical edges from above 0° through Angle.\n\nCTRL+RMB: fix selected edges to world vertical."
 
 
     button border_check_button "BORDER CHECK" pos:[18,70] width:264 height:30 \
@@ -16932,25 +17492,39 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
 
     on check_horizontal_button pressed do
     (
-        ::WallFixerRollout.runStraightEdgeDirection #horizontal fix_selected:false
+        ::WallFixerRollout.runStraightEdgeDirection #horizontal action:#exact
     )
 
 
     on check_horizontal_button rightclick do
     (
-        ::WallFixerRollout.runStraightEdgeDirection #horizontal fix_selected:true
+        if keyboard.controlPressed then
+        (
+            ::WallFixerRollout.runStraightEdgeDirection #horizontal action:#fix
+        )
+        else
+        (
+            ::WallFixerRollout.runStraightEdgeDirection #horizontal action:#skewed
+        )
     )
 
 
     on check_vertical_button pressed do
     (
-        ::WallFixerRollout.runStraightEdgeDirection #vertical fix_selected:false
+        ::WallFixerRollout.runStraightEdgeDirection #vertical action:#exact
     )
 
 
     on check_vertical_button rightclick do
     (
-        ::WallFixerRollout.runStraightEdgeDirection #vertical fix_selected:true
+        if keyboard.controlPressed then
+        (
+            ::WallFixerRollout.runStraightEdgeDirection #vertical action:#fix
+        )
+        else
+        (
+            ::WallFixerRollout.runStraightEdgeDirection #vertical action:#skewed
+        )
     )
 
 
@@ -17153,7 +17727,11 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
         tooltip:"Clear the Listener and print detailed diagnostics for the selected objects."
 
     button split_button "Split" pos:[8,80] width:143 height:30 \
-        tooltip:"LMB: Split the selected object by exactly one selected edge and explode the result into 2 objects."
+        tooltip:"LMB: Apply Editable Poly, split all selected edges, then explode the resulting elements into separate objects."
+
+
+    button material_button "Material" pos:[159,80] width:143 height:30 \
+        tooltip:"LMB: Assign one shared 10-ID Multi/Sub-Object material to selected geometry.\n\nRMB: Remove the material from selected geometry."
 
 
     on attach_button pressed do
@@ -17189,6 +17767,18 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
     on split_button pressed do
     (
         ::WallFixerRollout.runSplitSelectedEdge()
+    )
+
+
+    on material_button pressed do
+    (
+        ::WallFixerRollout.runAssignMultiMaterial()
+    )
+
+
+    on material_button rightclick do
+    (
+        ::WallFixerRollout.runRemoveMaterial()
     )
 )
 
@@ -18570,23 +19160,28 @@ function alignViewportToSelectedWallFaces =
         face_normal = alignment_data[2]
         face_count = alignment_data[3]
         reference_up = [0.0, 0.0, 1.0]
+        horizontal_normal = [face_normal.x, face_normal.y, 0.0]
 
 
-        if abs (dot face_normal reference_up) > 0.999 then
+        if (length horizontal_normal) > 0.0000001 then
         (
-            reference_up = [0.0, 1.0, 0.0]
+            view_normal = normalize horizontal_normal
+        )
+        else
+        (
+            view_normal = face_normal
         )
 
 
-        right_axis = cross reference_up face_normal
+        right_axis = cross reference_up view_normal
 
 
         if (length right_axis) > 0.0000001 then
         (
             right_axis = normalize right_axis
-            up_axis = normalize (cross face_normal right_axis)
-            camera_position = face_center + (face_normal * 1000.0)
-            camera_tm = matrix3 right_axis up_axis face_normal camera_position
+            up_axis = reference_up
+            camera_position = face_center + (view_normal * 1000.0)
+            camera_tm = matrix3 right_axis up_axis view_normal camera_position
 
 
             try
@@ -23828,8 +24423,71 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Splits the current object by its single selected edge and explodes the result into two objects.
-    Reports unsupported selections or splits that do not produce exactly two elements.
+    Assigns one shared 10-ID Multi/Sub-Object material to all selected geometry nodes.
+    The material is created once per button press and shared by the whole selection.
+    */
+    function runAssignMultiMaterial =
+    (
+        selected_nodes = for object_node in (selection as array) where object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #warning "Material: select one or more geometry objects."
+            false
+        )
+        else
+        (
+            multi_material = multimaterial numsubs:10 name:"WALL-FIXER MULTI"
+
+            for material_index = 1 to 10 do
+            (
+                multi_material.materialList[material_index] = standardMaterial name:("ID " + (material_index as string))
+            )
+            multi_material.materialIDList = #(1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+            multi_material.names = #("ID 1", "ID 2", "ID 3", "ID 4", "ID 5", "ID 6", "ID 7", "ID 8", "ID 9", "ID 10")
+
+            undo "Wall-Fixer - Assign Multi Material" on
+            (
+                for object_node in selected_nodes do object_node.material = multi_material
+            )
+
+            setStatus #success ("Material: assigned 10-ID Multi/Sub-Object to " + (selected_nodes.count as string) + " object(s).")
+            true
+        )
+        -- return
+    )
+
+
+    /*
+    Removes material assignments from all selected geometry nodes.
+    Geometry and Material IDs remain unchanged.
+    */
+    function runRemoveMaterial =
+    (
+        selected_nodes = for object_node in (selection as array) where object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #warning "Material: select one or more geometry objects."
+            false
+        )
+        else
+        (
+            undo "Wall-Fixer - Remove Material" on
+            (
+                for object_node in selected_nodes do object_node.material = undefined
+            )
+
+            setStatus #success ("Material: removed from " + (selected_nodes.count as string) + " object(s).")
+            true
+        )
+        -- return
+    )
+
+
+    /*
+    Applies Editable Poly, splits all selected edges, and explodes the resulting elements into separate objects.
+    Reports unsupported selections or splits that do not produce separate elements.
     */
     function runSplitSelectedEdge =
     (
@@ -24073,6 +24731,91 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
         #(converted_count, failed_count)
+        -- return
+    )
+
+
+    /*
+    Welds only the currently selected vertices when Vertex sub-object mode is active.
+    Existing Edit Poly or Editable Poly vertex selections are preserved as the weld input.
+    */
+    function runSelectedVertexWeld =
+    (
+        weld_threshold = WallFixerPreProcessRollout.weld_threshold_spinner.value
+        selected_nodes = selection as array
+        welded_count = 0
+        failed_count = 0
+        processed_count = 0
+
+
+        if subObjectLevel != 1 then
+        (
+            setStatus #warning "Weld: Vertex sub-object mode is not active."
+            false
+        )
+        else if selected_nodes.count == 0 then
+        (
+            setStatus #warning "Weld: select one or more geometry objects with selected vertices."
+            false
+        )
+        else
+        (
+            setProgress 0
+            setStatus #message "Welding selected vertices..."
+
+
+            undo "Wall-Fixer - Weld Selected Vertices" on
+            (
+                for object_node in selected_nodes do
+                (
+                    if object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass then
+                    (
+                        top_edit_poly = undefined
+
+
+                        for modifier_index = object_node.modifiers.count to 1 by -1 while top_edit_poly == undefined do
+                        (
+                            if classOf object_node.modifiers[modifier_index] == Edit_Poly then top_edit_poly = object_node.modifiers[modifier_index]
+                        )
+
+
+                        weld_result = weldSelectedEPolyVerts object_node weld_threshold editPolyModifier:top_edit_poly
+
+
+                        if weld_result == false then
+                        (
+                            failed_count += 1
+                        )
+                        else
+                        (
+                            processed_count += 1
+                            welded_count += weld_result
+                        )
+                    )
+                )
+            )
+
+
+            cleanupRedundantVerticesAfterGeometryChange selected_nodes
+            setProgress 100
+
+
+            if failed_count > 0 then
+            (
+                setStatus #warning ((welded_count as string) + " vertices welded; " + (failed_count as string) + " object(s) could not be processed.")
+                false
+            )
+            else if processed_count == 0 then
+            (
+                setStatus #warning "Weld: no Editable Poly or Edit Poly objects with selected vertices were processed."
+                false
+            )
+            else
+            (
+                setStatus #success ((welded_count as string) + " selected vertices welded.")
+                true
+            )
+        )
         -- return
     )
 
@@ -26994,38 +27737,41 @@ result_groups
 
 
     /*
-    Runs the imported Straight Edge Fixer horizontal/vertical check or straighten action.
-    LMB checks and RMB straightens the currently selected candidate edges.
+    Runs exact selection, skewed selection or selected-edge fixing for one direction.
+    LMB is exact, RMB is skewed within Angle, and CTRL+RMB fixes the current edge selection.
     */
-    function runStraightEdgeDirection direction_type fix_selected:false =
+    function runStraightEdgeDirection direction_type action:#exact =
     (
         saveStraightEdgeSettings()
         setProgress 0
-        action_text = if fix_selected then "Straightening" else "Checking"
-        setStatus #message (action_text + " " + (direction_type as string) + " edges...")
 
-
-        if fix_selected then
+        if (action == #fix) then
         (
-            operation_result = StraightEdgeFixer.straightenSelectedEdges \
-                direction_type \
-                WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
-                WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value \
-                WallFixerEdgeFixerOptionsRollout.search_in_z_spinner.value
+            action_text = "Fixing"
+            setStatus #message ("Fixing selected " + (direction_type as string) + " edges...")
+            operation_result = StraightEdgeFixer.fixSelectedDirectionEdges direction_type
         )
         else
         (
+            selection_mode = if (action == #skewed) then #skewed else #exact
+            action_text = if (selection_mode == #exact) then "Selecting exact" else "Selecting skewed"
+            setStatus #message (action_text + " " + (direction_type as string) + " edges...")
+
             operation_result = StraightEdgeFixer.checkEdgeDirection \
                 direction_type \
                 WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
-                WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value
+                WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value \
+                selection_mode:selection_mode
         )
 
-
         completed = normalizeStraightEdgeResult operation_result
-        if completed and fix_selected then cleanupRedundantVerticesAfterGeometryChange (selection as array)
-        setProgress 100
 
+        if completed and (action == #fix) then
+        (
+            cleanupRedundantVerticesAfterGeometryChange (selection as array)
+        )
+
+        setProgress 100
 
         if completed then
         (
@@ -27035,7 +27781,6 @@ result_groups
         (
             setStatus #warning (action_text + " " + (direction_type as string) + " edges did not produce a completed result.")
         )
-
 
         completed
         -- return

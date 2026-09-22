@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.35"
-global wall_fixer_core_tool_version = 0.92
+global wall_fixer_core_file_version = "0.36"
+global wall_fixer_core_tool_version = 0.926
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -3559,8 +3559,8 @@ struct WallFixer_v
 
 
     /*
-    Splits one selected geometry object at exactly one selected edge and explodes the resulting elements.
-    Supports a top Edit Poly modifier and an Editable Poly base object; success requires exactly two resulting objects.
+    Applies the current geometry to Editable Poly, splits all currently selected edges, and explodes the resulting elements.
+    Supports edge selection coming from a top Edit Poly modifier or an Editable Poly base object.
     */
     function splitSelectedEdgeToObjects =
     (
@@ -3568,7 +3568,7 @@ struct WallFixer_v
 
         if selected_nodes.count != 1 then
         (
-            last_slice_report = "Split: select exactly one geometry object with exactly one edge selected."
+            last_slice_report = "Split: select exactly one geometry object with one or more edges selected."
             return false
         )
 
@@ -3580,14 +3580,12 @@ struct WallFixer_v
         )
 
         selected_edges = #{}
-        top_edit_poly = undefined
 
         if node.modifiers.count > 0 and classOf node.modifiers[1] == Edit_Poly then
         (
-            top_edit_poly = node.modifiers[1]
             try
             (
-                selected_edges = top_edit_poly.GetSelection #Edge node:node
+                selected_edges = node.modifiers[1].GetSelection #Edge node:node
             )
             catch
             (
@@ -3600,77 +3598,84 @@ struct WallFixer_v
         )
         else
         (
-            last_slice_report = "Split: use an Editable Poly object or an object with a top Edit Poly modifier."
+            try
+            (
+                convertToPoly node
+            )
+            catch
+            (
+            )
+
+            if classOf node.baseObject == Editable_Poly then selected_edges = polyop.getEdgeSelection node.baseObject
+        )
+
+        if selected_edges.numberSet == 0 then
+        (
+            last_slice_report = "Split: select one or more edges."
             return false
         )
 
-        if selected_edges.numberSet != 1 then
+        conversion_ok = true
+
+        try
         (
-            last_slice_report = "Split: select exactly one edge."
+            convertToPoly node
+        )
+        catch
+        (
+            conversion_ok = false
+        )
+
+        if (not conversion_ok) or classOf node.baseObject != Editable_Poly then
+        (
+            last_slice_report = "Split: could not apply Editable Poly to the selected object."
+            return false
+        )
+
+        base_obj = node.baseObject
+        max_edge_index = polyop.getNumEdges base_obj
+        valid_edges = #{}
+
+        for edge_index in selected_edges where edge_index >= 1 and edge_index <= max_edge_index do valid_edges[edge_index] = true
+
+        if valid_edges.numberSet == 0 then
+        (
+            last_slice_report = "Split: selected edges did not survive Editable Poly conversion."
             return false
         )
 
         split_ok = false
 
-        if top_edit_poly != undefined then
+        try
         (
-            try
-            (
-                top_edit_poly.SetPrimaryNode node
-                top_edit_poly.SetEPolySelLevel #Edge
-                top_edit_poly.SetSelection #Edge #{} node:node
-                top_edit_poly.Select #Edge selected_edges node:node
-
-                if (top_edit_poly.GetSelection #Edge node:node) != selected_edges then
-                (
-                    throw "Selected edge could not be restored on the top Edit Poly modifier."
-                )
-
-                top_edit_poly.SetOperation #SplitEdges
-                top_edit_poly.Commit()
-                update node
-                convertToPoly node
-                split_ok = (classOf node.baseObject == Editable_Poly)
-            )
-            catch
-            (
-                split_ok = false
-            )
+            polyop.setEdgeSelection base_obj valid_edges
+            polyop.splitEdges base_obj valid_edges
+            update node
+            split_ok = true
         )
-        else
+        catch
         (
-            try
-            (
-                polyop.splitEdges node.baseObject selected_edges
-                update node
-                split_ok = true
-            )
-            catch
-            (
-                split_ok = false
-            )
+            split_ok = false
         )
 
         if not split_ok then
         (
-            last_slice_report = "Split failed while separating the selected edge."
+            last_slice_report = "Split failed while separating the selected edges."
             return false
         )
 
         result_nodes = explodeNodeByElements node
         removeRedundantVerticesFromNodes result_nodes
+        select result_nodes
+        completeRedraw()
 
-        if result_nodes.count != 2 then
+        if result_nodes.count < 2 then
         (
-            select result_nodes
-            completeRedraw()
-            last_slice_report = "Split completed, but the selected edge did not produce exactly 2 objects. Result objects: " + (result_nodes.count as string)
+            last_slice_report = "Split completed, but the selected edges did not create separate elements."
             return false
         )
 
-        select result_nodes
-        completeRedraw()
-        last_slice_report = "Split complete. Created 2 objects from the selected edge."
+        last_slice_report = "Split complete. Created " + (result_nodes.count as string) + " objects from " + (valid_edges.numberSet as string) + " selected edge(s)."
         true
         -- return
     ),

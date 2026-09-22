@@ -1,16 +1,10 @@
 ## NEXT
 
-HELPERS > Material button: LMB: assign a Multi/Sub-Object (multi-ID) material to the current selection. RMB: remove material from the current selection.
+UI: dialog registration/position persistence: check registered dialog size and position handling; saved position currently loads with a small offset, causing the dialog to drift on every position load. Fix so registration and restore use the same coordinates with no cumulative offset.
 
 ## IN PROGRESS
 
 ## QUEUE
-
-HELPERS > Align Camera: align the camera to walls rotated around the Z axis while keeping the camera-view horizon horizontal; do not introduce camera roll.
-
-ROLLOUT 1 > 2. WELD > RMB: when subObjectLevel 1 (vertex) is active, weld only the currently selected vertices.
-
-HELPERS > SPLIT > LMB: apply Editable Poly, edit the selected edges and run Split, then explode the object by elements into separate objects.
 
 
 
@@ -18,6 +12,14 @@ HELPERS > SPLIT > LMB: apply Editable Poly, edit the selected edges and run Spli
 
 
 ## DONE TODAY
+
+0.926 HELPERS > SPLIT > LMB: apply Editable Poly, edit the selected edges and run Split, then explode the object by elements into separate objects.
+
+0.925 ROLLOUT 1 > 2. WELD > RMB: when subObjectLevel 1 (vertex) is active, weld only the currently selected vertices.
+
+0.924 HELPERS > Align Camera: align the camera to walls rotated around the Z axis while keeping the camera-view horizon horizontal; do not introduce camera roll.
+
+0.923 HELPERS > Material button: LMB: assign a Multi/Sub-Object (multi-ID) material to the current selection. RMB: remove material from the current selection.
 
 0.91 SLICE WALLS > H \ V button: add button to the SLICE WALLS row. LMB: activate modifier "SLICE HORIZONTAL". RMB: activate modifier "SLICE VERTICAL". CTRL+LMB: activate "SLICE HORIZONTAL" and enter sub-object level 2. CTRL+RMB: activate "SLICE VERTICAL" and enter sub-object level 2.
 

@@ -1,5 +1,21 @@
 ﻿# Changes
 
+2026-09-22 — `Straight-Edge-Fixer.ms`, `Wall-Fixer.ms`: Vertical realign now handles Vertex sub-object mode explicitly; when `subObjectLevel == 1`, each selected vertex is moved in XY to the unselected endpoint of an incident vertical-direction edge while preserving the selected vertex Z, and the unselected endpoint is left unchanged; added `testVerticalSelectedVertexTarget`; project version 0.930.
+
+2026-09-22 — `Straight-Edge-Fixer.ms`, `Wall-Fixer.ms`: corrected EDGE FIXER alignment-axis semantics; Horizontal alignment now changes Z only and uses a neighboring horizontal edge Z when available, while Vertical alignment changes XY only and uses a neighboring vertical edge XY when available, preserving target endpoint Z; the reference-based straighten path now follows the same coordinate-only rules instead of projecting the whole edge onto the reference direction; added `testDirectionAlignmentTargets`; project version 0.929.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: made the first main-menu `Restart` command a direct top-level item instead of opening a Restart submenu; the existing restart behavior is unchanged and `testWallFixerDirectRestartMenu` checks launcher readiness without reloading; project version 0.928.
+
+2026-09-22 — `Straight-Edge-Fixer.ms`, `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: reworked EDGE FIXER horizontal/vertical events. LMB selects only exact zero-deviation edges; RMB selects skewed edges with `0° < deviation <= Angle`; CTRL+RMB fixes the current edge selection. Vertical fixing aligns to world Z. Horizontal fixing derives a horizontal tangent perpendicular to the best adjacent wall-face normal, preserving rotated wall direction while leveling Z. Added rotated-wall tangent regression coverage; project version 0.927.
+
+2026-09-22 — `Wall-Fixer-Core.ms`, `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: revised HELPERS `Split`; LMB captures the selected edges, applies Editable Poly, splits all surviving selected edges, explodes resulting elements into separate objects, cleans redundant vertices, and succeeds when at least two elements are produced; project version 0.926.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: PRE-PROCESS `2. VERTEX CHECK / WELD` RMB now detects Vertex sub-object mode and welds only the currently selected Editable Poly/Edit Poly vertices; outside Vertex mode it keeps the existing duplicate-vertex fix behavior; project version 0.925.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: HELPERS `Align Camera` now projects the selected wall normal onto XY and locks camera up to world +Z, keeping Z-rotated walls square to view without introducing camera roll; project version 0.924.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added HELPERS `Material`; LMB assigns one shared 10-ID Multi/Sub-Object material to selected geometry and RMB removes material assignments; project version 0.923.
+
 2026-09-22 — `Straight-Edge-Fixer.ms`, `Wall-Fixer.ms`: replaced direction-angle `atan2` calculation with explicit vector-length geometry using `acos(abs(dz) / edge_length)`. This makes angle-from-vertical and angle-from-horizontal unambiguous; the reported edge 6–13 case evaluates to about 2.67° from vertical and falls inside an Angle=40 check. Extended `testDirectionAngleThreshold` with matching vertical/horizontal regression vectors; project version 0.922.
 
 2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: Smart Explode confirmed-split failures now fall back to the source Editable Poly element groups; when a higher-priority NORMALS / FACE DIRECTION / XY POSITION detach fails but multiple mesh elements remain, those elements are detached instead of returning the source as failed; fallback logs the detected element count and counts as a successful split; project version 0.921.
