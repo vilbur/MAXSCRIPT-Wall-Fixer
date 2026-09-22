@@ -1,5 +1,5 @@
 /*
-Wall-Fixer UI 0.53
+Wall-Fixer UI 0.54
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.53"
-global wall_fixer_ui_tool_version = 0.62
+global wall_fixer_ui_file_version = "0.54"
+global wall_fixer_ui_tool_version = 0.63
 
 
 /*
@@ -82,6 +82,7 @@ global wall_face_classifier_cache = #()
 global wall_face_classifier_last_nodes = #()
 global wall_face_debug_enabled
 global wall_face_debug_run_id
+global wall_face_ground_pivot_enabled
 global wall_fixer_weld_threshold_syncing = false
 
 
@@ -94,6 +95,12 @@ if wall_face_debug_enabled == undefined then
 if wall_face_debug_run_id == undefined then
 (
     wall_face_debug_run_id = 0
+)
+
+
+if wall_face_ground_pivot_enabled == undefined then
+(
+    wall_face_ground_pivot_enabled = false
 )
 global wall_fixer_explode_wire_color_counter = 0
 
@@ -1592,7 +1599,7 @@ Main Wall-Fixer dialog owns shared progress, two-line message history and functi
 Child rollouts contain controls only and call these centralized handlers.
 */
 /*
-Embedded Inner-Outer Wall Finder 0.31
+Embedded Inner-Outer Wall Finder 0.32
 Runtime classifier implementation is embedded here so Wall-Fixer does not depend on a separately synced classifier file.
 Material ID 1 = OUTER, ID 2 = INNER, ID 3 = UP, ID 4 = DOWN.
 */
@@ -2987,6 +2994,7 @@ function getWallFaceDebugPropertyNames =
         "WallFaceDebugWorkingPivot",
         "WallFaceDebugUseEditPivot",
         "WallFaceDebugEditPivot",
+        "WallFaceDebugGroundPivot",
         "WallFaceDebugWallThickness",
         "WallFaceDebugConnectionThreshold",
         "WallFaceDebugConfidenceThreshold",
@@ -3216,7 +3224,7 @@ function writeWallFaceDebugTrace object_data run_data =
     )
 
 
-    setUserProp object_node "WallFaceDebugVersion" "1"
+    setUserProp object_node "WallFaceDebugVersion" "2"
     setUserProp object_node "WallFaceDebugRunId" (run_data[1] as string)
     setUserProp object_node "WallFaceDebugProjectVersion" (WallFixerVersion as string)
     setUserProp object_node "WallFaceDebugNodeName" object_node.name
@@ -3226,6 +3234,7 @@ function writeWallFaceDebugTrace object_data run_data =
     setUserProp object_node "WallFaceDebugWorkingPivot" (wallFaceDebugPointToString run_data[4])
     setUserProp object_node "WallFaceDebugUseEditPivot" (run_data[5] as string)
     setUserProp object_node "WallFaceDebugEditPivot" (run_data[6] as string)
+    setUserProp object_node "WallFaceDebugGroundPivot" (run_data[16] as string)
     setUserProp object_node "WallFaceDebugWallThickness" (run_data[7] as string)
     setUserProp object_node "WallFaceDebugConnectionThreshold" (run_data[8] as string)
     setUserProp object_node "WallFaceDebugConfidenceThreshold" (run_data[9] as string)
@@ -3299,7 +3308,7 @@ function debugWallFaceClassifierSelection verbose_vertices:true verbose_faces:tr
     format "WALL-FIXER GET OUTER WALLS DEBUG\n"
     format "Project version: % | trace mode: % | objects: %\n" WallFixerVersion wall_face_debug_enabled debug_nodes.count
     format "Current selection center: %\n" (wallFaceDebugPointToString (getWallFaceSelectionCenter debug_nodes))
-    format "Current Working Pivot: % | Use Edit Pivot: % | Edit Edit Pivot: %\n" (wallFaceDebugPointToString pivot_state[3]) pivot_state[1] pivot_state[2]
+    format "Current Working Pivot: % | Use Edit Pivot: % | Edit Edit Pivot: % | Ground Pivot: %\n" (wallFaceDebugPointToString pivot_state[3]) pivot_state[1] pivot_state[2] wall_face_ground_pivot_enabled
     format "======================================================================\n"
 
 
@@ -3340,7 +3349,7 @@ function debugWallFaceClassifierSelection verbose_vertices:true verbose_faces:tr
             format "Trace present: % | run: % | trace project: %\n" (debug_version != undefined) (getUserProp object_node "WallFaceDebugRunId") (getUserProp object_node "WallFaceDebugProjectVersion")
             format "Trace selection center: %\n" (getUserProp object_node "WallFaceDebugSelectionCenter")
             format "Trace analysis origin: %\n" (getUserProp object_node "WallFaceDebugAnalysisOrigin")
-            format "Trace Working Pivot: % | Use: % | Edit: %\n" (getUserProp object_node "WallFaceDebugWorkingPivot") (getUserProp object_node "WallFaceDebugUseEditPivot") (getUserProp object_node "WallFaceDebugEditPivot")
+            format "Trace Working Pivot: % | Use: % | Edit: % | Ground: %\n" (getUserProp object_node "WallFaceDebugWorkingPivot") (getUserProp object_node "WallFaceDebugUseEditPivot") (getUserProp object_node "WallFaceDebugEditPivot") (getUserProp object_node "WallFaceDebugGroundPivot")
             format "Trace Wall thickness: % | Connect threshold: % | Confidence: % | Horizontal threshold: %\n" (getUserProp object_node "WallFaceDebugWallThickness") (getUserProp object_node "WallFaceDebugConnectionThreshold") (getUserProp object_node "WallFaceDebugConfidenceThreshold") (getUserProp object_node "WallFaceDebugHorizontalThreshold")
             format "Trace classes: %\n" (getUserProp object_node "WallFaceDebugClassCounts")
             format "Trace resolution counts: %\n" (getUserProp object_node "WallFaceDebugResolutionCounts")
@@ -3579,6 +3588,12 @@ function centerWallFaceWorkingPivotToSelection =
     local selection_center = getWallFaceSelectionCenter selected_nodes
 
 
+    if selection_center != undefined and wall_face_ground_pivot_enabled then
+    (
+        selection_center.z = 0.0
+    )
+
+
     if selection_center != undefined then
     (
         local working_pivot_tm = undefined
@@ -3618,7 +3633,8 @@ function centerWallFaceWorkingPivotToSelection =
 
 
 /* Returns the origin used by INNER/OUTTER classification.
-   Use Edit Pivot uses the manual Working Pivot; otherwise classification uses the selection center without moving the Working Pivot.
+   Use Edit Pivot uses the manual Working Pivot; otherwise classification uses the selection center.
+   Ground Pivot forces the active origin and the actual Working Pivot onto world Z = 0 before analysis.
 */
 function getWallFaceAnalysisOrigin object_nodes =
 (
@@ -3653,6 +3669,41 @@ function getWallFaceAnalysisOrigin object_nodes =
     if analysis_origin == undefined then
     (
         analysis_origin = getWallFaceSelectionCenter object_nodes
+    )
+
+
+    if analysis_origin != undefined and wall_face_ground_pivot_enabled then
+    (
+        analysis_origin.z = 0.0
+        local working_pivot_tm = undefined
+
+
+        try
+        (
+            working_pivot_tm = WorkingPivot.getTM()
+        )
+        catch
+        (
+            working_pivot_tm = matrix3 1
+        )
+
+
+        if working_pivot_tm == undefined then
+        (
+            working_pivot_tm = matrix3 1
+        )
+
+
+        working_pivot_tm.translation = analysis_origin
+
+
+        try
+        (
+            WorkingPivot.setTM working_pivot_tm
+        )
+        catch
+        (
+        )
     )
 
 
@@ -5679,7 +5730,7 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
 
             if wall_face_debug_enabled then
             (
-                debug_run_data = #(wall_face_debug_run_id, debug_selection_center, analysis_origin, debug_pivot_state[3], debug_pivot_state[1], debug_pivot_state[2], wall_thickness, connection_threshold, confidence_threshold, horizontal_normal_threshold, thickness_resolved, forced_hierarchy_resolved, hierarchy_resolved, neighbor_resolved, fallback_resolved)
+                debug_run_data = #(wall_face_debug_run_id, debug_selection_center, analysis_origin, debug_pivot_state[3], debug_pivot_state[1], debug_pivot_state[2], wall_thickness, connection_threshold, confidence_threshold, horizontal_normal_threshold, thickness_resolved, forced_hierarchy_resolved, hierarchy_resolved, neighbor_resolved, fallback_resolved, wall_face_ground_pivot_enabled)
             )
 
 
@@ -5774,7 +5825,7 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
             )
 
 
-            format "Inner-Outer Wall Finder 0.31: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
+            format "Inner-Outer Wall Finder 0.32: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
 
 
             #(valid_nodes.count, total_faces, outer_count, inner_count, up_count, down_count, selection_type, thickness_resolved, hierarchy_resolved, neighbor_resolved, fallback_resolved) -- return
@@ -6529,6 +6580,7 @@ function testWallFaceWorkingPivotOrigin =
         local original_tm = WorkingPivot.getTM()
         local original_use_mode = WorkingPivot.UseMode
         local original_edit_mode = WorkingPivot.EditMode
+        local original_ground_pivot = wall_face_ground_pivot_enabled
         local expected_center = getWallFaceSelectionCenter test_nodes
         local selection_origin = undefined
         local centered_pivot = undefined
@@ -6540,6 +6592,7 @@ function testWallFaceWorkingPivotOrigin =
 
         try
         (
+            wall_face_ground_pivot_enabled = false
             WorkingPivot.UseMode = false
 
 
@@ -6577,6 +6630,7 @@ function testWallFaceWorkingPivotOrigin =
 
         try
         (
+            wall_face_ground_pivot_enabled = original_ground_pivot
             WorkingPivot.UseMode = false
             WorkingPivot.setTM original_tm
             WorkingPivot.EditMode = original_edit_mode
@@ -6588,6 +6642,82 @@ function testWallFaceWorkingPivotOrigin =
 
 
         format "Working Pivot origin test: %\n" test_passed
+        test_passed
+    )
+    -- return
+)
+
+
+/* Tests Ground Pivot with both selection-center and manual Working Pivot origins.
+   Ground mode must force world Z = 0 and restore the original pivot state after the test.
+*/
+function testWallFaceGroundPivot =
+(
+    local test_nodes = for object_node in selection where superclassof object_node == GeometryClass collect object_node
+    local test_passed = false
+
+
+    if test_nodes.count == 0 then
+    (
+        format "Ground Pivot test: select at least one supported wall object first.\n"
+        false
+    )
+    else
+    (
+        local original_tm = WorkingPivot.getTM()
+        local original_use_mode = WorkingPivot.UseMode
+        local original_edit_mode = WorkingPivot.EditMode
+        local original_ground_pivot = wall_face_ground_pivot_enabled
+        local selection_center = getWallFaceSelectionCenter test_nodes
+        local selection_ground_origin = undefined
+        local manual_ground_origin = undefined
+        local selection_ground_expected = undefined
+        local manual_ground_expected = undefined
+
+
+        try
+        (
+            wall_face_ground_pivot_enabled = true
+
+
+            if selection_center != undefined then
+            (
+                WorkingPivot.UseMode = false
+                selection_ground_expected = [selection_center.x, selection_center.y, 0.0]
+                selection_ground_origin = getWallFaceAnalysisOrigin test_nodes
+
+
+                local manual_tm = WorkingPivot.getTM()
+                manual_ground_expected = [selection_center.x + 13.0, selection_center.y + 17.0, 0.0]
+                manual_tm.translation = [manual_ground_expected.x, manual_ground_expected.y, 19.0]
+                WorkingPivot.setTM manual_tm
+                WorkingPivot.UseMode = true
+                manual_ground_origin = getWallFaceAnalysisOrigin test_nodes
+
+
+                test_passed = (((distance selection_ground_origin selection_ground_expected) < 0.0001) and ((distance manual_ground_origin manual_ground_expected) < 0.0001) and ((distance (WorkingPivot.getTM()).translation manual_ground_expected) < 0.0001))
+            )
+        )
+        catch
+        (
+            test_passed = false
+        )
+
+
+        try
+        (
+            wall_face_ground_pivot_enabled = original_ground_pivot
+            WorkingPivot.UseMode = false
+            WorkingPivot.setTM original_tm
+            WorkingPivot.EditMode = original_edit_mode
+            WorkingPivot.UseMode = original_use_mode
+        )
+        catch
+        (
+        )
+
+
+        format "Ground Pivot test: %\n" test_passed
         test_passed
     )
     -- return
@@ -6644,7 +6774,7 @@ function testWallFaceOptionsLayout =
 
 
     wallFaceClassifierRollout.setOptionsLayout true
-    expanded_ok = ((wallFaceClassifierRollout.height == 230) and (slot_control.height == 144))
+    expanded_ok = ((wallFaceClassifierRollout.height == 306) and (slot_control.height == 220))
 
 
     slot_control.height = original_slot_height
@@ -6741,7 +6871,7 @@ function testWallFaceClassRmbRouting =
 )
 
 
-rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
+rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:214
 (
     local working_pivot_syncing = false
 
@@ -6754,25 +6884,29 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
         tooltip:"LMB: Enable or disable Working Pivot editing in 3ds Max."
 
 
-    spinner spn_wall_thickness "Wall thickness:" pos:[8,46] width:214 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:76 \
+    checkbutton ground_pivot_checkbutton "GROUND PIVOT" pos:[8,46] width:270 height:30 \
+        tooltip:"Force the INNER \\ OUTTER analysis origin and Working Pivot to world ground at Z = 0. X/Y come from Use Edit Pivot or the selection center."
+
+
+    spinner spn_wall_thickness "Wall thickness:" pos:[8,84] width:214 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:76 \
         tooltip:"Maximum distance to search for the opposite wall. Default: 1 m."
-    label lbl_wall_units "units" pos:[228,50] width:50 height:18 align:#left tooltip:"Current display unit."
+    label lbl_wall_units "units" pos:[228,88] width:50 height:18 align:#left tooltip:"Current display unit."
 
 
-    spinner spn_connection_threshold "Connect threshold:" pos:[8,72] width:214 height:20 range:[0.001,1000000.0,((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:76 \
+    spinner spn_connection_threshold "Connect threshold:" pos:[8,110] width:214 height:20 range:[0.001,1000000.0,((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:76 \
         tooltip:"Matches neighbor vertices; at least 2 must match. Default is 10% of Wall thickness, and changing Wall thickness resets this value."
-    label lbl_connect_units "units" pos:[228,76] width:50 height:18 align:#left tooltip:"Current display unit."
+    label lbl_connect_units "units" pos:[228,114] width:50 height:18 align:#left tooltip:"Current display unit."
 
 
-    button btn_reset "RESET" pos:[8,100] width:270 height:30 \
+    button btn_reset "RESET" pos:[8,138] width:270 height:30 \
         tooltip:"LMB: Reset face classification, remove the classifier material, clear FORCED OUTER/INNER hints, cached class data, and debug trace."
 
 
-    checkbutton debug_trace_checkbutton "DEBUG TRACE" pos:[8,138] width:131 height:30 \
+    checkbutton debug_trace_checkbutton "DEBUG TRACE" pos:[8,176] width:131 height:30 \
         tooltip:"Record classifier inputs, per-face scores, resolution reasons, and class snapshots in object user properties."
 
 
-    button btn_print_debug "PRINT DEBUG" pos:[147,138] width:131 height:30 \
+    button btn_print_debug "PRINT DEBUG" pos:[147,176] width:131 height:30 \
         tooltip:"Print selected or last analyzed wall geometry, trace properties, vertices, faces, normals, Material IDs, scores, and resolution reasons to the MAXScript Listener."
 
 
@@ -6807,6 +6941,7 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
         local unit_label = getWallFaceDisplayUnitLabel()
         lbl_wall_units.text = unit_label
         lbl_connect_units.text = unit_label
+        ground_pivot_checkbutton.checked = wall_face_ground_pivot_enabled
         debug_trace_checkbutton.checked = wall_face_debug_enabled
         syncWorkingPivotControls()
     )
@@ -6840,6 +6975,13 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
             )
 
 
+            if wall_face_ground_pivot_enabled then
+            (
+                local selected_nodes = for object_node in selection where superclassof object_node == GeometryClass collect object_node
+                getWallFaceAnalysisOrigin selected_nodes
+            )
+
+
             syncWorkingPivotControls()
         )
     )
@@ -6866,6 +7008,19 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
 
 
             syncWorkingPivotControls()
+        )
+    )
+
+
+    on ground_pivot_checkbutton changed control_state do
+    (
+        wall_face_ground_pivot_enabled = control_state
+
+
+        if control_state then
+        (
+            local selected_nodes = for object_node in selection where superclassof object_node == GeometryClass collect object_node
+            getWallFaceAnalysisOrigin selected_nodes
         )
     )
 
@@ -6921,7 +7076,7 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
 rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
 (
     button btn_classify "INNER \\ OUTTER" pos:[4,8] width:149 height:32 \
-        tooltip:"LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
+        tooltip:"LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. GROUND PIVOT forces the active origin to world Z = 0. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
 
 
     button btn_explode "EXPLODE" pos:[157,8] width:149 height:32 \
@@ -6945,8 +7100,8 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
     (
         if options_open then
         (
-            wallFaceClassifierRollout.height = 268
-            wall_face_options_subrollout.height = 182
+            wallFaceClassifierRollout.height = 306
+            wall_face_options_subrollout.height = 220
         )
         else
         (

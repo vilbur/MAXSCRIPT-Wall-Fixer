@@ -1,4 +1,5 @@
 [NEXT]
+GET OUTER WALLS > Layer: add as 3rd button after Explode. Layer LMB: create layer next to current layer named "{Current layer name}-{INNER|OUTTER|TOP|BOTTOM}"
 
 
 [IN PROGRESS]
