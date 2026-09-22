@@ -1,6 +1,6 @@
 /*
-Wall-Fixer Bundled Loader 0.924
-Project version 0.951.
+Wall-Fixer Bundled Loader 0.933
+Project version 0.961.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.925"
-global wall_fixer_loader_tool_version = 0.951
+global wall_fixer_loader_file_version = "0.935"
+global wall_fixer_loader_tool_version = 0.961
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -16853,7 +16853,7 @@ createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #
 
 
 /*
-Wall-Fixer UI 0.911
+Wall-Fixer UI 0.920
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -16863,8 +16863,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.911"
-global wall_fixer_ui_tool_version = 0.951
+global wall_fixer_ui_file_version = "0.921"
+global wall_fixer_ui_tool_version = 0.961
 
 
 /*
@@ -16931,6 +16931,7 @@ global WallFixerEdgeFixerRollout
 global WallFixerSliceWallsRollout
 global WallFixerPostProcessRollout
 global WallFixerHelpersRollout
+global WallFixerDebugRollout
 global wallFaceClassifierRollout
 global wall_face_classifier_cache = #()
 global wall_face_classifier_last_nodes = #()
@@ -17618,6 +17619,7 @@ saved_edge_fixer_rolled_up = wallFixerReadIniBool "Rollouts" "EdgeFixer" true
 saved_slice_walls_rolled_up = wallFixerReadIniBool "Rollouts" "SliceWalls" true
 saved_postprocess_rolled_up = wallFixerReadIniBool "Rollouts" "PostProcess" true
 saved_helpers_rolled_up = wallFixerReadIniBool "Rollouts" "Helpers" true
+saved_debug_rolled_up = wallFixerReadIniBool "Rollouts" "Debug" true
 saved_edge_options_rolled_up = wallFixerReadIniBool "Rollouts" "EdgeFixerOptions" true
 saved_outer_options_rolled_up = wallFixerReadIniBool "Rollouts" "GetOuterWallsOptions" true
 
@@ -18101,12 +18103,16 @@ rollout WallFixerPreProcessRollout "1 PRE-PROCESS & FIX GEOMETRY" width:310 heig
             numbered_button_tooltip \
             "LMB: find unwelded/near-coincident vertices using Options > WELD DISTANCE as the maximum pair distance. Open border edges are also selected when candidates are found.\n\nRMB: weld/fix duplicated vertices using the same WELD DISTANCE."
 
+        duplicate_verts_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
+
 
         wallFixerSetupNumberedDarkButton \
             explode_walls_button \
             "3. EXPLODE OBJECTS TO WALLS" \
             numbered_button_tooltip \
             "1. NORMALS: Explode walls by normals\n\n2. FACE DIRECTION: Explode walls by face direction — detects front/backside normals\n\n3. XY POSITION: Explode walls by position\n\n4. ELEMENTS: Explode to elements"
+
+        explode_walls_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
     )
 
 
@@ -18238,11 +18244,12 @@ Straight Edge Fixer tuning controls are kept in the OPTIONS subrollout at the bo
 */
 rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:192
 (
+    local direction_button_tooltip
+
     groupBox edge_z_group "6. EDGE ROW FIXING AND BORDER EDGES CHECK" pos:[4,8] width:302 height:150
 
 
-    button check_vertical_button "VERTICAL \\ SKEWED" pos:[8,30] width:112 height:34 \
-        tooltip:"LMB: select exactly vertical edges at zero tolerance.\n\nRMB: select skewed vertical edges from above 0° through Angle.\n\nCTRL+RMB: fix selected edges to world vertical."
+    dotNetControl check_vertical_button "System.Windows.Forms.Button" pos:[8,30] width:112 height:34
 
 
     spinner edge_angle_spinner "" pos:[124,37] width:48 height:20 \
@@ -18251,8 +18258,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:192
     label edge_angle_units_label "°" pos:[174,39] width:12 height:18
 
 
-    button check_horizontal_button "HORIZONTAL \\ SLOPED" pos:[190,30] width:112 height:34 \
-        tooltip:"LMB: select exactly horizontal edges at zero tolerance.\n\nRMB: select sloped horizontal edges from above 0° through Angle.\n\nCTRL+RMB: fix selected edges horizontal while preserving wall direction."
+    dotNetControl check_horizontal_button "System.Windows.Forms.Button" pos:[190,30] width:112 height:34
 
 
     button border_check_button "BORDER CHECK" pos:[18,70] width:264 height:30 \
@@ -18280,6 +18286,22 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:192
 
     on WallFixerEdgeFixerRollout open do
     (
+        if direction_button_tooltip == undefined then
+        (
+            direction_button_tooltip = dotNetObject "System.Windows.Forms.ToolTip"
+        )
+
+        setupDarkButton check_vertical_button
+        setupDarkButton check_horizontal_button
+
+        direction_orange = (dotNetClass "System.Drawing.Color").Orange
+        check_vertical_button.Text = "VERTICAL \\ SKEWED"
+        check_vertical_button.ForeColor = direction_orange
+        direction_button_tooltip.SetToolTip check_vertical_button "LMB: select exactly vertical edges at zero tolerance.\n\nRMB: select skewed vertical edges from above 0° through Angle.\n\nCTRL+RMB: fix selected edges to world vertical."
+        check_horizontal_button.Text = "HORIZONTAL \\ SLOPED"
+        check_horizontal_button.ForeColor = direction_orange
+        direction_button_tooltip.SetToolTip check_horizontal_button "LMB: select exactly horizontal edges at zero tolerance.\n\nRMB: select sloped horizontal edges from above 0° through Angle.\n\nCTRL+RMB: fix selected edges horizontal while preserving wall direction."
+
         try
         (
             local settings_data = StraightEdgeFixer.loadSettings()
@@ -18342,40 +18364,46 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:192
     )
 
 
-    on check_horizontal_button pressed do
+    on check_horizontal_button MouseUp sender event_args do
     (
-        ::WallFixerRollout.runStraightEdgeDirection #horizontal action:#exact
+        mouse_button = wallFixerGetDotNetMouseButton event_args
+
+        if mouse_button == "Left" then
+        (
+            ::WallFixerRollout.runStraightEdgeDirection #horizontal action:#exact
+        )
+        else if mouse_button == "Right" then
+        (
+            if keyboard.controlPressed then
+            (
+                ::WallFixerRollout.runStraightEdgeDirection #horizontal action:#fix
+            )
+            else
+            (
+                ::WallFixerRollout.runStraightEdgeDirection #horizontal action:#skewed
+            )
+        )
     )
 
 
-    on check_horizontal_button rightclick do
+    on check_vertical_button MouseUp sender event_args do
     (
-        if keyboard.controlPressed then
+        mouse_button = wallFixerGetDotNetMouseButton event_args
+
+        if mouse_button == "Left" then
         (
-            ::WallFixerRollout.runStraightEdgeDirection #horizontal action:#fix
+            ::WallFixerRollout.runStraightEdgeDirection #vertical action:#exact
         )
-        else
+        else if mouse_button == "Right" then
         (
-            ::WallFixerRollout.runStraightEdgeDirection #horizontal action:#skewed
-        )
-    )
-
-
-    on check_vertical_button pressed do
-    (
-        ::WallFixerRollout.runStraightEdgeDirection #vertical action:#exact
-    )
-
-
-    on check_vertical_button rightclick do
-    (
-        if keyboard.controlPressed then
-        (
-            ::WallFixerRollout.runStraightEdgeDirection #vertical action:#fix
-        )
-        else
-        (
-            ::WallFixerRollout.runStraightEdgeDirection #vertical action:#skewed
+            if keyboard.controlPressed then
+            (
+                ::WallFixerRollout.runStraightEdgeDirection #vertical action:#fix
+            )
+            else
+            (
+                ::WallFixerRollout.runStraightEdgeDirection #vertical action:#skewed
+            )
         )
     )
 
@@ -18447,6 +18475,8 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
             "9. SLICE WALLS" \
             numbered_button_tooltip \
             "LMB: Slice selected walls using the active Vertical/Horizontal mode.\n\nRMB: Run both modes; active mode first, then the other mode."
+
+        slice_selected_walls_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
     )
 
 
@@ -18631,10 +18661,6 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
     button align_camera_button "Align Camera" pos:[8,44] width:143 height:30 \
         tooltip:"LMB: Align the active viewport perpendicular to selected wall faces. If no faces are selected, use the dominant wall-face normal. Switch to orthographic User view and zoom to the selection."
 
-
-    button print_objs_button "Print Objs" pos:[159,44] width:143 height:30 \
-        tooltip:"Clear the Listener and print detailed diagnostics for the selected objects."
-
     button split_button "Split" pos:[8,80] width:143 height:30 \
         tooltip:"LMB: Apply Editable Poly, split all selected edges, then explode the resulting elements into separate objects."
 
@@ -18667,12 +18693,6 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
     )
 
 
-    on print_objs_button pressed do
-    (
-        ::WallFixerRollout.runPrintSelectedObjects()
-    )
-
-
     on split_button pressed do
     (
         ::WallFixerRollout.runSplitSelectedEdge()
@@ -18690,6 +18710,45 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
         ::WallFixerRollout.runRemoveMaterial()
     )
 )
+
+
+
+/*
+DEBUG contains optional tracing and Listener diagnostics outside the main workflow.
+These controls do not change the numbered pipeline order.
+*/
+rollout WallFixerDebugRollout "DEBUG" width:310 height:80
+(
+    checkbutton debug_trace_checkbutton "DEBUG TRACE" pos:[8,8] width:143 height:30 \
+        tooltip:"Record classifier inputs, per-face scores, resolution reasons, and class snapshots in object user properties."
+
+    button btn_print_debug "PRINT DEBUG" pos:[159,8] width:143 height:30 \
+        tooltip:"Print selected or last analyzed wall geometry, trace properties, vertices, faces, normals, Material IDs, scores, and resolution reasons to the MAXScript Listener."
+
+    button print_objs_button "Print Objs" pos:[8,44] width:294 height:30 \
+        tooltip:"Clear the Listener and print detailed diagnostics for the selected objects."
+
+    on WallFixerDebugRollout open do
+    (
+        debug_trace_checkbutton.checked = wall_face_debug_enabled
+    )
+
+    on debug_trace_checkbutton changed control_state do
+    (
+        wall_face_debug_enabled = control_state
+    )
+
+    on btn_print_debug pressed do
+    (
+        debugWallFaceClassifierSelection verbose_vertices:true verbose_faces:true use_last_if_empty:true
+    )
+
+    on print_objs_button pressed do
+    (
+        ::WallFixerRollout.runPrintSelectedObjects()
+    )
+)
+
 
 
 /*
@@ -24254,7 +24313,7 @@ function testWallFaceOptionsLayout =
 
 
     wallFaceClassifierRollout.setOptionsLayout true
-    expanded_ok = ((wallFaceClassifierRollout.height == (268 + wall_fixer_closed_rollout_height)) and (slot_control.height == (182 + wall_fixer_closed_rollout_height)))
+    expanded_ok = ((wallFaceClassifierRollout.height == (230 + wall_fixer_closed_rollout_height)) and (slot_control.height == (144 + wall_fixer_closed_rollout_height)))
 
 
     slot_control.height = original_slot_height
@@ -24549,7 +24608,7 @@ function testWallFaceClassRmbRouting =
 )
 
 
-rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
+rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:138
 (
     local working_pivot_syncing = false
 
@@ -24578,14 +24637,6 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
 
     button btn_reset "RESET" pos:[8,100] width:270 height:30 \
         tooltip:"LMB: Reset face classification, remove the classifier material, clear FORCED OUTER/INNER hints, cached class data, and debug trace."
-
-
-    checkbutton debug_trace_checkbutton "DEBUG TRACE" pos:[8,138] width:131 height:30 \
-        tooltip:"Record classifier inputs, per-face scores, resolution reasons, and class snapshots in object user properties."
-
-
-    button btn_print_debug "PRINT DEBUG" pos:[147,138] width:131 height:30 \
-        tooltip:"Print selected or last analyzed wall geometry, trace properties, vertices, faces, normals, Material IDs, scores, and resolution reasons to the MAXScript Listener."
 
 
     /*
@@ -24620,7 +24671,6 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
         lbl_wall_units.text = unit_label
         lbl_connect_units.text = unit_label
         ground_pivot_checkbutton.checked = wall_face_ground_pivot_enabled
-        debug_trace_checkbutton.checked = wall_face_debug_enabled
         syncWorkingPivotControls()
     )
 
@@ -24717,18 +24767,6 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
         local unit_label = getWallFaceDisplayUnitLabel()
         lbl_wall_units.text = unit_label
         lbl_connect_units.text = unit_label
-    )
-
-
-    on debug_trace_checkbutton changed control_state do
-    (
-        wall_face_debug_enabled = control_state
-    )
-
-
-    on btn_print_debug pressed do
-    (
-        debugWallFaceClassifierSelection verbose_vertices:true verbose_faces:true use_last_if_empty:true
     )
 
 
@@ -24849,6 +24887,8 @@ function createWallFaceClassLayersFromCurrent =
 
 rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
 (
+    local class_button_tooltip
+
     button btn_classify "INNER \\ OUTTER" pos:[4,8] width:98 height:32 \
         tooltip:"LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. GROUND PIVOT forces the active origin to world Z = 0. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
 
@@ -24861,10 +24901,10 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
         tooltip:"LMB: Create/reuse -INNER, -OUTTER, -TOP, and -BOTTOM sibling layers and move selected single-class wall objects to the matching layer."
 
 
-    button btn_select_outer "OUTER" pos:[4,46] width:72 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing OUTER faces or face mode selects OUTER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces OUTER without AUTO GROW.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. A parallel opposite wall within Wall thickness also stops growth. Auto-grown walls are not marked FORCED. TOP/BOTTOM seams stop growth."
-    button btn_select_inner "INNER" pos:[80,46] width:72 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing INNER faces or face mode selects INNER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces INNER without AUTO GROW.\n\nCTRL+RMB: FORCE INNER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. A parallel opposite wall within Wall thickness also stops growth. Auto-grown walls are not marked FORCED. TOP/BOTTOM seams stop growth."
-    button btn_select_up "TOP" pos:[156,46] width:72 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing TOP faces or face mode selects TOP faces.\n\nRMB: Assign selected faces, or selected-object cap faces, to TOP.\n\nCTRL+RMB: Same TOP assignment; AUTO GROW is intentionally limited to OUTER/INNER wall sides."
-    button btn_select_down "BOTTOM" pos:[232,46] width:74 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing BOTTOM faces or face mode selects BOTTOM faces.\n\nRMB: Assign selected faces, or selected-object cap faces, to BOTTOM.\n\nCTRL+RMB: Same BOTTOM assignment; AUTO GROW is intentionally limited to OUTER/INNER wall sides."
+    dotNetControl btn_select_outer "System.Windows.Forms.Button" pos:[4,46] width:72 height:24
+    dotNetControl btn_select_inner "System.Windows.Forms.Button" pos:[80,46] width:72 height:24
+    dotNetControl btn_select_up "System.Windows.Forms.Button" pos:[156,46] width:72 height:24
+    dotNetControl btn_select_down "System.Windows.Forms.Button" pos:[232,46] width:74 height:24
 
 
     subRollout wall_face_options_subrollout "" pos:[0,78] width:310 height:wall_fixer_closed_rollout_height
@@ -24878,8 +24918,8 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
     (
         if options_open then
         (
-            wallFaceClassifierRollout.height = 268 + wall_fixer_closed_rollout_height
-            wall_face_options_subrollout.height = 182 + wall_fixer_closed_rollout_height
+            wallFaceClassifierRollout.height = 230 + wall_fixer_closed_rollout_height
+            wall_face_options_subrollout.height = 144 + wall_fixer_closed_rollout_height
         )
         else
         (
@@ -24933,6 +24973,33 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
 
     on wallFaceClassifierRollout open do
     (
+        if class_button_tooltip == undefined then
+        (
+            class_button_tooltip = dotNetObject "System.Windows.Forms.ToolTip"
+        )
+
+        light_blue = (dotNetClass "System.Drawing.Color").FromArgb 150 210 255
+        class_buttons = #(btn_select_outer, btn_select_inner, btn_select_up, btn_select_down)
+        class_texts = #("OUTER", "INNER", "TOP", "BOTTOM")
+        class_tooltips = #(
+            "LMB: Analyze selected objects first if needed, then select OUTER.\n\nRMB: FORCE OUTER.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW.",
+            "LMB: Analyze selected objects first if needed, then select INNER.\n\nRMB: FORCE INNER.\n\nCTRL+RMB: FORCE INNER, then AUTO GROW.",
+            "LMB: Analyze selected objects first if needed, then select TOP.\n\nRMB: Assign TOP.",
+            "LMB: Analyze selected objects first if needed, then select BOTTOM.\n\nRMB: Assign BOTTOM."
+        )
+
+        for class_index = 1 to class_buttons.count do
+        (
+            setupDarkButton class_buttons[class_index]
+            class_buttons[class_index].Text = class_texts[class_index]
+            class_buttons[class_index].ForeColor = light_blue
+            class_button_tooltip.SetToolTip class_buttons[class_index] class_tooltips[class_index]
+        )
+
+        class_orange = (dotNetClass "System.Drawing.Color").Orange
+        btn_select_outer.ForeColor = class_orange
+        btn_select_inner.ForeColor = class_orange
+
         try
         (
             addSubRollout wall_face_options_subrollout wallFaceClassifierOptionsRollout rolledUp:saved_outer_options_rolled_up
@@ -24961,7 +25028,7 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
         )
         else
         (
-            ::WallFixerRollout.setStatus #warning "Could not create all wall class layers."
+            ::WallFixerRollout.setStatus #failed "Could not create all wall class layers."
         )
     )
 
@@ -25004,107 +25071,44 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
     )
 
 
-    on btn_select_outer pressed do
+    function handleClassButtonMouse material_id event_args =
     (
-        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:wallFaceClassifierOptionsRollout.spn_wall_thickness.value connection_threshold:wallFaceClassifierOptionsRollout.spn_connection_threshold.value
-        local result_data = selectWallFacesByMaterialId 1
+        mouse_button = wallFixerGetDotNetMouseButton event_args
 
-
-        if result_data.count == 3 then
+        if mouse_button == "Left" then
         (
-            if result_data[3] == #faces then
-            (
-                undefined
-            )
-            else
-            (
-                undefined
-            )
+            analyzeUnclassifiedSelectedWallObjects wall_thickness:wallFaceClassifierOptionsRollout.spn_wall_thickness.value connection_threshold:wallFaceClassifierOptionsRollout.spn_connection_threshold.value
+            selectWallFacesByMaterialId material_id
         )
-    )
-
-
-    on btn_select_outer rightclick do
-    (
-        handleClassRightClick 1
-    )
-
-
-    on btn_select_inner pressed do
-    (
-        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:wallFaceClassifierOptionsRollout.spn_wall_thickness.value connection_threshold:wallFaceClassifierOptionsRollout.spn_connection_threshold.value
-        local result_data = selectWallFacesByMaterialId 2
-
-
-        if result_data.count == 3 then
+        else if mouse_button == "Right" then
         (
-            if result_data[3] == #faces then
-            (
-                undefined
-            )
-            else
-            (
-                undefined
-            )
+            handleClassRightClick material_id
         )
+        -- return
     )
 
 
-    on btn_select_inner rightclick do
+    on btn_select_outer MouseUp sender event_args do
     (
-        handleClassRightClick 2
+        handleClassButtonMouse 1 event_args
     )
 
 
-    on btn_select_up pressed do
+    on btn_select_inner MouseUp sender event_args do
     (
-        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:wallFaceClassifierOptionsRollout.spn_wall_thickness.value connection_threshold:wallFaceClassifierOptionsRollout.spn_connection_threshold.value
-        local result_data = selectWallFacesByMaterialId 3
-
-
-        if result_data.count == 3 then
-        (
-            if result_data[3] == #faces then
-            (
-                undefined
-            )
-            else
-            (
-                undefined
-            )
-        )
+        handleClassButtonMouse 2 event_args
     )
 
 
-    on btn_select_up rightclick do
+    on btn_select_up MouseUp sender event_args do
     (
-        handleClassRightClick 3
+        handleClassButtonMouse 3 event_args
     )
 
 
-    on btn_select_down pressed do
+    on btn_select_down MouseUp sender event_args do
     (
-        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:wallFaceClassifierOptionsRollout.spn_wall_thickness.value connection_threshold:wallFaceClassifierOptionsRollout.spn_connection_threshold.value
-        local result_data = selectWallFacesByMaterialId 4
-
-
-        if result_data.count == 3 then
-        (
-            if result_data[3] == #faces then
-            (
-                undefined
-            )
-            else
-            (
-                undefined
-            )
-        )
-    )
-
-
-    on btn_select_down rightclick do
-    (
-        handleClassRightClick 4
+        handleClassButtonMouse 4 event_args
     )
 
 
@@ -25174,7 +25178,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
     (
         color_class = dotNetClass "System.Drawing.Color"
         result_text = "SUCCESS"
-        result_color = color_class.HotPink
+        result_color = color_class.Green
 
 
         case result_type of
@@ -25183,6 +25187,11 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
             (
                 result_text = "WARNING"
                 result_color = color_class.DarkOrange
+            )
+            #failed:
+            (
+                result_text = "FAILED"
+                result_color = color_class.OrangeRed
             )
             #error:
             (
@@ -25223,7 +25232,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         renderStatusLine status_line_bottom status_texts[2]
 
 
-        if (message_type == #success) or (message_type == #warning) or (message_type == #error) then
+        if (message_type == #success) or (message_type == #warning) or (message_type == #failed) or (message_type == #error) then
         (
             showProcessResult message_type
         )
@@ -25410,6 +25419,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         setIniSetting wall_fixer_ui_ini_path "Rollouts" "SliceWalls" (if WallFixerSliceWallsRollout.open then "0" else "1")
         setIniSetting wall_fixer_ui_ini_path "Rollouts" "PostProcess" (if WallFixerPostProcessRollout.open then "0" else "1")
         setIniSetting wall_fixer_ui_ini_path "Rollouts" "Helpers" (if WallFixerHelpersRollout.open then "0" else "1")
+        setIniSetting wall_fixer_ui_ini_path "Rollouts" "Debug" (if WallFixerDebugRollout.open then "0" else "1")
         setIniSetting wall_fixer_ui_ini_path "Rollouts" "EdgeFixerOptions" (if WallFixerEdgeFixerOptionsRollout.open then "0" else "1")
         setIniSetting wall_fixer_ui_ini_path "Rollouts" "GetOuterWallsOptions" (if wallFaceClassifierOptionsRollout.open then "0" else "1")
 
@@ -25518,7 +25528,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
         else
         (
-            setStatus #warning WallFixer.last_slice_report
+            setStatus #failed WallFixer.last_slice_report
         )
 
 
@@ -25556,7 +25566,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
         else
         (
-            setStatus #warning WallFixer.last_slice_report
+            setStatus #failed WallFixer.last_slice_report
         )
 
 
@@ -25583,7 +25593,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
         else
         (
-            setStatus #warning WallFixer.last_slice_report
+            setStatus #failed WallFixer.last_slice_report
         )
 
 
@@ -25618,7 +25628,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
         else
         (
-            setStatus #warning WallFixer.last_slice_report
+            setStatus #failed WallFixer.last_slice_report
         )
 
 
@@ -25742,7 +25752,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
         else
         (
-            setStatus #warning WallFixer.last_slice_report
+            setStatus #failed WallFixer.last_slice_report
         )
 
 
@@ -26027,7 +26037,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
             )
             else if processed_count == 0 then
             (
-                setStatus #warning "Weld: no Editable Poly or Edit Poly objects with selected vertices were processed."
+                setStatus #failed "Weld: no Editable Poly or Edit Poly objects with selected vertices were processed."
                 false
             )
             else
@@ -28985,7 +28995,7 @@ result_groups
         )
         else
         (
-            setStatus #warning (action_text + " " + (direction_type as string) + " edges did not produce a completed result.")
+            setStatus #failed (action_text + " " + (direction_type as string) + " edges did not produce a completed result.")
         )
 
         completed
@@ -29012,7 +29022,7 @@ result_groups
         )
         else
         (
-            setStatus #warning "Border edge check did not produce a completed result."
+            setStatus #failed "Border edge check did not produce a completed result."
         )
 
 
@@ -29504,6 +29514,7 @@ result_groups
         addSubRollout workflow_subrollout WallFixerSliceWallsRollout rolledUp:saved_slice_walls_rolled_up
         addSubRollout workflow_subrollout WallFixerPostProcessRollout rolledUp:saved_postprocess_rolled_up
         addSubRollout workflow_subrollout WallFixerHelpersRollout rolledUp:saved_helpers_rolled_up
+        addSubRollout workflow_subrollout WallFixerDebugRollout rolledUp:saved_debug_rolled_up
     )
 
 
@@ -29562,6 +29573,7 @@ result_groups
         saveStraightEdgeSettings()
 
 
+        removeSubRollout workflow_subrollout WallFixerDebugRollout
         removeSubRollout workflow_subrollout WallFixerHelpersRollout
         removeSubRollout workflow_subrollout WallFixerPostProcessRollout
         removeSubRollout workflow_subrollout WallFixerSliceWallsRollout

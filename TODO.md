@@ -1,25 +1,33 @@
 ## NEXT
 
-UI: SUCCESS label: display the SUCCESS status text in green.
 
 
 ## IN PROGRESS
 
 ## QUEUE
 
-UI: button 2: make the button font/text color orange.
-
-UI: VERTICAL / SKEWED row buttons: make the button font/text color orange.
-
-UI: button 3: make the button font/text color orange.
-
-UI: INNER / OUTTER buttons: make the .NET button font orange.
-
-UI: button 9: make the button font/text color orange.
-
-UI: FAILED label: add a "FAILED" status label and use it instead of a warning when a function fails but the failure is non-critical.
 
 ## DONE TODAY
+
+0.961 UI: .NET controls: keep the background color dark grey, matching the other .NET buttons.
+
+0.960 UI: FAILED label: add a "FAILED" status label and use it instead of a warning when a function fails but the failure is non-critical.
+
+0.959 UI: button 9: make the button font/text color orange.
+
+0.958 UI: INNER / OUTTER buttons: make the .NET button font orange.
+
+0.957 UI: button 3: make the button font/text color orange.
+
+0.956 UI: VERTICAL / SKEWED row buttons: make the button font/text color orange.
+
+0.955 UI: button 2: make the button font/text color orange.
+
+0.954 UI: create new rollout "DEBUG" and move both existing Options > Debug buttons plus HELPERS > Print Objs into it.
+
+0.953 UI: rollout 2 button row starting with "OUTTER": make the entire row font/text color light blue.
+
+0.952 UI: SUCCESS label: display the SUCCESS status text in green.
 
 0.939 SLICE WALLS > Completion status: final single-mode and both-mode success messages now include elapsed processing time.
 

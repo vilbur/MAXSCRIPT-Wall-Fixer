@@ -1,3 +1,23 @@
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: applied the shared dark `.NET` button template to the GET OUTER WALLS class buttons and EDGE FIXER direction buttons so their background, border, hover/down states, and bold font match the other dark WinForms controls while preserving their orange/light-blue text colors; project version 0.961.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added a distinct `FAILED` completed-status label for non-critical operation failures; safe-to-continue failures now use FAILED, prerequisites/partial outcomes remain WARNING, and hard failures remain ERROR; project version 0.960.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: numbered Slice button 9 now uses orange text while retaining the shared dark-button styling and existing LMB/RMB behavior; project version 0.959.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: GET OUTER WALLS OUTER and INNER .NET class buttons now use orange text; TOP and BOTTOM remain light blue; project version 0.958.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: PRE-PROCESS numbered button 3 (`EXPLODE OBJECTS TO WALLS`) now uses orange text while retaining the shared dark-button styling; project version 0.957.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: converted EDGE FIXER `VERTICAL \\ SKEWED` and `HORIZONTAL \\ SLOPED` direction buttons to WinForms controls with orange text while preserving LMB/RMB/CTRL+RMB behavior; project version 0.956.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: PRE-PROCESS numbered button 2 (`VERTEX CHECK / WELD`) now uses orange text while retaining the shared dark-button styling; project version 0.955.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added a persisted top-level `DEBUG` rollout containing DEBUG TRACE, PRINT DEBUG, and Print Objs; removed those controls from GET OUTER WALLS Options/HELPERS and compacted the Options layout; project version 0.954.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: converted GET OUTER WALLS OUTER/INNER/TOP/BOTTOM class-row controls to WinForms buttons and set the whole row text to light blue while preserving LMB/RMB/CTRL+RMB behavior; project version 0.953.
+
+2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: SUCCESS status text is now green; WARNING and ERROR colors remain unchanged; project version 0.952.
+
 2026-09-22 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: removed the duplicate PRE-PROCESS step 2 weld spinner and expanded `2. VERTEX CHECK / WELD` to the full row; step 2 now reads only `Options > WELD DISTANCE`, renamed the Options `Threshold` label to `WELD DISTANCE`, and added `testPreProcessWeldDistanceControl`; project version 0.951.
 
 2026-09-22 — `Wall-Fixer-Core.ms`, `Wall-Fixer.ms`: Slice Walls directional runs now preserve the opposite existing slice modifier; Horizontal replaces only `SLICE HORIZONTAL` and keeps `SLICE VERTICAL`, while Vertical replaces only `SLICE VERTICAL` and keeps `SLICE HORIZONTAL`. Legacy `SLICE ALL` and slicing cleanup modifiers are still cleared before a directional rebuild. RMB both-mode slicing therefore finishes with two directional slice modifiers stacked instead of deleting the first pass. Added `testSliceModifierRetentionPolicy`; project version 0.950.
