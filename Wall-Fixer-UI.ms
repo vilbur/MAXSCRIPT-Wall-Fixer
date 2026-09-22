@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer UI 0.40
+Wall-Fixer UI 0.41
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.40"
-global wall_fixer_ui_tool_version = 0.49
+global wall_fixer_ui_file_version = "0.41"
+global wall_fixer_ui_tool_version = 0.50
 
 
 /*
@@ -1269,12 +1269,8 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:112
 EDGE FIXER contains geometry-fix workflow steps 5 through 8.
 The Straight Edge Fixer action callbacks are inherited without changing their geometry logic.
 */
-rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:324
+rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:350
 (
-    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[8,8] width:294 height:34 \
-        tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
-
-
     subRollout edge_fixer_options_subrollout "" pos:[0,48] width:310 height:24
 
 
@@ -1295,12 +1291,16 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:324
         tooltip:"Detect repeated horizontal edge levels and align nearby horizontal edges to TOP, BOTTOM or CENTER target Z."
 
 
-    button fix_ngons_button "7. FIX N-GONS" pos:[8,238] width:294 height:34 \
+    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[8,224] width:294 height:34 \
+        tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
+
+
+    button fix_ngons_button "7. FIX N-GONS" pos:[8,264] width:294 height:34 \
         tooltip:"Run the current Wall-Fixer Fix N-gons function before slicing."
 
 
-    groupBox check_result_group "8. CHECK RESULT" pos:[8,278] width:294 height:38
-    label check_result_label "Manual viewport check of geometry fixes." pos:[18,294] width:274 height:18
+    groupBox check_result_group "8. CHECK RESULT" pos:[8,304] width:294 height:38
+    label check_result_label "Manual viewport check of geometry fixes." pos:[18,320] width:274 height:18
 
 
     /*
@@ -1318,10 +1318,11 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:324
         check_vertical_button.pos = [155, (100 + layout_offset)]
         border_check_button.pos = [18, (140 + layout_offset)]
         straight_edge_fixer_button.pos = [18, (176 + layout_offset)]
-        fix_ngons_button.pos = [8, (238 + layout_offset)]
-        check_result_group.pos = [8, (278 + layout_offset)]
-        check_result_label.pos = [18, (294 + layout_offset)]
-        WallFixerEdgeFixerRollout.height = 324 + layout_offset
+        two_edge_verts_button.pos = [8, (224 + layout_offset)]
+        fix_ngons_button.pos = [8, (264 + layout_offset)]
+        check_result_group.pos = [8, (304 + layout_offset)]
+        check_result_label.pos = [18, (320 + layout_offset)]
+        WallFixerEdgeFixerRollout.height = 350 + layout_offset
         -- return
     )
 
@@ -5891,14 +5892,14 @@ function testEdgeFixerOptionsLayout =
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout false
-    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 324) and (slot_control.height == 24) and (WallFixerEdgeFixerRollout.edge_z_group.pos.y == 78))
+    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 350) and (slot_control.height == 24) and (WallFixerEdgeFixerRollout.edge_z_group.pos.y == 78))
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout true
-    expanded_ok = ((WallFixerEdgeFixerRollout.height == 418) and (slot_control.height == 118) and (WallFixerEdgeFixerRollout.edge_z_group.pos.y == 172))
+    expanded_ok = ((WallFixerEdgeFixerRollout.height == 444) and (slot_control.height == 118) and (WallFixerEdgeFixerRollout.edge_z_group.pos.y == 172))
 
 
-    WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 324)
+    WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 350)
 
 
     local test_passed = width_ok and collapsed_ok and expanded_ok

@@ -1,4 +1,5 @@
-﻿[NEXT]
+[NEXT]
+Uppercase rollout name: GET OUTER WALLS
 
 
 
@@ -7,11 +8,8 @@
 
 
 [QUEUE]
-
-
-
-
-
+UI: resize subrolouts slots, set subrollout.slot.width == parent rollout width - 8
+UI: use full rollout width for parent controls; resize groupbox.width = parent rollout width - 8 (4px side padding)
 
 [DONE]
 0.38 Remove "Create Test Scene" button and the label above
