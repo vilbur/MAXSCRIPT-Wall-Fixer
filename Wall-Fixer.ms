@@ -1,6 +1,8 @@
 ﻿/*
-Wall-Fixer Bundled Loader 0.32
-Project version 0.38.
+Wall-Fixer Bundled Loader 0.43
+Project version 0.49.
+
+
 
 
 This launcher contains the complete Wall-Fixer runtime snapshot.
@@ -8,13 +10,18 @@ Separate component files remain development sources and are not required at star
 */
 
 
+
+
 global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.32"
-global wall_fixer_loader_tool_version = 0.38
+global wall_fixer_loader_file_version = "0.43"
+global wall_fixer_loader_tool_version = 0.49
 global wall_fixer_runtime_mode = #bundled
+global wall_fixer_launcher_path = getSourceFileName()
+
+
 
 
 /*
@@ -27,6 +34,8 @@ if wall_fixer_version_system != 1 then
 )
 
 
+
+
 if wall_fixer_version_epoch != 3 then
 (
     wall_fixer_version_epoch = 3
@@ -34,7 +43,11 @@ if wall_fixer_version_epoch != 3 then
 )
 
 
+
+
 wall_fixer_loader_current_tool_version_number = undefined
+
+
 
 
 if WallFixerVersion != undefined then
@@ -50,6 +63,8 @@ if WallFixerVersion != undefined then
 )
 
 
+
+
 if wall_fixer_loader_current_tool_version_number == undefined then
 (
     WallFixerVersion = wall_fixer_loader_tool_version
@@ -58,6 +73,8 @@ else if wall_fixer_loader_tool_version > wall_fixer_loader_current_tool_version_
 (
     WallFixerVersion = wall_fixer_loader_tool_version
 )
+
+
 
 
 /*
@@ -74,14 +91,20 @@ function testWallFixerLoader =
     format "============================================================\n"
 
 
+
+
     true
     -- return
 )
 
 
+
+
 format "Wall-Fixer bundled loader %\n" wall_fixer_loader_file_version
 format "Project version: %\n" WallFixerVersion
 format "Source file: %\n" (getSourceFileName())
+
+
 
 
 /*
@@ -91,6 +114,8 @@ Bundled dependency order:
 3. Straight Edge Fixer
 4. Wall-Fixer UI
 */
+
+
 
 
 /*
@@ -4911,6 +4936,7 @@ struct WallFixer_v
         attached_count = 0
         failed_count = 0
 
+
         for node in selected_nodes do
         (
             if node != undefined and isValidNode node and superClassOf node == GeometryClass then
@@ -4919,6 +4945,7 @@ struct WallFixer_v
             )
         )
 
+
         if geometry_nodes.count < 2 then
         (
             last_slice_report = "Attach: select at least two geometry objects."
@@ -4926,7 +4953,9 @@ struct WallFixer_v
             return false
         )
 
+
         target_node = geometry_nodes[1]
+
 
         if target_node.modifiers.count > 0 then
         (
@@ -4935,6 +4964,7 @@ struct WallFixer_v
                 target_edit_poly = target_node.modifiers[1]
             )
         )
+
 
         if target_edit_poly == undefined and classOf target_node.baseObject != Editable_Poly then
         (
@@ -4947,6 +4977,7 @@ struct WallFixer_v
             )
         )
 
+
         if target_edit_poly == undefined and classOf target_node.baseObject != Editable_Poly then
         (
             last_slice_report = "Attach: the target object could not be converted to Editable Poly."
@@ -4954,13 +4985,16 @@ struct WallFixer_v
             return false
         )
 
+
         for source_index = 2 to geometry_nodes.count do
         (
             source_node = geometry_nodes[source_index]
 
+
             if isValidNode source_node then
             (
                 attach_succeeded = false
+
 
                 try
                 (
@@ -4973,12 +5007,14 @@ struct WallFixer_v
                         polyop.attach target_node source_node
                     )
 
+
                     attach_succeeded = not(isValidNode source_node)
                 )
                 catch
                 (
                     attach_succeeded = false
                 )
+
 
                 if attach_succeeded then
                 (
@@ -4991,13 +5027,16 @@ struct WallFixer_v
             )
         )
 
+
         if isValidNode target_node then
         (
             update target_node
             select target_node
         )
 
+
         completeRedraw()
+
 
         if failed_count > 0 then
         (
@@ -5014,6 +5053,7 @@ struct WallFixer_v
         -- return
     ),
 
+
     /*
     Moves each selected node pivot to the center of its object using the native CenterPivot operation.
     The current object geometry and modifier stack are preserved.
@@ -5024,12 +5064,14 @@ struct WallFixer_v
         centered_count = 0
         failed_count = 0
 
+
         if selected_nodes.count == 0 then
         (
             last_slice_report = "Reset Pivot to Center: select at least one object."
             if not batch_quiet then format "%\n" last_slice_report
             return false
         )
+
 
         for node in selected_nodes do
         (
@@ -5047,7 +5089,9 @@ struct WallFixer_v
             )
         )
 
+
         completeRedraw()
+
 
         if centered_count == 0 then
         (
@@ -5069,6 +5113,7 @@ struct WallFixer_v
         )
         -- return
     ),
+
 
     /*
     Attaches all selected geometry into the first interactively selected target and welds the result.
@@ -16033,20 +16078,8 @@ createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #
 
 
 
-try
-(
-    destroyDialog straightEdgeFixer_ui
-)
-catch
-(
-)
-
-
 /*
-Bundled Wall-Fixer UI.
-*/
-/*
-Wall-Fixer UI 0.29
+Wall-Fixer UI 0.40
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -16055,8 +16088,9 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_ui_file_version = "0.29"
-global wall_fixer_ui_tool_version = 0.38
+global wall_fixer_launcher_path
+global wall_fixer_ui_file_version = "0.40"
+global wall_fixer_ui_tool_version = 0.49
 
 
 /*
@@ -16843,6 +16877,92 @@ function wallFixerOpenWorkflowImage image_filename image_label =
 Main dialog menu provides restart, left/right docking and workflow-image help commands.
 Help images open in the Windows default image viewer.
 */
+/*
+Resolves the launcher used by Restart without requiring component files beside it.
+Prefers the active bundled launcher, then the user scripts install and canonical Google Drive repository.
+*/
+function wallFixerResolveRestartScriptPath source_script_path:undefined =
+(
+    resolved_path = undefined
+
+
+    if wall_fixer_launcher_path != undefined then
+    (
+        if doesFileExist wall_fixer_launcher_path allowDirectory:false ignoreCache:true then
+        (
+            resolved_path = wall_fixer_launcher_path
+        )
+    )
+
+
+    if resolved_path == undefined and source_script_path != undefined then
+    (
+        resolved_path = WallFixer.getRestartScriptPath source_script_path
+    )
+
+
+    if resolved_path == undefined then
+    (
+        user_scripts_candidate = (getDir #userScripts) + "\\MAXSCRIPT-Wall-Fixer\\Wall-Fixer.ms"
+
+
+        if doesFileExist user_scripts_candidate allowDirectory:false ignoreCache:true then
+        (
+            resolved_path = user_scripts_candidate
+        )
+    )
+
+
+    if resolved_path == undefined then
+    (
+        canonical_c_candidate = "C:\\GoogleDrive\\ProgramsData\\CG\\3DsMax\\AppData\\scripts\\MAXSCRIPT-Wall-Fixer\\Wall-Fixer.ms"
+
+
+        if doesFileExist canonical_c_candidate allowDirectory:false ignoreCache:true then
+        (
+            resolved_path = canonical_c_candidate
+        )
+    )
+
+
+    if resolved_path == undefined then
+    (
+        canonical_g_candidate = "G:\\GoogleDrive\\ProgramsData\\CG\\3DsMax\\AppData\\scripts\\MAXSCRIPT-Wall-Fixer\\Wall-Fixer.ms"
+
+
+        if doesFileExist canonical_g_candidate allowDirectory:false ignoreCache:true then
+        (
+            resolved_path = canonical_g_candidate
+        )
+    )
+
+
+    resolved_path
+    -- return
+)
+
+
+
+
+/*
+Tests Restart launcher resolution without reloading Wall-Fixer.
+Prints the selected launcher path and returns it for inspection.
+*/
+function testWallFixerRestartResolver =
+(
+    restart_script_path = wallFixerResolveRestartScriptPath source_script_path:wall_fixer_ui_source_path
+
+
+    format "Wall-Fixer restart launcher: %\n" restart_script_path
+
+
+    restart_script_path
+    -- return
+)
+
+
+
+
 rcmenu wall_fixer_main_menu
 (
     subMenu "Restart"
@@ -16867,7 +16987,7 @@ rcmenu wall_fixer_main_menu
 
     on restart_tools_menu_item picked do
     (
-        restart_script_path = WallFixer.getRestartScriptPath wall_fixer_ui_source_path
+        restart_script_path = wallFixerResolveRestartScriptPath source_script_path:wall_fixer_ui_source_path
 
 
         if restart_script_path != undefined then
@@ -16877,7 +16997,7 @@ rcmenu wall_fixer_main_menu
         )
         else
         (
-            messageBox "Wall-Fixer.ms was not found beside the Wall-Fixer component files." title:"Wall-Fixer"
+            messageBox "Wall-Fixer launcher was not found. Run Wall-Fixer.ms manually from the canonical repository." title:"Wall-Fixer"
         )
     )
 
@@ -17133,78 +17253,64 @@ rollout WallFixerPreProcessRollout "PRE-PROCESS & FIX GEOMETRY" width:310 height
 
 
 /*
-EDGE FIXER contains geometry-fix workflow steps 5 through 8.
-The Straight Edge Fixer controls and callbacks are inherited without changing their geometry logic.
+EDGE FIXER OPTIONS contains the Straight Edge Fixer tuning controls.
+The controls are separated from the main EDGE FIXER workflow without changing geometry logic.
 */
-rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:392
+rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:112
 (
-    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[8,8] width:294 height:34 \
-        tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
-
-
-    groupBox edge_z_group "6. EDGE Z-LEVEL FIXING AND BORDER EDGES CHECK" pos:[8,48] width:294 height:248
-
-
-    label level_settings_label "LEVEL SETTINGS" pos:[18,68] width:104 height:18
-    label level_tolerance_label "Level Tol:" pos:[18,92] width:58 height:18
-    spinner level_tolerance_spinner "" pos:[76,89] width:72 height:20 \
+    label level_settings_label "LEVEL SETTINGS" pos:[8,8] width:104 height:18
+    label level_tolerance_label "Level Tol:" pos:[8,32] width:58 height:18
+    spinner level_tolerance_spinner "" pos:[66,29] width:72 height:20 \
         range:[0.000001,1000000.0,0.01] type:#worldUnits scale:0.001 \
         tooltip:"Maximum world-axis deviation used for level detection and direction checks."
 
 
-    label min_edges_label "Min Edges:" pos:[158,92] width:60 height:18
-    spinner min_level_edges_spinner "" pos:[220,89] width:62 height:20 \
+    label min_edges_label "Min Edges:" pos:[148,32] width:60 height:18
+    spinner min_level_edges_spinner "" pos:[210,29] width:62 height:20 \
         range:[1,100000,3] type:#integer scale:1 \
         tooltip:"Minimum horizontal edge count needed to define a valid Z level."
 
 
-    label search_z_label "Search Z:" pos:[18,118] width:58 height:18
-    spinner search_in_z_spinner "" pos:[76,115] width:72 height:20 \
+    label search_z_label "Search Z:" pos:[8,58] width:58 height:18
+    spinner search_in_z_spinner "" pos:[66,55] width:72 height:20 \
         range:[0.0,1000000.0,10.0] type:#worldUnits scale:0.1 \
         tooltip:"Maximum world-Z distance from a detected level."
 
 
-    checkbox straight_quiet_checkbox "Quiet" pos:[158,117] width:58 height:18 checked:false \
+    checkbox straight_quiet_checkbox "Quiet" pos:[148,57] width:58 height:18 checked:false \
         tooltip:"Suppress the Straight Edge Fixer final report dialog."
 
 
-    label edge_checks_label "EDGE CHECKS" pos:[18,146] width:82 height:18
-    label edge_angle_label "Angle:" pos:[158,146] width:42 height:18
-    spinner edge_angle_spinner "" pos:[202,143] width:80 height:20 \
+    label edge_checks_label "EDGE CHECKS" pos:[8,86] width:82 height:18
+    label edge_angle_label "Angle:" pos:[148,86] width:42 height:18
+    spinner edge_angle_spinner "" pos:[192,83] width:80 height:20 \
         range:[0.0,45.0,45.0] type:#float scale:1.0 \
         tooltip:"Candidate direction angle threshold in degrees."
 
 
-    button check_horizontal_button "CHECK HORIZONTAL" pos:[18,170] width:127 height:34 \
-        tooltip:"LMB: select visible near-horizontal error edges.\n\nRMB: straighten currently selected near-horizontal edges."
-    button check_vertical_button "CHECK VERTICAL" pos:[155,170] width:127 height:34 \
-        tooltip:"LMB: select visible near-vertical error edges.\n\nRMB: straighten currently selected near-vertical edges."
-
-
-    button border_check_button "BORDER CHECK" pos:[18,210] width:264 height:30 \
-        tooltip:"Select visible border edges with unwelded/overlapping local-Z seams, reflex corners above 180 degrees or 360-degree backtracking borders."
-
-
-    button straight_edge_fixer_button "STRAIGHT EDGE FIXER" pos:[18,246] width:264 height:36 \
-        tooltip:"Detect repeated horizontal edge levels and align nearby horizontal edges to TOP, BOTTOM or CENTER target Z."
-
-
-    button fix_ngons_button "7. FIX N-GONS" pos:[8,306] width:294 height:34 \
-        tooltip:"Run the current Wall-Fixer Fix N-gons function before slicing."
-
-
-    groupBox check_result_group "8. CHECK RESULT" pos:[8,346] width:294 height:38
-    label check_result_label "Manual viewport check of geometry fixes." pos:[18,362] width:274 height:18
-
-
-    on WallFixerEdgeFixerRollout open do
+    on WallFixerEdgeFixerOptionsRollout open do
     (
-        settings_data = StraightEdgeFixer.loadSettings()
+        local settings_data = StraightEdgeFixer.loadSettings()
         level_tolerance_spinner.value = wallFixerReadIniFloat "Controls" "LevelTolerance" settings_data[1]
         min_level_edges_spinner.value = wallFixerReadIniInt "Controls" "MinLevelEdges" settings_data[2]
         search_in_z_spinner.value = wallFixerReadIniFloat "Controls" "SearchInZ" settings_data[3]
         edge_angle_spinner.value = wallFixerReadIniFloat "Controls" "EdgeAngle" settings_data[4]
         straight_quiet_checkbox.checked = wallFixerReadIniBool "Controls" "StraightQuiet" settings_data[5]
+    )
+
+
+    on WallFixerEdgeFixerOptionsRollout rolledUp options_open do
+    (
+        try
+        (
+            if WallFixerEdgeFixerRollout != undefined then
+            (
+                WallFixerEdgeFixerRollout.setOptionsLayout options_open
+            )
+        )
+        catch
+        (
+        )
     )
 
 
@@ -17233,8 +17339,83 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:392
 
 
     on straight_quiet_checkbox changed control_state do
-(
+    (
         ::WallFixerRollout.saveStraightEdgeSettings()
+    )
+)
+
+
+/*
+EDGE FIXER contains geometry-fix workflow steps 5 through 8.
+The Straight Edge Fixer action callbacks are inherited without changing their geometry logic.
+*/
+rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:324
+(
+    button two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" pos:[8,8] width:294 height:34 \
+        tooltip:"LMB: select straight two-visible-edge vertices using the current Wall-Fixer function.\n\nRMB: run the native Vertex Remove command on the current selection."
+
+
+    subRollout edge_fixer_options_subrollout "" pos:[0,48] width:310 height:24
+
+
+    groupBox edge_z_group "6. EDGE Z-LEVEL FIXING AND BORDER EDGES CHECK" pos:[8,78] width:294 height:150
+
+
+    button check_horizontal_button "CHECK HORIZONTAL" pos:[18,100] width:127 height:34 \
+        tooltip:"LMB: select visible near-horizontal error edges.\n\nRMB: straighten currently selected near-horizontal edges."
+    button check_vertical_button "CHECK VERTICAL" pos:[155,100] width:127 height:34 \
+        tooltip:"LMB: select visible near-vertical error edges.\n\nRMB: straighten currently selected near-vertical edges."
+
+
+    button border_check_button "BORDER CHECK" pos:[18,140] width:264 height:30 \
+        tooltip:"Select visible border edges with unwelded/overlapping local-Z seams, reflex corners above 180 degrees or 360-degree backtracking borders."
+
+
+    button straight_edge_fixer_button "STRAIGHT EDGE FIXER" pos:[18,176] width:264 height:36 \
+        tooltip:"Detect repeated horizontal edge levels and align nearby horizontal edges to TOP, BOTTOM or CENTER target Z."
+
+
+    button fix_ngons_button "7. FIX N-GONS" pos:[8,238] width:294 height:34 \
+        tooltip:"Run the current Wall-Fixer Fix N-gons function before slicing."
+
+
+    groupBox check_result_group "8. CHECK RESULT" pos:[8,278] width:294 height:38
+    label check_result_label "Manual viewport check of geometry fixes." pos:[18,294] width:274 height:18
+
+
+    /*
+    Resizes the OPTIONS slot and shifts the remaining EDGE FIXER controls.
+    Collapsed OPTIONS leaves only its header; expanded OPTIONS restores the full controls area.
+    */
+    function setOptionsLayout options_open =
+    (
+        local layout_offset = if options_open then 94 else 0
+
+
+        edge_fixer_options_subrollout.height = if options_open then 118 else 24
+        edge_z_group.pos = [8, (78 + layout_offset)]
+        check_horizontal_button.pos = [18, (100 + layout_offset)]
+        check_vertical_button.pos = [155, (100 + layout_offset)]
+        border_check_button.pos = [18, (140 + layout_offset)]
+        straight_edge_fixer_button.pos = [18, (176 + layout_offset)]
+        fix_ngons_button.pos = [8, (238 + layout_offset)]
+        check_result_group.pos = [8, (278 + layout_offset)]
+        check_result_label.pos = [18, (294 + layout_offset)]
+        WallFixerEdgeFixerRollout.height = 324 + layout_offset
+        -- return
+    )
+
+
+    on WallFixerEdgeFixerRollout open do
+    (
+        try
+        (
+            addSubRollout edge_fixer_options_subrollout WallFixerEdgeFixerOptionsRollout rolledUp:true
+            setOptionsLayout false
+        )
+        catch
+        (
+        )
     )
 
 
@@ -17290,6 +17471,18 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:392
     on fix_ngons_button pressed do
     (
         ::WallFixerRollout.runFixNgons #preprocess
+    )
+
+
+    on WallFixerEdgeFixerRollout close do
+    (
+        try
+        (
+            removeSubRollout edge_fixer_options_subrollout WallFixerEdgeFixerOptionsRollout
+        )
+        catch
+        (
+        )
     )
 )
 
@@ -17403,13 +17596,16 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:48
     button attach_button "Attach" pos:[8,8] width:143 height:30 \
         tooltip:"Attach all selected geometry into the first selected object."
 
+
     button reset_pivot_button "Reset Pivot to Center" pos:[159,8] width:143 height:30 \
         tooltip:"Move each selected object's pivot to the center of its geometry."
+
 
     on attach_button pressed do
     (
         ::WallFixerRollout.runAttachSelectedObjects()
     )
+
 
     on reset_pivot_button pressed do
     (
@@ -17417,12 +17613,67 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:48
     )
 )
 
+
+/*
+Tests native Working Pivot read/write access and restores the original modes.
+Returns true only when both Use and Edit modes can be toggled and restored.
+*/
+function testWallFixerWorkingPivotControls =
+(
+    original_use_mode = WorkingPivot.UseMode
+    original_edit_mode = WorkingPivot.EditMode
+    test_passed = false
+
+
+    try
+    (
+        WorkingPivot.EditMode = false
+        WorkingPivot.UseMode = true
+        use_mode_on = WorkingPivot.UseMode
+
+
+        WorkingPivot.UseMode = false
+        use_mode_off = not WorkingPivot.UseMode
+
+
+        WorkingPivot.EditMode = true
+        edit_mode_on = WorkingPivot.EditMode
+
+
+        WorkingPivot.EditMode = false
+        edit_mode_off = not WorkingPivot.EditMode
+
+
+        test_passed = use_mode_on and use_mode_off and edit_mode_on and edit_mode_off
+    )
+    catch
+    (
+        test_passed = false
+    )
+
+
+    try
+    (
+        WorkingPivot.EditMode = original_edit_mode
+        WorkingPivot.UseMode = original_use_mode
+    )
+    catch
+    (
+    )
+
+
+    format "Wall-Fixer Working Pivot controls test: %\n" test_passed
+    test_passed
+    -- return
+)
+
+
 /*
 Main Wall-Fixer dialog owns shared progress, two-line message history and function wrappers.
 Child rollouts contain controls only and call these centralized handlers.
 */
 /*
-Embedded Inner-Outer Wall Finder 0.29
+Embedded Inner-Outer Wall Finder 0.30
 Runtime classifier implementation is embedded here so Wall-Fixer does not depend on a separately synced classifier file.
 Material ID 1 = OUTER, ID 2 = INNER, ID 3 = UP, ID 4 = DOWN.
 */
@@ -18843,6 +19094,146 @@ function getWallFaceWorkingNodes remember_selection:false =
 )
 
 
+/* Calculates the geometry center used to place the Working Pivot for wall classification.
+   Each supported object contributes its average world-space vertex position.
+*/
+function getWallFaceSelectionCenter object_nodes =
+(
+    local selection_center = [0.0, 0.0, 0.0]
+    local object_center_count = 0
+
+
+    for object_node in object_nodes do
+    (
+        local source_data = getFaceGeometrySource object_node
+
+
+        if source_data != undefined then
+        (
+            local vertex_count = getSourceNumVertices object_node source_data
+
+
+            if vertex_count > 0 then
+            (
+                local object_center = [0.0, 0.0, 0.0]
+
+
+                for vertex_index = 1 to vertex_count do
+                (
+                    object_center += getSourceVertexWorld object_node source_data vertex_index
+                )
+
+
+                object_center /= vertex_count
+                selection_center += object_center
+                object_center_count += 1
+            )
+        )
+    )
+
+
+    if object_center_count > 0 then
+    (
+        selection_center / object_center_count
+    )
+    else
+    (
+        undefined
+    )
+    -- return
+)
+
+
+/* Centers the 3ds Max Working Pivot to the current geometry selection.
+   This is an explicit helper action and does not enable Use Edit Pivot.
+*/
+function centerWallFaceWorkingPivotToSelection =
+(
+    local selected_nodes = for object_node in selection where superclassof object_node == GeometryClass collect object_node
+    local selection_center = getWallFaceSelectionCenter selected_nodes
+
+
+    if selection_center != undefined then
+    (
+        local working_pivot_tm = undefined
+
+
+        try
+        (
+            working_pivot_tm = WorkingPivot.getTM()
+        )
+        catch
+        (
+            working_pivot_tm = matrix3 1
+        )
+
+
+        if working_pivot_tm == undefined then
+        (
+            working_pivot_tm = matrix3 1
+        )
+
+
+        working_pivot_tm.translation = selection_center
+
+
+        try
+        (
+            WorkingPivot.setTM working_pivot_tm
+        )
+        catch
+        (
+        )
+    )
+
+
+    selection_center -- return
+)
+
+
+/* Returns the origin used by INNER/OUTTER classification.
+   Use Edit Pivot uses the manual Working Pivot; otherwise classification uses the selection center without moving the Working Pivot.
+*/
+function getWallFaceAnalysisOrigin object_nodes =
+(
+    local analysis_origin = undefined
+    local use_working_pivot = false
+
+
+    try
+    (
+        use_working_pivot = WorkingPivot.UseMode
+    )
+    catch
+    (
+        use_working_pivot = false
+    )
+
+
+    if use_working_pivot then
+    (
+        try
+        (
+            local working_pivot_tm = WorkingPivot.getTM()
+            analysis_origin = working_pivot_tm.translation
+        )
+        catch
+        (
+            analysis_origin = undefined
+        )
+    )
+
+
+    if analysis_origin == undefined then
+    (
+        analysis_origin = getWallFaceSelectionCenter object_nodes
+    )
+
+
+    analysis_origin -- return
+)
+
+
 /* Returns the default connection distance derived from wall thickness.
    Neighbor connection starts at ten percent of the current wall-thickness value.
 */
@@ -19252,6 +19643,115 @@ function wallFaceGrowthElementsConnect element_a element_b connection_threshold 
 )
 
 
+/* Returns true when one face pair represents an opposite-facing wall across the normal within Wall Thickness.
+   Same-facing continuations and perpendicular corners are not treated as thickness barriers.
+*/
+function wallFaceGrowthFacePairHasThicknessBarrier center_a normal_a center_b normal_b wall_thickness connection_threshold parallel_threshold:0.90 epsilon:0.0000001 =
+(
+    local barrier_result = false
+
+
+    if wall_thickness > epsilon and (length normal_a) > epsilon and (length normal_b) > epsilon then
+    (
+        local normal_a_unit = normalize normal_a
+        local normal_b_unit = normalize normal_b
+        local opposite_value = dot normal_a_unit normal_b_unit
+
+
+        if opposite_value <= (-parallel_threshold) then
+        (
+            local center_delta = center_b - center_a
+            local normal_distance = abs (dot center_delta normal_a_unit)
+
+
+            if normal_distance > epsilon and normal_distance <= wall_thickness then
+            (
+                barrier_result = true
+            )
+        )
+    )
+
+
+    barrier_result -- return
+)
+
+
+/* Reads one live face center and normal for AUTO GROW thickness checks.
+   Returns undefined when the face cannot provide at least three vertices.
+*/
+function getWallFaceGrowthFaceCenterNormal object_node source_data face_index epsilon:0.0000001 =
+(
+    local result_data = undefined
+    local face_degree = getSourceFaceDegree object_node source_data face_index
+
+
+    if face_degree >= 3 then
+    (
+        local face_vertices = #()
+
+
+        for corner_index = 1 to face_degree do
+        (
+            local vertex_index = getSourceFaceVertex object_node source_data face_index corner_index
+            append face_vertices (getSourceVertexWorld object_node source_data vertex_index)
+        )
+
+
+        result_data = #(calculatePolygonCenter face_vertices, calculatePolygonNormal face_vertices epsilon:epsilon)
+    )
+
+
+    result_data -- return
+)
+
+
+/* Returns true when two connected growth islands are separated across their normals by Wall Thickness.
+   This prevents CTRL+RMB AUTO GROW from crossing onto the opposite wall side.
+*/
+function wallFaceGrowthElementsBlockedByThickness element_a element_b wall_thickness connection_threshold parallel_threshold:0.90 epsilon:0.0000001 =
+(
+    local barrier_result = false
+
+
+    if wall_thickness > epsilon then
+    (
+        local object_node_a = element_a[1]
+        local source_data_a = element_a[2]
+        local face_bits_a = element_a[3]
+        local object_node_b = element_b[1]
+        local source_data_b = element_b[2]
+        local face_bits_b = element_b[3]
+
+
+        for face_index_a in face_bits_a while not barrier_result do
+        (
+            local face_data_a = getWallFaceGrowthFaceCenterNormal object_node_a source_data_a face_index_a epsilon:epsilon
+
+
+            if face_data_a != undefined then
+            (
+                for face_index_b in face_bits_b while not barrier_result do
+                (
+                    local face_data_b = getWallFaceGrowthFaceCenterNormal object_node_b source_data_b face_index_b epsilon:epsilon
+
+
+                    if face_data_b != undefined then
+                    (
+                        if wallFaceGrowthFacePairHasThicknessBarrier face_data_a[1] face_data_a[2] face_data_b[1] face_data_b[2] wall_thickness connection_threshold parallel_threshold:parallel_threshold epsilon:epsilon then
+                        (
+                            barrier_result = true
+                        )
+                    )
+                )
+            )
+        )
+    )
+
+
+    barrier_result -- return
+)
+
+
 /* Captures CTRL+RMB growth seeds before any manual class overwrite occurs.
    Face mode uses selected non-cap faces; object mode uses every existing wall-side face so the forced object can grow from any side.
 */
@@ -19325,7 +19825,7 @@ function getWallFaceGrowthSeedData material_id =
    Objects that already carry manual FORCED OUTER/INNER data are hard blockers and are never entered or traversed.
    Auto-grown neighbors only change Material ID and do not become persistent FORCED hints. TOP/DOWN faces remain barriers.
 */
-function growCachedWallFaceClass seed_data_array material_id connection_threshold =
+function growCachedWallFaceClass seed_data_array material_id connection_threshold wall_thickness =
 (
     local processed_nodes = getWallFaceProcessedCacheNodes()
     local seed_nodes = #()
@@ -19424,29 +19924,36 @@ function growCachedWallFaceClass seed_data_array material_id connection_threshol
 
                     if wallFaceGrowthElementsConnect frontier_element candidate_element connection_threshold then
                     (
-                        visited_elements[element_index] = true
-                        append frontier_elements candidate_element
-
-
-                        local growth_index = 0
-
-
-                        for data_index = 1 to growth_data_array.count do
+                        if wallFaceGrowthElementsBlockedByThickness frontier_element candidate_element wall_thickness connection_threshold then
                         (
-                            if growth_index == 0 and growth_data_array[data_index][1] == candidate_node then
-                            (
-                                growth_index = data_index
-                            )
-                        )
-
-
-                        if growth_index == 0 then
-                        (
-                            append growth_data_array #(candidate_node, candidate_source, copy candidate_element[3])
+                            visited_elements[element_index] = true
                         )
                         else
                         (
-                            growth_data_array[growth_index][3] = growth_data_array[growth_index][3] + candidate_element[3]
+                            visited_elements[element_index] = true
+                            append frontier_elements candidate_element
+
+
+                            local growth_index = 0
+
+
+                            for data_index = 1 to growth_data_array.count do
+                            (
+                                if growth_index == 0 and growth_data_array[data_index][1] == candidate_node then
+                                (
+                                    growth_index = data_index
+                                )
+                            )
+
+
+                            if growth_index == 0 then
+                            (
+                                append growth_data_array #(candidate_node, candidate_source, copy candidate_element[3])
+                            )
+                            else
+                            (
+                                growth_data_array[growth_index][3] = growth_data_array[growth_index][3] + candidate_element[3]
+                            )
                         )
                     )
                 )
@@ -19498,6 +20005,36 @@ function testWallFaceGrowthSeamFilter connection_threshold:1.0 =
 
 
     #(vertical_connects, horizontal_connects, (vertical_connects and not horizontal_connects)) -- return
+)
+
+
+
+
+/* Tests the Wall Thickness AUTO GROW barrier without changing scene geometry.
+   Opposite-facing walls inside thickness must block; same-facing, corner and beyond-thickness samples must not.
+*/
+function testWallFaceGrowthThicknessBarrier wall_thickness:100.0 connection_threshold:10.0 =
+(
+    local center_a = [0.0, 0.0, 0.0]
+    local normal_a = [1.0, 0.0, 0.0]
+    local opposite_center = [50.0, 0.0, 0.0]
+    local opposite_normal = [-1.0, 0.0, 0.0]
+    local same_facing_center = [50.0, 100.0, 0.0]
+    local same_facing_normal = [1.0, 0.0, 0.0]
+    local corner_center = [50.0, 0.0, 0.0]
+    local corner_normal = [0.0, 1.0, 0.0]
+    local far_center = [(wall_thickness + connection_threshold + 1.0), 0.0, 0.0]
+    local blocks_opposite = wallFaceGrowthFacePairHasThicknessBarrier center_a normal_a opposite_center opposite_normal wall_thickness connection_threshold
+    local blocks_same_facing = wallFaceGrowthFacePairHasThicknessBarrier center_a normal_a same_facing_center same_facing_normal wall_thickness connection_threshold
+    local blocks_corner = wallFaceGrowthFacePairHasThicknessBarrier center_a normal_a corner_center corner_normal wall_thickness connection_threshold
+    local blocks_far = wallFaceGrowthFacePairHasThicknessBarrier center_a normal_a far_center opposite_normal wall_thickness connection_threshold
+    local passed = blocks_opposite and not blocks_same_facing and not blocks_corner and not blocks_far
+
+
+    format "CTRL+RMB thickness barrier | opposite: % | same-facing: % | corner: % | beyond thickness: % | passed: %\n" blocks_opposite blocks_same_facing blocks_corner blocks_far passed
+
+
+    #(blocks_opposite, blocks_same_facing, blocks_corner, blocks_far, passed) -- return
 )
 
 
@@ -20213,6 +20750,7 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
     local object_data_array = #()
     local bbox_min = undefined
     local bbox_max = undefined
+    local analysis_origin = undefined
     local total_faces = 0
     local outer_count = 0
     local inner_count = 0
@@ -20297,9 +20835,9 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
         else
         (
             wall_face_classifier_last_nodes = for object_node in valid_nodes collect object_node
+            analysis_origin = getWallFaceAnalysisOrigin valid_nodes
 
 
-            local bbox_center = (bbox_min + bbox_max) * 0.5
             local bbox_diagonal = length (bbox_max - bbox_min)
             local geometry_epsilon = bbox_diagonal * 0.00000001
             local ray_offset = bbox_diagonal * 0.00001
@@ -20428,27 +20966,14 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
                     )
                     else
                     (
-                        local plus_exit = getBBoxExitDistance face_center face_normal bbox_min bbox_max epsilon:geometry_epsilon
-                        local minus_exit = getBBoxExitDistance face_center (-face_normal) bbox_min bbox_max epsilon:geometry_epsilon
-                        local bbox_score = 0.0
-                        local radial_vector = face_center - bbox_center
-                        local radial_score = 0.0
+                        local radial_vector = face_center - analysis_origin
                         local spatial_score = 0.0
-
-
-                        if (plus_exit + minus_exit) > geometry_epsilon then
-                        (
-                            bbox_score = (minus_exit - plus_exit) / (plus_exit + minus_exit)
-                        )
 
 
                         if (length radial_vector) > geometry_epsilon then
                         (
-                            radial_score = dot face_normal (normalize radial_vector)
+                            spatial_score = dot face_normal (normalize radial_vector)
                         )
-
-
-                        spatial_score = (bbox_score * 0.70) + (radial_score * 0.30)
                         face_scores[face_index] = spatial_score
 
 
@@ -20562,7 +21087,7 @@ function classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 w
             redrawViews()
 
 
-            format "Inner-Outer Wall Finder 0.29: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
+            format "Inner-Outer Wall Finder 0.30: % faces | FORCED hints: % | forced propagation: % | OUTER: % | INNER: % | UP: % | DOWN: % | thickness: % | hierarchy total: % | neighbor: % | fallback: % | selected: %\n" total_faces forced_face_count forced_hierarchy_resolved outer_count inner_count up_count down_count thickness_resolved hierarchy_resolved neighbor_resolved fallback_resolved selection_type
 
 
             #(valid_nodes.count, total_faces, outer_count, inner_count, up_count, down_count, selection_type, thickness_resolved, hierarchy_resolved, neighbor_resolved, fallback_resolved) -- return
@@ -21298,6 +21823,90 @@ function testWallFaceAutoAnalyzeSelection wall_thickness:(units.decodeValue "1m"
 )
 
 
+/* Tests selection-center classification, explicit RMB-style pivot centering, and manual Use Edit Pivot origin selection.
+   The original Working Pivot transform and modes are restored before returning.
+*/
+function testWallFaceWorkingPivotOrigin =
+(
+    local test_nodes = for object_node in selection where superclassof object_node == GeometryClass collect object_node
+    local test_passed = false
+
+
+    if test_nodes.count == 0 then
+    (
+        format "Working Pivot origin test: select at least one supported wall object first.\n"
+        false
+    )
+    else
+    (
+        local original_tm = WorkingPivot.getTM()
+        local original_use_mode = WorkingPivot.UseMode
+        local original_edit_mode = WorkingPivot.EditMode
+        local expected_center = getWallFaceSelectionCenter test_nodes
+        local selection_origin = undefined
+        local centered_pivot = undefined
+        local pivot_before_selection_origin = undefined
+        local pivot_after_selection_origin = undefined
+        local manual_origin = undefined
+        local manual_point = undefined
+
+
+        try
+        (
+            WorkingPivot.UseMode = false
+
+
+            if expected_center != undefined then
+            (
+                local off_center_tm = WorkingPivot.getTM()
+                off_center_tm.translation = expected_center + [37.0, 41.0, 43.0]
+                WorkingPivot.setTM off_center_tm
+                pivot_before_selection_origin = (WorkingPivot.getTM()).translation
+
+
+                selection_origin = getWallFaceAnalysisOrigin test_nodes
+                pivot_after_selection_origin = (WorkingPivot.getTM()).translation
+
+
+                centered_pivot = centerWallFaceWorkingPivotToSelection()
+
+
+                manual_point = expected_center + [13.0, 17.0, 19.0]
+                local manual_tm = WorkingPivot.getTM()
+                manual_tm.translation = manual_point
+                WorkingPivot.setTM manual_tm
+                WorkingPivot.UseMode = true
+                manual_origin = getWallFaceAnalysisOrigin test_nodes
+
+
+                test_passed = (((distance selection_origin expected_center) < 0.0001) and ((distance pivot_before_selection_origin pivot_after_selection_origin) < 0.0001) and ((distance centered_pivot expected_center) < 0.0001) and ((distance manual_origin manual_point) < 0.0001))
+            )
+        )
+        catch
+        (
+            test_passed = false
+        )
+
+
+        try
+        (
+            WorkingPivot.UseMode = false
+            WorkingPivot.setTM original_tm
+            WorkingPivot.EditMode = original_edit_mode
+            WorkingPivot.UseMode = original_use_mode
+        )
+        catch
+        (
+        )
+
+
+        format "Working Pivot origin test: %\n" test_passed
+        test_passed
+    )
+    -- return
+)
+
+
 /* Reports which force-assignment mode the current modifier state selects.
    Hold CTRL while calling to verify that CTRL+RMB resolves to AUTO GROW mode.
 */
@@ -21306,43 +21915,197 @@ function testWallFaceForceModifier =
     local auto_grow = keyboard.controlPressed
     local force_mode = if auto_grow then #forceAndAutoGrow else #forceOnly
 
+
     format "Wall force modifier | CTRL: % | mode: %\n" auto_grow force_mode
+
 
     force_mode -- return
 )
 
-rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
+
+/*
+Verifies compact/expanded Get Outer Walls OPTIONS sizing without changing the final layout.
+The test checks full-width slot sizing plus collapsed and expanded heights.
+*/
+function testWallFaceOptionsLayout =
 (
-    spinner spn_wall_thickness "Wall thickness:" pos:[8,8] width:204 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:70 \
+    local slot_control = wallFaceClassifierRollout.wall_face_options_subrollout
+    local original_rollout_height = wallFaceClassifierRollout.height
+    local original_slot_height = slot_control.height
+    local width_ok = slot_control.width == wallFaceClassifierRollout.width
+    local collapsed_ok = false
+    local expanded_ok = false
+
+
+    wallFaceClassifierRollout.setOptionsLayout false
+    collapsed_ok = ((wallFaceClassifierRollout.height == 110) and (slot_control.height == 24))
+
+
+    wallFaceClassifierRollout.setOptionsLayout true
+    expanded_ok = ((wallFaceClassifierRollout.height == 230) and (slot_control.height == 144))
+
+
+    slot_control.height = original_slot_height
+    wallFaceClassifierRollout.height = original_rollout_height
+
+
+    local test_passed = width_ok and collapsed_ok and expanded_ok
+    format "Get Outer Walls OPTIONS layout test | width:% collapsed:% expanded:% | result:%\n" width_ok collapsed_ok expanded_ok test_passed
+
+
+    test_passed -- return
+)
+
+
+/*
+Verifies compact/expanded EDGE FIXER OPTIONS sizing without changing the final layout.
+The test checks full-width slot sizing, control shifting and parent rollout height.
+*/
+function testEdgeFixerOptionsLayout =
+(
+    local slot_control = WallFixerEdgeFixerRollout.edge_fixer_options_subrollout
+    local original_rollout_height = WallFixerEdgeFixerRollout.height
+    local width_ok = slot_control.width == WallFixerEdgeFixerRollout.width
+    local collapsed_ok = false
+    local expanded_ok = false
+
+
+    WallFixerEdgeFixerRollout.setOptionsLayout false
+    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 324) and (slot_control.height == 24) and (WallFixerEdgeFixerRollout.edge_z_group.pos.y == 78))
+
+
+    WallFixerEdgeFixerRollout.setOptionsLayout true
+    expanded_ok = ((WallFixerEdgeFixerRollout.height == 418) and (slot_control.height == 118) and (WallFixerEdgeFixerRollout.edge_z_group.pos.y == 172))
+
+
+    WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 324)
+
+
+    local test_passed = width_ok and collapsed_ok and expanded_ok
+    format "EDGE FIXER OPTIONS layout test | width:% collapsed:% expanded:% | result:%\n" width_ok collapsed_ok expanded_ok test_passed
+
+
+    test_passed -- return
+)
+
+
+rollout wallFaceClassifierOptionsRollout "OPTIONS" width:252 height:138
+(
+    local working_pivot_syncing = false
+
+
+    checkbutton use_working_pivot_checkbutton "Use Edit Pivot" pos:[8,8] width:114 height:30 \
+        tooltip:"LMB: Use the manually positioned Working Pivot as the INNER \\ OUTTER classification origin.\n\nRMB: Center the Working Pivot to the current geometry selection."
+
+
+    checkbutton edit_working_pivot_checkbutton "Edit Edit Pivot" pos:[130,8] width:114 height:30 \
+        tooltip:"LMB: Enable or disable Working Pivot editing in 3ds Max."
+
+
+    spinner spn_wall_thickness "Wall thickness:" pos:[8,46] width:180 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:62 \
         tooltip:"Maximum distance to search for the opposite wall. Default: 1 m."
-    label lbl_wall_units "units" pos:[218,12] width:50 height:18 align:#left tooltip:"Current display unit."
+    label lbl_wall_units "units" pos:[194,50] width:48 height:18 align:#left tooltip:"Current display unit."
 
 
-    spinner spn_connection_threshold "Connect threshold:" pos:[8,34] width:204 height:20 range:[0.001,1000000.0,((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:70 \
+    spinner spn_connection_threshold "Connect threshold:" pos:[8,72] width:180 height:20 range:[0.001,1000000.0,((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:62 \
         tooltip:"Matches neighbor vertices; at least 2 must match. Default is 10% of Wall thickness, and changing Wall thickness resets this value."
-    label lbl_connect_units "units" pos:[218,38] width:50 height:18 align:#left tooltip:"Current display unit."
+    label lbl_connect_units "units" pos:[194,76] width:48 height:18 align:#left tooltip:"Current display unit."
 
 
-    button btn_classify "INNER \\ OUTTER" pos:[8,60] width:82 height:32 tooltip:"LMB: Classify selected objects. If nothing is selected, restore the last classified object set. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = UP | Pastel Brown = DOWN."
-    button btn_explode "EXPLODE" pos:[97,60] width:82 height:32 tooltip:"LMB: Split each selected classified object into separate OUTER, INNER, UP, and DOWN objects."
-    button btn_reset "RESET" pos:[186,60] width:82 height:32 tooltip:"LMB: Reset face classification, remove the classifier material, clear FORCED OUTER/INNER hints, and clear cached class data."
+    button btn_reset "RESET" pos:[8,100] width:236 height:30 \
+        tooltip:"LMB: Reset face classification, remove the classifier material, clear FORCED OUTER/INNER hints, and clear cached class data."
 
 
-    button btn_select_outer "SELECT OUTER" pos:[8,98] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing OUTER faces or face mode selects OUTER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces OUTER without AUTO GROW.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. Auto-grown walls are not marked FORCED. TOP/DOWN seams stop growth."
-    button btn_select_inner "SELECT INNER" pos:[141,98] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing INNER faces or face mode selects INNER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces INNER without AUTO GROW.\n\nCTRL+RMB: FORCE INNER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. Auto-grown walls are not marked FORCED. TOP/DOWN seams stop growth."
-    button btn_select_up "SELECT UP" pos:[8,128] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing UP faces or face mode selects UP faces."
-    button btn_select_down "SELECT DOWN" pos:[141,128] width:127 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing DOWN faces or face mode selects DOWN faces."
+    /*
+    Synchronizes Get Outer Walls Working Pivot controls with the native 3ds Max state.
+    Failed interface reads leave both controls off instead of interrupting the Wall-Fixer UI.
+    */
+    function syncWorkingPivotControls =
+    (
+        working_pivot_syncing = true
 
 
-    label lbl_status "Ready" pos:[8,158] width:260 height:18 align:#left tooltip:"Classification counts and current selection."
-    button btn_test "Create test scene" pos:[8,180] width:130 height:24 tooltip:"Create simple wall geometry for testing."
+        try
+        (
+            use_working_pivot_checkbutton.checked = WorkingPivot.UseMode
+            edit_working_pivot_checkbutton.checked = WorkingPivot.EditMode
+        )
+        catch
+        (
+            use_working_pivot_checkbutton.checked = false
+            edit_working_pivot_checkbutton.checked = false
+        )
 
 
-    on wallFaceClassifierRollout open do
+        working_pivot_syncing = false
+        -- return
+    )
+
+
+    on wallFaceClassifierOptionsRollout open do
     (
         local unit_label = getWallFaceDisplayUnitLabel()
         lbl_wall_units.text = unit_label
         lbl_connect_units.text = unit_label
+        syncWorkingPivotControls()
+    )
+
+
+    on wallFaceClassifierOptionsRollout rolledUp options_open do
+    (
+        try
+        (
+            if wallFaceClassifierRollout != undefined then
+            (
+                wallFaceClassifierRollout.setOptionsLayout options_open
+            )
+        )
+        catch
+        (
+        )
+    )
+
+
+    on use_working_pivot_checkbutton changed control_state do
+    (
+        if not working_pivot_syncing then
+        (
+            try
+            (
+                WorkingPivot.UseMode = control_state
+            )
+            catch
+            (
+            )
+
+
+            syncWorkingPivotControls()
+        )
+    )
+
+
+    on use_working_pivot_checkbutton rightclick do
+    (
+        centerWallFaceWorkingPivotToSelection()
+        syncWorkingPivotControls()
+    )
+
+
+    on edit_working_pivot_checkbutton changed control_state do
+    (
+        if not working_pivot_syncing then
+        (
+            try
+            (
+                WorkingPivot.EditMode = control_state
+            )
+            catch
+            (
+            )
+
+
+            syncWorkingPivotControls()
+        )
     )
 
 
@@ -21363,23 +22126,93 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
     )
 
 
+    on btn_reset pressed do
+    (
+        local result_data = #()
+
+
+        undo "Reset Wall Face Classification" on
+        (
+            result_data = resetSelectedWallFaceClassification()
+        )
+
+
+        if result_data.count == 2 then
+        (
+            undefined
+        )
+    )
+)
+
+
+rollout wallFaceClassifierRollout "Get Outer Walls" width:276 height:110
+(
+    button btn_classify "INNER \\ OUTTER" pos:[8,8] width:128 height:32 \
+        tooltip:"LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
+
+
+    button btn_explode "EXPLODE" pos:[140,8] width:128 height:32 \
+        tooltip:"LMB: Split each selected classified object into separate OUTER, INNER, TOP, and BOTTOM objects."
+
+
+    button btn_select_outer "OUTER" pos:[8,46] width:61 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing OUTER faces or face mode selects OUTER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces OUTER without AUTO GROW.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. A parallel opposite wall within Wall thickness also stops growth. Auto-grown walls are not marked FORCED. TOP/BOTTOM seams stop growth."
+    button btn_select_inner "INNER" pos:[73,46] width:61 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing INNER faces or face mode selects INNER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces INNER without AUTO GROW.\n\nCTRL+RMB: FORCE INNER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. A parallel opposite wall within Wall thickness also stops growth. Auto-grown walls are not marked FORCED. TOP/BOTTOM seams stop growth."
+    button btn_select_up "TOP" pos:[138,46] width:61 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing TOP faces or face mode selects TOP faces."
+    button btn_select_down "BOTTOM" pos:[203,46] width:65 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing BOTTOM faces or face mode selects BOTTOM faces."
+
+
+    subRollout wall_face_options_subrollout "" pos:[0,78] width:276 height:24
+
+
+    /*
+    Resizes the OPTIONS slot and Get Outer Walls rollout to match the OPTIONS rolled state.
+    Collapsed OPTIONS leaves only its header; expanded OPTIONS restores the full controls area.
+    */
+    function setOptionsLayout options_open =
+    (
+        if options_open then
+        (
+            wallFaceClassifierRollout.height = 230
+            wall_face_options_subrollout.height = 144
+        )
+        else
+        (
+            wall_face_options_subrollout.height = 24
+            wallFaceClassifierRollout.height = 110
+        )
+        -- return
+    )
+
+
+    on wallFaceClassifierRollout open do
+    (
+        try
+        (
+            addSubRollout wall_face_options_subrollout wallFaceClassifierOptionsRollout rolledUp:true
+            setOptionsLayout false
+        )
+        catch
+        (
+        )
+    )
+
+
     on btn_classify pressed do
     (
         local result_data = #()
-        local unit_label = getWallFaceDisplayUnitLabel()
-        lbl_wall_units.text = unit_label
-        lbl_connect_units.text = unit_label
+        local wall_thickness_value = wallFaceClassifierOptionsRollout.spn_wall_thickness.value
+        local connection_threshold_value = wallFaceClassifierOptionsRollout.spn_connection_threshold.value
 
 
         undo "Classify Wall Faces" on
         (
-            result_data = classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
+            result_data = classifySelectedWallFaces confidence_threshold:0.12 neighbor_passes:3 wall_thickness:wall_thickness_value connection_threshold:connection_threshold_value
         )
 
 
         if result_data.count == 11 then
         (
-            lbl_status.text = ("OUTER: " + result_data[3] as string + "  INNER: " + result_data[4] as string + "  UP: " + result_data[5] as string + "  DOWN: " + result_data[6] as string)
+            undefined
         )
     )
 
@@ -21397,32 +22230,14 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
 
         if result_data.count == 4 then
         (
-            lbl_status.text = ("EXPLODE: " + result_data[2] as string + " objects created from " + result_data[1] as string + " sources")
-        )
-    )
-
-
-    on btn_reset pressed do
-    (
-        local result_data = #()
-
-
-        undo "Reset Wall Face Classification" on
-        (
-            result_data = resetSelectedWallFaceClassification()
-        )
-
-
-        if result_data.count == 2 then
-        (
-            lbl_status.text = ("RESET: " + result_data[1] as string + " objects | " + result_data[2] as string + " face IDs | material + FORCED data cleared")
+            undefined
         )
     )
 
 
     on btn_select_outer pressed do
     (
-        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:wallFaceClassifierOptionsRollout.spn_wall_thickness.value connection_threshold:wallFaceClassifierOptionsRollout.spn_connection_threshold.value
         local result_data = selectWallFacesByMaterialId 1
 
 
@@ -21430,11 +22245,11 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
         (
             if result_data[3] == #faces then
             (
-                lbl_status.text = ("OUTER faces: " + result_data[2] as string)
+                undefined
             )
             else
             (
-                lbl_status.text = ("OUTER objects: " + result_data[1] as string)
+                undefined
             )
         )
     )
@@ -21446,14 +22261,16 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
         local growth_result = #()
         local auto_grow = keyboard.controlPressed
 
+
         if auto_grow then
         (
             local seed_data_array = getWallFaceGrowthSeedData 1
 
+
             undo "Force And Grow Wall Faces OUTER" on
             (
                 result_data = markSelectedWallFaces 1
-                growth_result = growCachedWallFaceClass seed_data_array 1 spn_connection_threshold.value
+                growth_result = growCachedWallFaceClass seed_data_array 1 wallFaceClassifierOptionsRollout.spn_connection_threshold.value wallFaceClassifierOptionsRollout.spn_wall_thickness.value
             )
         )
         else
@@ -21464,15 +22281,16 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
             )
         )
 
+
         if result_data.count == 3 then
         (
             if auto_grow and growth_result.count == 3 then
             (
-                lbl_status.text = ("FORCED OUTER + AUTO GROW: " + result_data[2] as string + " faces | grew " + growth_result[2] as string + " faces on " + growth_result[1] as string + " cached walls")
+                undefined
             )
             else
             (
-                lbl_status.text = ("FORCED OUTER: " + result_data[2] as string + " faces | " + result_data[3] as string)
+                undefined
             )
         )
     )
@@ -21480,7 +22298,7 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
 
     on btn_select_inner pressed do
     (
-        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:wallFaceClassifierOptionsRollout.spn_wall_thickness.value connection_threshold:wallFaceClassifierOptionsRollout.spn_connection_threshold.value
         local result_data = selectWallFacesByMaterialId 2
 
 
@@ -21488,11 +22306,11 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
         (
             if result_data[3] == #faces then
             (
-                lbl_status.text = ("INNER faces: " + result_data[2] as string)
+                undefined
             )
             else
             (
-                lbl_status.text = ("INNER objects: " + result_data[1] as string)
+                undefined
             )
         )
     )
@@ -21504,14 +22322,16 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
         local growth_result = #()
         local auto_grow = keyboard.controlPressed
 
+
         if auto_grow then
         (
             local seed_data_array = getWallFaceGrowthSeedData 2
 
+
             undo "Force And Grow Wall Faces INNER" on
             (
                 result_data = markSelectedWallFaces 2
-                growth_result = growCachedWallFaceClass seed_data_array 2 spn_connection_threshold.value
+                growth_result = growCachedWallFaceClass seed_data_array 2 wallFaceClassifierOptionsRollout.spn_connection_threshold.value wallFaceClassifierOptionsRollout.spn_wall_thickness.value
             )
         )
         else
@@ -21522,15 +22342,16 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
             )
         )
 
+
         if result_data.count == 3 then
         (
             if auto_grow and growth_result.count == 3 then
             (
-                lbl_status.text = ("FORCED INNER + AUTO GROW: " + result_data[2] as string + " faces | grew " + growth_result[2] as string + " faces on " + growth_result[1] as string + " cached walls")
+                undefined
             )
             else
             (
-                lbl_status.text = ("FORCED INNER: " + result_data[2] as string + " faces | " + result_data[3] as string)
+                undefined
             )
         )
     )
@@ -21538,7 +22359,7 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
 
     on btn_select_up pressed do
     (
-        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:wallFaceClassifierOptionsRollout.spn_wall_thickness.value connection_threshold:wallFaceClassifierOptionsRollout.spn_connection_threshold.value
         local result_data = selectWallFacesByMaterialId 3
 
 
@@ -21546,11 +22367,11 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
         (
             if result_data[3] == #faces then
             (
-                lbl_status.text = ("UP faces: " + result_data[2] as string)
+                undefined
             )
             else
             (
-                lbl_status.text = ("UP objects: " + result_data[1] as string)
+                undefined
             )
         )
     )
@@ -21558,7 +22379,7 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
 
     on btn_select_down pressed do
     (
-        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:spn_wall_thickness.value connection_threshold:spn_connection_threshold.value
+        local analyze_result = analyzeUnclassifiedSelectedWallObjects wall_thickness:wallFaceClassifierOptionsRollout.spn_wall_thickness.value connection_threshold:wallFaceClassifierOptionsRollout.spn_connection_threshold.value
         local result_data = selectWallFacesByMaterialId 4
 
 
@@ -21566,24 +22387,27 @@ rollout wallFaceClassifierRollout "4. Get Outter Walls" width:276 height:208
         (
             if result_data[3] == #faces then
             (
-                lbl_status.text = ("DOWN faces: " + result_data[2] as string)
+                undefined
             )
             else
             (
-                lbl_status.text = ("DOWN objects: " + result_data[1] as string)
+                undefined
             )
         )
     )
 
 
-    on btn_test pressed do
+    on wallFaceClassifierRollout close do
     (
-        createWallFaceClassifierTestScene()
-        lbl_status.text = "Test scene created."
+        try
+        (
+            removeSubRollout wall_face_options_subrollout wallFaceClassifierOptionsRollout
+        )
+        catch
+        (
+        )
     )
 )
-
-
 
 
 
@@ -21594,7 +22418,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
     dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,6] width:76 height:40
     dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:19
     dotNetControl status_line_bottom "System.Windows.Forms.RichTextBox" pos:[88,28] width:248 height:19
-    subRollout workflow_subrollout "" pos:[8,54] width:328 height:686
+    subRollout workflow_subrollout "" pos:[0,54] width:344 height:686
 
 
     local status_texts = #("Ready.", "")
@@ -21886,12 +22710,15 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         setStatus #message "Attaching selected objects..."
         operation_success = false
 
+
         undo "Wall-Fixer - Attach" on
         (
             operation_success = WallFixer.attachSelectedObjects()
         )
 
+
         setProgress 100
+
 
         if operation_success then
         (
@@ -21902,9 +22729,11 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
             setStatus #warning WallFixer.last_slice_report
         )
 
+
         operation_success
         -- return
     )
+
 
     /*
     Centers the pivot of every selected scene node using MaxScript CenterPivot.
@@ -21916,12 +22745,15 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         setStatus #message "Resetting selected pivots to center..."
         operation_success = false
 
+
         undo "Wall-Fixer - Reset Pivot to Center" on
         (
             operation_success = WallFixer.centerSelectedPivots()
         )
 
+
         setProgress 100
+
 
         if operation_success then
         (
@@ -21932,9 +22764,11 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
             setStatus #warning WallFixer.last_slice_report
         )
 
+
         operation_success
         -- return
     )
+
 
     /*
     Persists all controls imported from Straight Edge Fixer.
@@ -21942,19 +22776,19 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
     */
     function saveStraightEdgeSettings =
     (
-        setIniSetting wall_fixer_ui_ini_path "Controls" "LevelTolerance" (WallFixerEdgeFixerRollout.level_tolerance_spinner.value as string)
-        setIniSetting wall_fixer_ui_ini_path "Controls" "MinLevelEdges" (WallFixerEdgeFixerRollout.min_level_edges_spinner.value as string)
-        setIniSetting wall_fixer_ui_ini_path "Controls" "SearchInZ" (WallFixerEdgeFixerRollout.search_in_z_spinner.value as string)
-        setIniSetting wall_fixer_ui_ini_path "Controls" "EdgeAngle" (WallFixerEdgeFixerRollout.edge_angle_spinner.value as string)
-        setIniSetting wall_fixer_ui_ini_path "Controls" "StraightQuiet" (if WallFixerEdgeFixerRollout.straight_quiet_checkbox.checked then "1" else "0")
+        setIniSetting wall_fixer_ui_ini_path "Controls" "LevelTolerance" (WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value as string)
+        setIniSetting wall_fixer_ui_ini_path "Controls" "MinLevelEdges" (WallFixerEdgeFixerOptionsRollout.min_level_edges_spinner.value as string)
+        setIniSetting wall_fixer_ui_ini_path "Controls" "SearchInZ" (WallFixerEdgeFixerOptionsRollout.search_in_z_spinner.value as string)
+        setIniSetting wall_fixer_ui_ini_path "Controls" "EdgeAngle" (WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value as string)
+        setIniSetting wall_fixer_ui_ini_path "Controls" "StraightQuiet" (if WallFixerEdgeFixerOptionsRollout.straight_quiet_checkbox.checked then "1" else "0")
 
 
         StraightEdgeFixer.saveSettings \
-            WallFixerEdgeFixerRollout.level_tolerance_spinner.value \
-            WallFixerEdgeFixerRollout.min_level_edges_spinner.value \
-            WallFixerEdgeFixerRollout.search_in_z_spinner.value \
-            WallFixerEdgeFixerRollout.edge_angle_spinner.value \
-            WallFixerEdgeFixerRollout.straight_quiet_checkbox.checked
+            WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
+            WallFixerEdgeFixerOptionsRollout.min_level_edges_spinner.value \
+            WallFixerEdgeFixerOptionsRollout.search_in_z_spinner.value \
+            WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value \
+            WallFixerEdgeFixerOptionsRollout.straight_quiet_checkbox.checked
         -- return
     )
 
@@ -24812,16 +25646,16 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
         (
             completed = StraightEdgeFixer.straightenSelectedEdges \
                 direction_type \
-                WallFixerEdgeFixerRollout.level_tolerance_spinner.value \
-                WallFixerEdgeFixerRollout.edge_angle_spinner.value \
-                WallFixerEdgeFixerRollout.search_in_z_spinner.value
+                WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
+                WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value \
+                WallFixerEdgeFixerOptionsRollout.search_in_z_spinner.value
         )
         else
         (
             completed = StraightEdgeFixer.checkEdgeDirection \
                 direction_type \
-                WallFixerEdgeFixerRollout.level_tolerance_spinner.value \
-                WallFixerEdgeFixerRollout.edge_angle_spinner.value
+                WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
+                WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value
         )
 
 
@@ -24852,7 +25686,7 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
         saveStraightEdgeSettings()
         setProgress 0
         setStatus #message "Checking border edges..."
-        completed = StraightEdgeFixer.checkBorders WallFixerEdgeFixerRollout.level_tolerance_spinner.value
+        completed = StraightEdgeFixer.checkBorders WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value
         setProgress 100
 
 
@@ -24883,10 +25717,10 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
 
 
         completed = StraightEdgeFixer.alignSelection \
-            level_tolerance:WallFixerEdgeFixerRollout.level_tolerance_spinner.value \
-            min_level_edges:WallFixerEdgeFixerRollout.min_level_edges_spinner.value \
-            search_in_z:WallFixerEdgeFixerRollout.search_in_z_spinner.value \
-            quiet_mode:WallFixerEdgeFixerRollout.straight_quiet_checkbox.checked
+            level_tolerance:WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
+            min_level_edges:WallFixerEdgeFixerOptionsRollout.min_level_edges_spinner.value \
+            search_in_z:WallFixerEdgeFixerOptionsRollout.search_in_z_spinner.value \
+            quiet_mode:WallFixerEdgeFixerOptionsRollout.straight_quiet_checkbox.checked
 
 
         setProgress 100
