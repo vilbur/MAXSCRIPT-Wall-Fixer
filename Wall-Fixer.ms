@@ -1,6 +1,6 @@
-/*
-Wall-Fixer Bundled Loader 0.57
-Project version 0.63.
+﻿/*
+Wall-Fixer Bundled Loader 0.63
+Project version 0.69.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.57"
-global wall_fixer_loader_tool_version = 0.63
+global wall_fixer_loader_file_version = "0.63"
+global wall_fixer_loader_tool_version = 0.69
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -13380,18 +13380,16 @@ WallFixer = WallFixer_v()
 
 
 /*
-Straight Edge Fixer 0.2
+Straight Edge Fixer 0.22
 Detects repeated horizontal edge levels and aligns nearby horizontal edges to them.
 */
-
 
 global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.2"
-global straight_edge_fixer_tool_version = 0.2
-
+global straight_edge_fixer_file_version = "0.22"
+global straight_edge_fixer_tool_version = 0.69
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -13402,16 +13400,13 @@ if wall_fixer_version_system != 1 then
     wall_fixer_version_system = 1
 )
 
-
 if wall_fixer_version_epoch != 2 then
 (
     wall_fixer_version_epoch = 2
     WallFixerVersion = undefined
 )
 
-
 straight_edge_fixer_current_tool_version_number = undefined
-
 
 if WallFixerVersion != undefined then
 (
@@ -13425,7 +13420,6 @@ if WallFixerVersion != undefined then
     )
 )
 
-
 if straight_edge_fixer_current_tool_version_number == undefined then
 (
     WallFixerVersion = straight_edge_fixer_tool_version
@@ -13434,7 +13428,6 @@ else if straight_edge_fixer_tool_version > straight_edge_fixer_current_tool_vers
 (
     WallFixerVersion = straight_edge_fixer_tool_version
 )
-
 
 if WallFixerRollout != undefined then
 (
@@ -13448,14 +13441,11 @@ if WallFixerRollout != undefined then
 )
 
 
-
-
 global straightEdgeFixerCompareData
 global straightEdgeFixerCompareLevelData
 global StraightEdgeFixer_v
 global StraightEdgeFixer
 global straightEdgeFixer_ui
-
 
 /*
 Compares edge records by their center world Z.
@@ -13477,7 +13467,6 @@ function straightEdgeFixerCompareData item_a item_b =
     )
 ) -- return
 
-
 /*
 Compares detected level records from bottom to top.
 Used by qsort before reporting and alignment.
@@ -13498,13 +13487,11 @@ function straightEdgeFixerCompareLevelData level_a level_b =
     )
 ) -- return
 
-
 struct StraightEdgeFixer_v
 (
     version = "0.2",
     ini_file = ((getDir #plugcfg) + "\\Straight-Edge-Fixer.ini"),
     legacy_ini_file = ((getDir #plugcfg) + "\\Aling-Edges-To-Levels.ini"),
-
 
     /*
     Counts enabled bits in a BitArray.
@@ -13514,18 +13501,14 @@ struct StraightEdgeFixer_v
     (
         bit_count = 0
 
-
         for bit_id in bit_set do
         (
             bit_count += 1
         )
 
-
         bit_count
         -- return
     ),
-
-
 
 
     /*
@@ -13544,7 +13527,6 @@ struct StraightEdgeFixer_v
             dialog_x = getIniSetting legacy_ini_file "Dialog" "X"
             dialog_y = getIniSetting legacy_ini_file "Dialog" "Y"
 
-
             if (level_tolerance != "") then setIniSetting ini_file "Settings" "LevelTolerance" level_tolerance
             if (min_level_edges != "") then setIniSetting ini_file "Settings" "MinLevelEdges" min_level_edges
             if (search_in_z != "") then setIniSetting ini_file "Settings" "SearchInZ" search_in_z
@@ -13554,11 +13536,9 @@ struct StraightEdgeFixer_v
             if (dialog_y != "") then setIniSetting ini_file "Dialog" "Y" dialog_y
         )
 
-
         true
         -- return
     ),
-
 
     /*
     Safely converts an INI string to a floating-point value.
@@ -13568,7 +13548,6 @@ struct StraightEdgeFixer_v
     (
         result_value = default_value
         stored_value = getIniSetting ini_file section_name key_name
-
 
         if ((stored_value != undefined) and (stored_value != "")) then
         (
@@ -13582,11 +13561,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Safely converts an INI string to an integer value.
@@ -13596,7 +13573,6 @@ struct StraightEdgeFixer_v
     (
         result_value = default_value
         stored_value = getIniSetting ini_file section_name key_name
-
 
         if ((stored_value != undefined) and (stored_value != "")) then
         (
@@ -13610,11 +13586,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Reads a persisted boolean value.
@@ -13625,7 +13599,6 @@ struct StraightEdgeFixer_v
         result_value = default_value
         stored_value = getIniSetting ini_file section_name key_name
 
-
         if (stored_value == "1") then
         (
             result_value = true
@@ -13635,11 +13608,9 @@ struct StraightEdgeFixer_v
             result_value = false
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Loads tool settings from the INI file.
@@ -13653,24 +13624,20 @@ struct StraightEdgeFixer_v
         angle_threshold = getIniFloat "Settings" "AngleThreshold" 45.0
         quiet_mode = getIniBoolean "Settings" "QuietMode" false
 
-
         if (level_tolerance <= 0.0) then
         (
             level_tolerance = 0.01
         )
-
 
         if (min_level_edges < 1) then
         (
             min_level_edges = 3
         )
 
-
         if (search_in_z < 0.0) then
         (
             search_in_z = 10.0
         )
-
 
         if (angle_threshold < 0.0) then
         (
@@ -13681,11 +13648,9 @@ struct StraightEdgeFixer_v
             angle_threshold = 45.0
         )
 
-
         #(level_tolerance, min_level_edges, search_in_z, angle_threshold, quiet_mode)
         -- return
     ),
-
 
     /*
     Saves current tool settings to the INI file.
@@ -13699,11 +13664,9 @@ struct StraightEdgeFixer_v
         setIniSetting ini_file "Settings" "AngleThreshold" (angle_threshold as string)
         setIniSetting ini_file "Settings" "QuietMode" (if quiet_mode then "1" else "0")
 
-
         true
         -- return
     ),
-
 
     /*
     Loads the saved dialog screen position.
@@ -13714,11 +13677,9 @@ struct StraightEdgeFixer_v
         position_x = getIniInteger "Dialog" "X" 100
         position_y = getIniInteger "Dialog" "Y" 100
 
-
         [position_x, position_y]
         -- return
     ),
-
 
     /*
     Saves the dialog screen position.
@@ -13732,11 +13693,9 @@ struct StraightEdgeFixer_v
             setIniSetting ini_file "Dialog" "Y" (dialog_position.y as string)
         )
 
-
         true
         -- return
     ),
-
 
     /*
     Finds an existing top Edit Poly modifier.
@@ -13746,11 +13705,9 @@ struct StraightEdgeFixer_v
     (
         edit_poly = undefined
 
-
         if (node.modifiers.count > 0) then
         (
             top_modifier = node.modifiers[1]
-
 
             if (classOf top_modifier == Edit_Poly) then
             (
@@ -13758,11 +13715,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         edit_poly
         -- return
     ),
-
 
     /*
     Returns true when a modifier instance belongs to the supplied node stack.
@@ -13771,7 +13726,6 @@ struct StraightEdgeFixer_v
     function modifierBelongsToNode node modifier_value =
     (
         result_value = false
-
 
         if ((isValidNode node) and (modifier_value != undefined)) then
         (
@@ -13785,11 +13739,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Returns the currently active Edit Poly modifier when it belongs to this node.
@@ -13800,7 +13752,6 @@ struct StraightEdgeFixer_v
         edit_poly = undefined
         current_object = undefined
 
-
         try
         (
             current_object = modPanel.getCurrentObject()
@@ -13810,7 +13761,6 @@ struct StraightEdgeFixer_v
             current_object = undefined
         )
 
-
         if ((current_object != undefined) and
             (classOf current_object == Edit_Poly) and
             (modifierBelongsToNode node current_object)) then
@@ -13818,11 +13768,9 @@ struct StraightEdgeFixer_v
             edit_poly = current_object
         )
 
-
         edit_poly
         -- return
     ),
-
 
     /*
     Finds the first Edit Poly modifier with an exact case-insensitive name.
@@ -13833,11 +13781,9 @@ struct StraightEdgeFixer_v
         edit_poly = undefined
         requested_name = toUpper modifier_name
 
-
         for modifier_index = 1 to node.modifiers.count while (edit_poly == undefined) do
         (
             modifier_value = node.modifiers[modifier_index]
-
 
             if ((classOf modifier_value == Edit_Poly) and
                 ((toUpper modifier_value.name) == requested_name)) then
@@ -13846,11 +13792,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         edit_poly
         -- return
     ),
-
 
     /*
     Resolves a writable Editable Poly or Edit Poly source without creating duplicates.
@@ -13869,7 +13813,6 @@ struct StraightEdgeFixer_v
         top_edit_poly = getTopEditPoly node
         slice_horizontal = findNamedEditPoly node "SLICE HORIZONTAL"
         existing_fixer = findNamedEditPoly node "STRAIGHT EDGE FIXER"
-
 
         if ((active_edit_poly != undefined) and
             ((toUpper active_edit_poly.name) == "SLICE HORIZONTAL")) then
@@ -13901,11 +13844,9 @@ struct StraightEdgeFixer_v
             adapter = #(#edit_poly, new_edit_poly, true)
         )
 
-
         adapter
         -- return
     ),
-
 
     /*
     Returns the number of edges exposed by the current geometry adapter.
@@ -13915,21 +13856,18 @@ struct StraightEdgeFixer_v
     (
         edge_count = 0
 
-
         if (adapter[1] == #editable_poly) then
         (
-            edge_count = polyop.getNumEdges adapter[2]
+            edge_count = polyop.getNumEdges (adapter[2])
         )
         else if (adapter[1] == #edit_poly) then
         (
-            edge_count = EditPolyMod.GetNumEdges adapter[2] node:node
+            edge_count = EditPolyMod.GetNumEdges (adapter[2]) node:node
         )
-
 
         edge_count
         -- return
     ),
-
 
     /*
     Returns the two vertex IDs used by one edge.
@@ -13939,24 +13877,20 @@ struct StraightEdgeFixer_v
     (
         edge_verts = #()
 
-
         if (adapter[1] == #editable_poly) then
         (
-            edge_verts = polyop.getEdgeVerts adapter[2] edge_id
+            edge_verts = polyop.getEdgeVerts (adapter[2]) edge_id
         )
         else if (adapter[1] == #edit_poly) then
         (
-            vert_a = EditPolyMod.GetEdgeVertex adapter[2] edge_id 1 node:node
-            vert_b = EditPolyMod.GetEdgeVertex adapter[2] edge_id 2 node:node
+            vert_a = EditPolyMod.GetEdgeVertex (adapter[2]) edge_id 1 node:node
+            vert_b = EditPolyMod.GetEdgeVertex (adapter[2]) edge_id 2 node:node
             edge_verts = #(vert_a, vert_b)
         )
-
 
         edge_verts
         -- return
     ),
-
-
 
 
     /*
@@ -13967,12 +13901,11 @@ struct StraightEdgeFixer_v
     (
         result_value = false
 
-
         try
         (
             if (adapter[1] == #editable_poly) then
             (
-                result_value = polyop.getEdgeVis adapter[2] edge_id
+                result_value = polyop.getEdgeVis (adapter[2]) edge_id
             )
             else if (adapter[1] == #edit_poly) then
             (
@@ -14002,11 +13935,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Returns one vertex position in object-local coordinates.
@@ -14016,21 +13947,18 @@ struct StraightEdgeFixer_v
     (
         vertex_position = [0,0,0]
 
-
         if (adapter[1] == #editable_poly) then
         (
-            vertex_position = polyop.getVert adapter[2] vert_id
+            vertex_position = polyop.getVert (adapter[2]) vert_id
         )
         else if (adapter[1] == #edit_poly) then
         (
-            vertex_position = EditPolyMod.GetVertex adapter[2] vert_id node:node
+            vertex_position = EditPolyMod.GetVertex (adapter[2]) vert_id node:node
         )
-
 
         vertex_position
         -- return
     ),
-
 
     /*
     Returns one vertex position in world coordinates.
@@ -14041,12 +13969,9 @@ struct StraightEdgeFixer_v
         local_position = getVertexPosition node adapter vert_id
         world_position = local_position * node.objectTransform
 
-
         world_position
         -- return
     ),
-
-
 
 
     /*
@@ -14057,20 +13982,18 @@ struct StraightEdgeFixer_v
     (
         result_value = false
 
-
         if (isEdgeVisible node adapter edge_id) then
         (
             try
             (
                 if (adapter[1] == #editable_poly) then
                 (
-                    edge_faces = polyop.getFacesUsingEdge adapter[2] edge_id
+                    edge_faces = polyop.getFacesUsingEdge (adapter[2]) edge_id
                 )
                 else
                 (
                     edge_faces = polyop.getFacesUsingEdge node edge_id
                 )
-
 
                 result_value = (edge_faces.numberSet == 1)
             )
@@ -14080,11 +14003,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Collects all visible open border edges.
@@ -14095,7 +14016,6 @@ struct StraightEdgeFixer_v
         border_edges = #{}
         edge_count = getEdgeCount node adapter
 
-
         for edge_id = 1 to edge_count do
         (
             if (isBorderEdge node adapter edge_id) then
@@ -14104,11 +14024,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         border_edges
         -- return
     ),
-
 
     /*
     Returns true when two local XY coordinates match inside tolerance.
@@ -14121,7 +14039,6 @@ struct StraightEdgeFixer_v
         -- return
     ),
 
-
     /*
     Returns true when one border edge follows one local XY column.
     Both endpoints must share the same local X and Y inside tolerance.
@@ -14131,7 +14048,6 @@ struct StraightEdgeFixer_v
         result_value = false
         edge_verts = getEdgeVertIds node adapter edge_id
 
-
         if (edge_verts.count == 2) then
         (
             point_a = getVertexPosition node adapter edge_verts[1]
@@ -14139,11 +14055,9 @@ struct StraightEdgeFixer_v
             result_value = localXYMatches point_a point_b tolerance
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Tests whether two one-dimensional Z intervals overlap or touch.
@@ -14155,7 +14069,6 @@ struct StraightEdgeFixer_v
         -- return
     ),
 
-
     /*
     Returns true when two border edges are separate IDs on the same local XY column
     and their local Z ranges overlap or touch without sharing a welded vertex.
@@ -14166,7 +14079,6 @@ struct StraightEdgeFixer_v
         edge_a_verts = getEdgeVertIds node adapter edge_a
         edge_b_verts = getEdgeVertIds node adapter edge_b
 
-
         if ((edge_a_verts.count == 2) and (edge_b_verts.count == 2)) then
         (
             shared_vertex =
@@ -14174,7 +14086,6 @@ struct StraightEdgeFixer_v
                 (edge_a_verts[1] == edge_b_verts[2]) or
                 (edge_a_verts[2] == edge_b_verts[1]) or
                 (edge_a_verts[2] == edge_b_verts[2])
-
 
             if (not shared_vertex) then
             (
@@ -14184,18 +14095,15 @@ struct StraightEdgeFixer_v
                     edge_a_point = getVertexPosition node adapter edge_a_verts[1]
                     edge_b_point = getVertexPosition node adapter edge_b_verts[1]
 
-
                     if (localXYMatches edge_a_point edge_b_point tolerance) then
                     (
                         edge_a_point_2 = getVertexPosition node adapter edge_a_verts[2]
                         edge_b_point_2 = getVertexPosition node adapter edge_b_verts[2]
 
-
                         min_a = amin edge_a_point.z edge_a_point_2.z
                         max_a = amax edge_a_point.z edge_a_point_2.z
                         min_b = amin edge_b_point.z edge_b_point_2.z
                         max_b = amax edge_b_point.z edge_b_point_2.z
-
 
                         result_value = zRangesOverlapOrTouch min_a max_a min_b max_b tolerance
                     )
@@ -14203,11 +14111,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Finds visible border edges that look like an unwelded vertical seam.
@@ -14218,18 +14124,15 @@ struct StraightEdgeFixer_v
         invalid_edges = #{}
         border_edge_array = for edge_id in border_edges collect edge_id
 
-
         if (border_edge_array.count > 1) then
         (
             for edge_index_a = 1 to (border_edge_array.count - 1) do
             (
                 edge_a = border_edge_array[edge_index_a]
 
-
                 for edge_index_b = (edge_index_a + 1) to border_edge_array.count do
                 (
                     edge_b = border_edge_array[edge_index_b]
-
 
                     if (borderEdgesFormUnweldedColumn node adapter edge_a edge_b tolerance) then
                     (
@@ -14240,11 +14143,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         invalid_edges
         -- return
     ),
-
 
     /*
     Returns all visible border edges using one vertex.
@@ -14254,11 +14155,9 @@ struct StraightEdgeFixer_v
     (
         result_edges = #()
 
-
         for edge_id in border_edges do
         (
             edge_verts = getEdgeVertIds node adapter edge_id
-
 
             if (edge_verts.count == 2) then
             (
@@ -14269,11 +14168,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         result_edges
         -- return
     ),
-
 
     /*
     Returns the opposite vertex of an edge.
@@ -14283,7 +14180,6 @@ struct StraightEdgeFixer_v
     (
         other_vert = 0
         edge_verts = getEdgeVertIds node adapter edge_id
-
 
         if (edge_verts.count == 2) then
         (
@@ -14297,11 +14193,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         other_vert
         -- return
     ),
-
 
     /*
     Walks one visible border chain from a seed edge.
@@ -14314,30 +14208,25 @@ struct StraightEdgeFixer_v
         closed_loop = false
         seed_verts = getEdgeVertIds node adapter seed_edge
 
-
         if (seed_verts.count == 2) then
         (
             start_vert = seed_verts[1]
             current_vert = seed_verts[2]
             current_edge = seed_edge
 
-
             append ordered_vertices start_vert
             append ordered_vertices current_vert
             append ordered_edges current_edge
 
-
             continue_walk = true
             safety_count = 0
             max_steps = border_edges.numberSet + 2
-
 
             while (continue_walk and (safety_count < max_steps)) do
             (
                 safety_count += 1
                 incident_edges = getBorderEdgesAtVertex node adapter border_edges current_vert
                 next_edge = 0
-
 
                 for candidate_edge in incident_edges while (next_edge == 0) do
                 (
@@ -14347,7 +14236,6 @@ struct StraightEdgeFixer_v
                     )
                 )
 
-
                 if (next_edge == 0) then
                 (
                     continue_walk = false
@@ -14355,7 +14243,6 @@ struct StraightEdgeFixer_v
                 else
                 (
                     next_vert = getOtherEdgeVertex node adapter next_edge current_vert
-
 
                     if (next_vert == 0) then
                     (
@@ -14382,11 +14269,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         #(ordered_vertices, ordered_edges, closed_loop)
         -- return
     ),
-
 
     /*
     Calculates a Newell normal from an ordered local-space border loop.
@@ -14397,7 +14282,6 @@ struct StraightEdgeFixer_v
         normal_value = [0,0,0]
         vert_count = ordered_vertices.count
 
-
         if (vert_count >= 3) then
         (
             for vert_index = 1 to vert_count do
@@ -14406,24 +14290,20 @@ struct StraightEdgeFixer_v
                 point_a = getVertexPosition node adapter ordered_vertices[vert_index]
                 point_b = getVertexPosition node adapter ordered_vertices[next_index]
 
-
                 normal_value.x += (point_a.y - point_b.y) * (point_a.z + point_b.z)
                 normal_value.y += (point_a.z - point_b.z) * (point_a.x + point_b.x)
                 normal_value.z += (point_a.x - point_b.x) * (point_a.y + point_b.y)
             )
         )
 
-
         if ((length normal_value) > 0.0000001) then
         (
             normal_value = normalize normal_value
         )
 
-
         normal_value
         -- return
     ),
-
 
     /*
     Finds border edges touching reflex border corners with interior angle above 180 degrees.
@@ -14434,17 +14314,14 @@ struct StraightEdgeFixer_v
         invalid_edges = #{}
         remaining_edges = copy border_edges
 
-
         while (remaining_edges.numberSet > 0) do
         (
             seed_edge = 0
-
 
             for edge_id in remaining_edges while (seed_edge == 0) do
             (
                 seed_edge = edge_id
             )
-
 
             if (seed_edge > 0) then
             (
@@ -14453,42 +14330,34 @@ struct StraightEdgeFixer_v
                 ordered_edges = loop_data[2]
                 closed_loop = loop_data[3]
 
-
                 for walked_edge in ordered_edges do
                 (
                     remaining_edges[walked_edge] = false
                 )
-
 
                 if (closed_loop and (ordered_vertices.count >= 3) and
                     (ordered_edges.count == ordered_vertices.count)) then
                 (
                     loop_normal = getBorderLoopNormal node adapter ordered_vertices
 
-
                     if ((length loop_normal) > 0.0000001) then
                     (
                         vert_count = ordered_vertices.count
-
 
                         for vert_index = 1 to vert_count do
                         (
                             previous_index = if (vert_index == 1) then vert_count else (vert_index - 1)
                             next_index = if (vert_index == vert_count) then 1 else (vert_index + 1)
 
-
                             previous_point = getVertexPosition node adapter ordered_vertices[previous_index]
                             current_point = getVertexPosition node adapter ordered_vertices[vert_index]
                             next_point = getVertexPosition node adapter ordered_vertices[next_index]
 
-
                             vector_to_previous = previous_point - current_point
                             vector_to_next = next_point - current_point
 
-
                             previous_length = length vector_to_previous
                             next_length = length vector_to_next
-
 
                             if ((previous_length > 0.0000001) and
                                 (next_length > 0.0000001)) then
@@ -14498,10 +14367,8 @@ struct StraightEdgeFixer_v
                                 direction_dot = dot previous_direction next_direction
                                 direction_dot = amax -1.0 (amin 1.0 direction_dot)
 
-
                                 turn_cross = cross vector_to_previous vector_to_next
                                 signed_turn = dot turn_cross loop_normal
-
 
                                 /*
                                 Standard reflex corner:
@@ -14509,7 +14376,6 @@ struct StraightEdgeFixer_v
                                 negative = convex turn and positive = reflex turn.
                                 */
                                 is_reflex_corner = (signed_turn > 0.0000001)
-
 
                                 /*
                                 360-degree backtrack:
@@ -14519,12 +14385,10 @@ struct StraightEdgeFixer_v
                                 */
                                 is_backtrack_360 = (direction_dot >= 0.9999)
 
-
                                 if (is_reflex_corner or is_backtrack_360) then
                                 (
                                     previous_edge_index = if (vert_index == 1) then ordered_edges.count else (vert_index - 1)
                                     next_edge_index = vert_index
-
 
                                     invalid_edges[ordered_edges[previous_edge_index]] = true
                                     invalid_edges[ordered_edges[next_edge_index]] = true
@@ -14536,11 +14400,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         invalid_edges
         -- return
     ),
-
 
     /*
     Checks visible open borders for unwelded local-Z seams and reflex corners.
@@ -14553,7 +14415,6 @@ struct StraightEdgeFixer_v
         total_unwelded_edges = 0
         total_reflex_edges = 0
         processed_count = 0
-
 
         if (selected_nodes.count == 0) then
         (
@@ -14573,9 +14434,7 @@ struct StraightEdgeFixer_v
                     invalid_edges = copy unwelded_edges
                     invalid_edges += reflex_edges
 
-
                     setEdgeSelection node adapter invalid_edges
-
 
                     total_unwelded_edges += countBits unwelded_edges
                     total_reflex_edges += countBits reflex_edges
@@ -14583,23 +14442,19 @@ struct StraightEdgeFixer_v
                 )
             )
 
-
             if (processed_count > 0) then
             (
                 setCommandPanelTaskMode mode:#modify
                 subObjectLevel = 2
                 completeRedraw()
 
-
                 format "Border Check: selected % invalid border edge(s). Unwelded/overlapping: %, reflex >180 deg: %.\n" total_invalid_edges total_unwelded_edges total_reflex_edges
             )
         )
 
-
         total_invalid_edges
         -- return
     ),
-
 
     /*
     Returns true when an edge is horizontal within tolerance.
@@ -14610,7 +14465,6 @@ struct StraightEdgeFixer_v
         result_value = false
         edge_verts = getEdgeVertIds node adapter edge_id
 
-
         if (edge_verts.count == 2) then
         (
             point_a = getVertexWorldPosition node adapter edge_verts[1]
@@ -14618,11 +14472,9 @@ struct StraightEdgeFixer_v
             result_value = ((abs (point_a.z - point_b.z)) <= tolerance)
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Returns true when an edge is vertical within tolerance.
@@ -14633,24 +14485,19 @@ struct StraightEdgeFixer_v
         result_value = false
         edge_verts = getEdgeVertIds node adapter edge_id
 
-
         if (edge_verts.count == 2) then
         (
             point_a = getVertexWorldPosition node adapter edge_verts[1]
             point_b = getVertexWorldPosition node adapter edge_verts[2]
-
 
             result_value =
                 ((abs (point_a.x - point_b.x)) <= tolerance) and
                 ((abs (point_a.y - point_b.y)) <= tolerance)
         )
 
-
         result_value
         -- return
     ),
-
-
 
 
     /*
@@ -14662,7 +14509,6 @@ struct StraightEdgeFixer_v
         angle_value = undefined
         edge_verts = getEdgeVertIds node adapter edge_id
 
-
         if (edge_verts.count == 2) then
         (
             point_a = getVertexWorldPosition node adapter edge_verts[1]
@@ -14671,18 +14517,15 @@ struct StraightEdgeFixer_v
             horizontal_length = sqrt ((edge_vector.x * edge_vector.x) + (edge_vector.y * edge_vector.y))
             vertical_length = abs edge_vector.z
 
-
             if ((horizontal_length > 0.0000001) or (vertical_length > 0.0000001)) then
             (
                 angle_value = atan2 vertical_length horizontal_length
             )
         )
 
-
         angle_value
         -- return
     ),
-
 
     /*
     Returns true when a non-horizontal edge is still close enough to horizontal to be checked.
@@ -14692,11 +14535,9 @@ struct StraightEdgeFixer_v
     (
         result_value = false
 
-
         if (not (isHorizontalEdge node adapter edge_id tolerance)) then
         (
             angle_value = getEdgeAngleFromHorizontal node adapter edge_id
-
 
             if (angle_value != undefined) then
             (
@@ -14704,11 +14545,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Returns true when a non-vertical edge is still close enough to vertical to be checked.
@@ -14718,11 +14557,9 @@ struct StraightEdgeFixer_v
     (
         result_value = false
 
-
         if (not (isVerticalEdge node adapter edge_id tolerance)) then
         (
             angle_from_horizontal = getEdgeAngleFromHorizontal node adapter edge_id
-
 
             if (angle_from_horizontal != undefined) then
             (
@@ -14731,11 +14568,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Selects an edge BitArray on the current geometry source.
@@ -14743,22 +14578,21 @@ struct StraightEdgeFixer_v
     */
     function setEdgeSelection node adapter edge_selection =
     (
+        geometry_source = adapter[2]
+
         if (adapter[1] == #editable_poly) then
         (
-            polyop.setEdgeSelection adapter[2] edge_selection
+            polyop.setEdgeSelection geometry_source edge_selection
         )
         else if (adapter[1] == #edit_poly) then
         (
-            EditPolyMod.SetEPolySelLevel adapter[2] #Edge
-            EditPolyMod.SetSelection adapter[2] #Edge edge_selection node:node
+            EditPolyMod.SetEPolySelLevel geometry_source #Edge
+            EditPolyMod.SetSelection geometry_source #Edge edge_selection node:node
         )
-
 
         true
         -- return
     ),
-
-
 
 
     /*
@@ -14768,22 +14602,20 @@ struct StraightEdgeFixer_v
     function getEdgeSelection node adapter =
     (
         edge_selection = #{}
-
+        geometry_source = adapter[2]
 
         if (adapter[1] == #editable_poly) then
         (
-            edge_selection = polyop.getEdgeSelection adapter[2]
+            edge_selection = polyop.getEdgeSelection geometry_source
         )
         else if (adapter[1] == #edit_poly) then
         (
-            edge_selection = EditPolyMod.GetSelection adapter[2] #Edge node:node
+            edge_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
         )
-
 
         edge_selection
         -- return
     ),
-
 
     /*
     Sets vertex selection on Editable Poly or Edit Poly.
@@ -14791,21 +14623,21 @@ struct StraightEdgeFixer_v
     */
     function setVertexSelection node adapter vertex_selection =
     (
+        geometry_source = adapter[2]
+
         if (adapter[1] == #editable_poly) then
         (
-            polyop.setVertSelection adapter[2] vertex_selection
+            polyop.setVertSelection geometry_source vertex_selection
         )
         else if (adapter[1] == #edit_poly) then
         (
-            EditPolyMod.SetEPolySelLevel adapter[2] #Vertex
-            EditPolyMod.SetSelection adapter[2] #Vertex vertex_selection node:node
+            EditPolyMod.SetEPolySelLevel geometry_source #Vertex
+            EditPolyMod.SetSelection geometry_source #Vertex vertex_selection node:node
         )
-
 
         true
         -- return
     ),
-
 
     /*
     Returns the world-space center of one edge.
@@ -14816,7 +14648,6 @@ struct StraightEdgeFixer_v
         center_position = undefined
         edge_verts = getEdgeVertIds node adapter edge_id
 
-
         if (edge_verts.count == 2) then
         (
             point_a = getVertexWorldPosition node adapter edge_verts[1]
@@ -14824,11 +14655,9 @@ struct StraightEdgeFixer_v
             center_position = (point_a + point_b) * 0.5
         )
 
-
         center_position
         -- return
     ),
-
 
     /*
     Returns a normalized world-space edge direction.
@@ -14839,13 +14668,11 @@ struct StraightEdgeFixer_v
         direction_value = undefined
         edge_verts = getEdgeVertIds node adapter edge_id
 
-
         if (edge_verts.count == 2) then
         (
             point_a = getVertexWorldPosition node adapter edge_verts[1]
             point_b = getVertexWorldPosition node adapter edge_verts[2]
             edge_vector = point_b - point_a
-
 
             if ((length edge_vector) > 0.0000001) then
             (
@@ -14853,11 +14680,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         direction_value
         -- return
     ),
-
 
     /*
     Returns the unsigned parallel angle between two edges in degrees.
@@ -14869,7 +14694,6 @@ struct StraightEdgeFixer_v
         direction_a = getEdgeDirectionWorld node adapter edge_a
         direction_b = getEdgeDirectionWorld node adapter edge_b
 
-
         if ((direction_a != undefined) and (direction_b != undefined)) then
         (
             dot_value = abs (dot direction_a direction_b)
@@ -14877,11 +14701,9 @@ struct StraightEdgeFixer_v
             angle_value = acos dot_value
         )
 
-
         angle_value
         -- return
     ),
-
 
     /*
     Returns a common vertex ID shared by two edges.
@@ -14892,7 +14714,6 @@ struct StraightEdgeFixer_v
         shared_vertex = 0
         edge_a_verts = getEdgeVertIds node adapter edge_a
         edge_b_verts = getEdgeVertIds node adapter edge_b
-
 
         if ((edge_a_verts.count == 2) and (edge_b_verts.count == 2)) then
         (
@@ -14906,11 +14727,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         shared_vertex
         -- return
     ),
-
 
     /*
     Returns true when an edge is already a valid straight reference for the requested mode.
@@ -14919,7 +14738,6 @@ struct StraightEdgeFixer_v
     function isStraightReferenceEdge node adapter edge_id check_type tolerance =
     (
         result_value = false
-
 
         if (isEdgeVisible node adapter edge_id) then
         (
@@ -14933,11 +14751,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Finds the best visible straight edge directly neighboring the bad edge.
@@ -14950,18 +14766,15 @@ struct StraightEdgeFixer_v
         best_angle = 1.0e30
         edge_count = getEdgeCount node adapter
 
-
         for reference_edge = 1 to edge_count do
         (
             if ((reference_edge != target_edge) and (isStraightReferenceEdge node adapter reference_edge check_type tolerance)) then
             (
                 shared_vertex = getSharedVertexId node adapter target_edge reference_edge
 
-
                 if (shared_vertex > 0) then
                 (
                     parallel_angle = getParallelAngle node adapter target_edge reference_edge
-
 
                     if ((parallel_angle <= angle_threshold) and (parallel_angle < best_angle)) then
                     (
@@ -14972,11 +14785,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         best_reference
         -- return
     ),
-
 
     /*
     Finds the nearest visible straight reference on the same Z level.
@@ -14990,7 +14801,6 @@ struct StraightEdgeFixer_v
         target_center = getEdgeCenterWorld node adapter target_edge
         edge_count = getEdgeCount node adapter
 
-
         if (target_center != undefined) then
         (
             for reference_edge = 1 to edge_count do
@@ -14999,21 +14809,17 @@ struct StraightEdgeFixer_v
                 (
                     reference_center = getEdgeCenterWorld node adapter reference_edge
 
-
                     if (reference_center != undefined) then
                     (
                         z_distance = abs (target_center.z - reference_center.z)
-
 
                         if (z_distance <= search_in_z) then
                         (
                             parallel_angle = getParallelAngle node adapter target_edge reference_edge
 
-
                             if (parallel_angle <= angle_threshold) then
                             (
                                 spatial_distance = distance target_center reference_center
-
 
                                 if (spatial_distance < best_distance) then
                                 (
@@ -15027,11 +14833,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         best_reference
         -- return
     ),
-
 
     /*
     Moves one vertex to an exact world-space position.
@@ -15041,14 +14845,13 @@ struct StraightEdgeFixer_v
     (
         result_value = false
 
-
         try
         (
             if (adapter[1] == #editable_poly) then
             (
                 inverse_tm = inverse node.objectTransform
                 target_local_position = target_world_position * inverse_tm
-                polyop.setVert adapter[2] vert_id target_local_position
+                polyop.setVert (adapter[2]) vert_id target_local_position
                 update node
                 result_value = true
             )
@@ -15057,19 +14860,16 @@ struct StraightEdgeFixer_v
                 current_world_position = getVertexWorldPosition node adapter vert_id
                 move_delta = target_world_position - current_world_position
 
-
                 if ((length move_delta) > 0.0000001) then
                 (
                     one_vertex = #{}
                     one_vertex[vert_id] = true
 
-
-                    EditPolyMod.SetEPolySelLevel adapter[2] #Vertex
-                    EditPolyMod.SetSelection adapter[2] #Vertex one_vertex node:node
-                    EditPolyMod.MoveSelection adapter[2] move_delta
-                    EditPolyMod.Commit adapter[2]
+                    EditPolyMod.SetEPolySelLevel (adapter[2]) #Vertex
+                    EditPolyMod.SetSelection (adapter[2]) #Vertex one_vertex node:node
+                    EditPolyMod.MoveSelection (adapter[2]) move_delta
+                    EditPolyMod.Commit (adapter[2])
                 )
-
 
                 update node
                 result_value = true
@@ -15080,11 +14880,9 @@ struct StraightEdgeFixer_v
             result_value = false
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Straightens one selected edge using a reference edge direction.
@@ -15100,7 +14898,6 @@ struct StraightEdgeFixer_v
         reference_method = reference_data[3]
         reference_direction = getEdgeDirectionWorld node adapter reference_edge
 
-
         if ((target_verts.count == 2) and (reference_direction != undefined)) then
         (
             if ((reference_method == #neighbor) and (shared_vertex > 0)) then
@@ -15109,7 +14906,6 @@ struct StraightEdgeFixer_v
                 anchor_position = getVertexWorldPosition node adapter shared_vertex
                 moving_position = getVertexWorldPosition node adapter moving_vertex
                 projection_distance = dot (moving_position - anchor_position) reference_direction
-
 
                 if ((abs projection_distance) > 0.0000001) then
                 (
@@ -15124,22 +14920,18 @@ struct StraightEdgeFixer_v
                 target_center = (point_a + point_b) * 0.5
                 reference_center = getEdgeCenterWorld node adapter reference_edge
 
-
                 if ((check_type == #horizontal) and (reference_center != undefined)) then
                 (
                     target_center.z = reference_center.z
                 )
 
-
                 half_vector = (point_b - point_a) * 0.5
                 projected_half_length = dot half_vector reference_direction
-
 
                 if ((abs projected_half_length) > 0.0000001) then
                 (
                     target_a = target_center - (reference_direction * projected_half_length)
                     target_b = target_center + (reference_direction * projected_half_length)
-
 
                     moved_a = setVertexWorldPosition node adapter target_verts[1] target_a
                     moved_b = setVertexWorldPosition node adapter target_verts[2] target_b
@@ -15147,7 +14939,6 @@ struct StraightEdgeFixer_v
                 )
             )
         )
-
 
         if (result_value) then
         (
@@ -15161,11 +14952,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         result_value
         -- return
     ),
-
 
     /*
     Converts a BitArray of IDs to comma-separated text.
@@ -15176,7 +14965,6 @@ struct StraightEdgeFixer_v
         result_text = ""
         first_item = true
 
-
         for item_id in bit_set do
         (
             if (not first_item) then
@@ -15184,16 +14972,13 @@ struct StraightEdgeFixer_v
                 result_text += ", "
             )
 
-
             result_text += (item_id as string)
             first_item = false
         )
 
-
         result_text
         -- return
     ),
-
 
     /*
     Straightens only the currently selected visible edges for Horizontal or Vertical mode.
@@ -15208,7 +14993,6 @@ struct StraightEdgeFixer_v
         total_fixed_edges = 0
         has_failed_edges = false
         failure_report = ""
-
 
         if (selected_nodes.count == 0) then
         (
@@ -15227,32 +15011,26 @@ struct StraightEdgeFixer_v
                         pending_edges = #{}
                         failed_vertices = #{}
 
-
                         for edge_id in original_edge_selection do
                         (
-                            if (isEdgeVisible node adapter edge_id) then
+                            if (check_type == #horizontal) then
                             (
-                                if (check_type == #horizontal) then
+                                if (isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold) then
                                 (
-                                    if (isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold) then
-                                    (
-                                        pending_edges[edge_id] = true
-                                    )
+                                    pending_edges[edge_id] = true
                                 )
-                                else if (check_type == #vertical) then
+                            )
+                            else if (check_type == #vertical) then
+                            (
+                                if (isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold) then
                                 (
-                                    if (isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold) then
-                                    (
-                                        pending_edges[edge_id] = true
-                                    )
+                                    pending_edges[edge_id] = true
                                 )
                             )
                         )
 
-
                         total_selected_candidates += countBits pending_edges
                         continue_processing = true
-
 
                         /*
                         Multiple passes let a newly fixed edge become the straight neighbor
@@ -15263,17 +15041,14 @@ struct StraightEdgeFixer_v
                             continue_processing = false
                             pending_snapshot = copy pending_edges
 
-
                             for edge_id in pending_snapshot do
                             (
                                 reference_data = findNeighborReference node adapter edge_id check_type tolerance angle_threshold
-
 
                                 if (reference_data == undefined) then
                                 (
                                     reference_data = findSameLevelReference node adapter edge_id check_type tolerance angle_threshold search_in_z
                                 )
-
 
                                 if (reference_data != undefined) then
                                 (
@@ -15287,11 +15062,9 @@ struct StraightEdgeFixer_v
                             )
                         )
 
-
                         for failed_edge in pending_edges do
                         (
                             failed_edge_verts = getEdgeVertIds node adapter failed_edge
-
 
                             if (failed_edge_verts.count == 2) then
                             (
@@ -15300,19 +15073,16 @@ struct StraightEdgeFixer_v
                             )
                         )
 
-
                         if (failed_vertices.numberSet > 0) then
                         (
                             has_failed_edges = true
                             failure_report += node.name + ": " + (bitIdsToString failed_vertices) + "\n"
                         )
 
-
                         append object_results #(node, adapter, original_edge_selection, failed_vertices)
                     )
                 )
             )
-
 
             /*
             If any heuristic failed, expose only failed vertices for manual repair.
@@ -15325,11 +15095,9 @@ struct StraightEdgeFixer_v
                     setVertexSelection object_result[1] object_result[2] object_result[4]
                 )
 
-
                 setCommandPanelTaskMode mode:#modify
                 subObjectLevel = 1
                 completeRedraw()
-
 
                 messageBox ("Unable to straighten edges with vertices:\n\n" + failure_report) title:"Straight Edge Fixer"
             )
@@ -15340,14 +15108,11 @@ struct StraightEdgeFixer_v
                     setEdgeSelection object_result[1] object_result[2] object_result[3]
                 )
 
-
                 setCommandPanelTaskMode mode:#modify
                 subObjectLevel = 2
                 completeRedraw()
 
-
                 format "Straight Edge Fixer: fixed % selected edge(s).\n" total_fixed_edges
-
 
                 if (total_selected_candidates == 0) then
                 (
@@ -15356,11 +15121,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         #(total_fixed_edges, has_failed_edges)
         -- return
     ),
-
 
     /*
     Checks one requested edge direction and selects every failing edge.
@@ -15371,7 +15134,6 @@ struct StraightEdgeFixer_v
         selected_nodes = selection as array
         total_bad_edges = 0
         processed_count = 0
-
 
         if (selected_nodes.count == 0) then
         (
@@ -15388,41 +15150,34 @@ struct StraightEdgeFixer_v
                     edge_count = getEdgeCount node adapter
                     bad_edges = #{}
 
-
                     for edge_id = 1 to edge_count do
                     (
-                        if (isEdgeVisible node adapter edge_id) then
+                        if (check_type == #horizontal) then
                         (
-                            if (check_type == #horizontal) then
+                            if (isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold) then
                             (
-                                if (isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold) then
-                                (
-                                    bad_edges[edge_id] = true
-                                )
+                                bad_edges[edge_id] = true
                             )
-                            else if (check_type == #vertical) then
+                        )
+                        else if (check_type == #vertical) then
+                        (
+                            if (isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold) then
                             (
-                                if (isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold) then
-                                (
-                                    bad_edges[edge_id] = true
-                                )
+                                bad_edges[edge_id] = true
                             )
                         )
                     )
-
 
                     setEdgeSelection node adapter bad_edges
                     total_bad_edges += countBits bad_edges
                 )
             )
 
-
             if (processed_count > 0) then
             (
                 setCommandPanelTaskMode mode:#modify
                 subObjectLevel = 2
                 completeRedraw()
-
 
                 if (check_type == #horizontal) then
                 (
@@ -15435,11 +15190,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         total_bad_edges
         -- return
     ),
-
 
     /*
     Reads all visible horizontal edge data used by level detection.
@@ -15450,7 +15203,6 @@ struct StraightEdgeFixer_v
         edge_data = #()
         edge_count = getEdgeCount node adapter
 
-
         for edge_id = 1 to edge_count do
         (
             if (isEdgeVisible node adapter edge_id) then
@@ -15458,7 +15210,6 @@ struct StraightEdgeFixer_v
                 if (isHorizontalEdge node adapter edge_id level_tolerance) then
                 (
                     edge_verts = getEdgeVertIds node adapter edge_id
-
 
                     if (edge_verts.count == 2) then
                     (
@@ -15468,18 +15219,15 @@ struct StraightEdgeFixer_v
                         z_max = amax point_a.z point_b.z
                         z_center = (point_a.z + point_b.z) * 0.5
 
-
                         append edge_data #(edge_id, z_min, z_max, z_center, edge_verts[1], edge_verts[2])
                     )
                 )
             )
         )
 
-
         edge_data
         -- return
     ),
-
 
     /*
     Builds one detected Z-level record from defining horizontal edges.
@@ -15491,17 +15239,14 @@ struct StraightEdgeFixer_v
         level_min = cluster[1][4]
         level_max = cluster[1][4]
 
-
         for item in cluster do
         (
             definition_edges[item[1]] = true
-
 
             if (item[4] < level_min) then
             (
                 level_min = item[4]
             )
-
 
             if (item[4] > level_max) then
             (
@@ -15509,14 +15254,11 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         level_center = (level_min + level_max) * 0.5
-
 
         #(definition_edges, level_min, level_max, level_center, #{}, level_center, #CENTER, 0)
         -- return
     ),
-
 
     /*
     Detects repeated world-Z levels from horizontal edges.
@@ -15526,14 +15268,12 @@ struct StraightEdgeFixer_v
     (
         levels = #()
 
-
         if (edge_data.count > 0) then
         (
             qsort edge_data straightEdgeFixerCompareData
             cluster = #()
             cluster_min_z = 0.0
             max_cluster_span = level_tolerance * 2.0
-
 
             for item in edge_data do
             (
@@ -15553,18 +15293,15 @@ struct StraightEdgeFixer_v
                         append levels (makeLevel cluster)
                     )
 
-
                     cluster = #(item)
                     cluster_min_z = item[4]
                 )
             )
 
-
             if (cluster.count >= min_level_edges) then
             (
                 append levels (makeLevel cluster)
             )
-
 
             if (levels.count > 1) then
             (
@@ -15572,11 +15309,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         levels
         -- return
     ),
-
 
     /*
     Assigns every horizontal edge to the nearest detected level inside Search in Z.
@@ -15593,11 +15328,9 @@ struct StraightEdgeFixer_v
                 nearest_level = 0
                 nearest_distance = 1.0e30
 
-
                 for level_index = 1 to levels.count do
                 (
                     level_distance = abs (edge_z - levels[level_index][4])
-
 
                     if (level_distance < nearest_distance) then
                     (
@@ -15606,7 +15339,6 @@ struct StraightEdgeFixer_v
                     )
                 )
 
-
                 if ((nearest_level > 0) and (nearest_distance <= search_in_z)) then
                 (
                     levels[nearest_level][5][edge_id] = true
@@ -15614,11 +15346,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         levels
         -- return
     ),
-
 
     /*
     Finds one horizontal edge record by edge ID.
@@ -15628,7 +15358,6 @@ struct StraightEdgeFixer_v
     (
         result_data = undefined
 
-
         for item in edge_data while (result_data == undefined) do
         (
             if (item[1] == edge_id) then
@@ -15637,11 +15366,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         result_data
         -- return
     ),
-
 
     /*
     Chooses TOP, BOTTOM, or CENTER target Z for every detected edge level.
@@ -15661,19 +15388,16 @@ struct StraightEdgeFixer_v
             below_count = 0
             above_count = 0
 
-
             for edge_id in assigned_edges do
             (
                 if (not definition_edges[edge_id]) then
                 (
                     item = getEdgeDataById edge_data edge_id
 
-
                     if (item != undefined) then
                     (
                         outside_count += 1
                         edge_z = item[4]
-
 
                         if (edge_z < level_min) then
                         (
@@ -15686,7 +15410,6 @@ struct StraightEdgeFixer_v
                     )
                 )
             )
-
 
             if (outside_count == 0) then
             (
@@ -15709,15 +15432,12 @@ struct StraightEdgeFixer_v
                 level_data[7] = #CENTER
             )
 
-
             level_data[8] = outside_count
         )
-
 
         levels
         -- return
     ),
-
 
     /*
     Collects unique vertex IDs used by the assigned edges of one level.
@@ -15727,11 +15447,9 @@ struct StraightEdgeFixer_v
     (
         vertex_ids = #{}
 
-
         for edge_id in assigned_edges do
         (
             edge_verts = getEdgeVertIds node adapter edge_id
-
 
             if (edge_verts.count == 2) then
             (
@@ -15740,11 +15458,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         vertex_ids
         -- return
     ),
-
 
     /*
     Aligns one vertex to target world Z on an Editable Poly base object.
@@ -15759,14 +15475,11 @@ struct StraightEdgeFixer_v
         target_world_position = [world_position.x, world_position.y, target_z]
         target_local_position = target_world_position * inverse_tm
 
-
         polyop.setVert editable_poly vert_id target_local_position
-
 
         true
         -- return
     ),
-
 
     /*
     Aligns assigned edge vertices directly on an Editable Poly base object.
@@ -15779,19 +15492,16 @@ struct StraightEdgeFixer_v
             vertex_ids = getLevelVertexIds node adapter level_data[5]
             target_z = level_data[6]
 
-
             for vert_id in vertex_ids do
             (
                 setEditablePolyVertexWorldZ node editable_poly vert_id target_z
             )
         )
 
-
         update node
         true
         -- return
     ),
-
 
     /*
     Aligns assigned edge vertices through an Edit Poly modifier.
@@ -15803,22 +15513,18 @@ struct StraightEdgeFixer_v
         previous_level = EditPolyMod.GetEPolySelLevel edit_poly
         object_tm = node.objectTransform
 
-
         EditPolyMod.SetEPolySelLevel edit_poly #Vertex
-
 
         for level_data in levels do
         (
             vertex_ids = getLevelVertexIds node adapter level_data[5]
             target_z = level_data[6]
 
-
             for vert_id in vertex_ids do
             (
                 current_local_position = EditPolyMod.GetVertex edit_poly vert_id node:node
                 current_world_position = current_local_position * object_tm
                 world_move_delta = [0,0,(target_z - current_world_position.z)]
-
 
                 if ((length world_move_delta) > 0.0000001) then
                 (
@@ -15831,16 +15537,13 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         EditPolyMod.SetSelection edit_poly #Vertex previous_selection node:node
         EditPolyMod.SetEPolySelLevel edit_poly previous_level
         update node
 
-
         true
         -- return
     ),
-
 
     /*
     Formats one object's detected edge levels from bottom to top.
@@ -15849,7 +15552,6 @@ struct StraightEdgeFixer_v
     function buildObjectReport node levels =
     (
         report_text = "OBJECT: " + node.name + "\n"
-
 
         if (levels.count == 0) then
         (
@@ -15864,7 +15566,6 @@ struct StraightEdgeFixer_v
                 assigned_count = countBits level_data[5]
                 outside_count = level_data[8]
 
-
                 report_text +=
                     "  Level " + (level_index as string) +
                     " | detected Z: " + (level_data[4] as string) +
@@ -15876,11 +15577,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         report_text
         -- return
     ),
-
 
     /*
     Processes one selected object using horizontal edges instead of loose vertices.
@@ -15892,7 +15591,6 @@ struct StraightEdgeFixer_v
         adapter = undefined
         created_new_modifier = false
 
-
         try
         (
             adapter = getGeometryAdapter node
@@ -15902,23 +15600,21 @@ struct StraightEdgeFixer_v
             levels = assignEdgesToLevels levels edge_data search_in_z
             levels = calculateTargets levels edge_data
 
-
             if (levels.count > 0) then
             (
                 if (adapter[1] == #editable_poly) then
                 (
-                    applyToEditablePoly node adapter[2] adapter levels
+                    applyToEditablePoly node (adapter[2]) adapter levels
                 )
                 else
                 (
-                    applyToEditPoly node adapter[2] adapter levels
+                    applyToEditPoly node (adapter[2]) adapter levels
                 )
             )
             else if (created_new_modifier) then
             (
-                deleteModifier node adapter[2]
+                deleteModifier node (adapter[2])
             )
-
 
             report_text = buildObjectReport node levels
         )
@@ -15928,22 +15624,19 @@ struct StraightEdgeFixer_v
             (
                 try
                 (
-                    deleteModifier node adapter[2]
+                    deleteModifier node (adapter[2])
                 )
                 catch
                 (
                 )
             )
 
-
             report_text = "OBJECT: " + node.name + "\n  ERROR: " + (getCurrentException() as string) + "\n"
         )
-
 
         report_text
         -- return
     ),
-
 
     /*
     Detects and aligns horizontal edge levels on all selected geometry objects.
@@ -15954,7 +15647,6 @@ struct StraightEdgeFixer_v
         selected_nodes = selection as array
         report_text = "STRAIGHT EDGE FIXER " + version + "\n\n"
         processed_count = 0
-
 
         if (selected_nodes.count == 0) then
         (
@@ -15975,9 +15667,7 @@ struct StraightEdgeFixer_v
                 )
             )
 
-
             completeRedraw()
-
 
             if (processed_count == 0) then
             (
@@ -15989,11 +15679,9 @@ struct StraightEdgeFixer_v
             )
         )
 
-
         true
         -- return
     ),
-
 
     on create do
     (
@@ -16001,9 +15689,7 @@ struct StraightEdgeFixer_v
     )
 )
 
-
 StraightEdgeFixer = StraightEdgeFixer_v()
-
 
 try
 (
@@ -16013,43 +15699,32 @@ catch
 (
 )
 
-
 rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
 (
     groupBox grp_settings "LEVEL SETTINGS" pos:[8,8] width:284 height:132
 
-
     label lbl_level_tolerance "Level Tolerance:" pos:[20,32] width:120 height:18
     spinner spn_level_tolerance "" pos:[150,30] width:125 height:18 range:[0.000001,1000000.0,0.01] type:#worldunits scale:0.001 tooltip:"Maximum world-axis deviation. For level detection it defines horizontal edges and groups their center Z values. The same tolerance is used by the direction checks."
-
 
     label lbl_min_level_edges "Min Level Edges:" pos:[20,60] width:120 height:18
     spinner spn_min_level_edges "" pos:[150,58] width:125 height:18 range:[1,100000,3] type:#integer scale:1 tooltip:"Minimum number of horizontal edges required inside Level Tolerance to define a valid Z level."
 
-
     label lbl_search_in_z "Search in Z:" pos:[20,88] width:120 height:18
     spinner spn_search_in_z "" pos:[150,86] width:125 height:18 range:[0.0,1000000.0,10.0] type:#worldunits scale:0.1 tooltip:"Maximum world-Z distance from a detected level. Horizontal edges inside this range are assigned to the nearest level and aligned."
 
-
     checkbox chk_quiet_mode "Quiet Mode" pos:[20,116] width:240 height:18 checked:false tooltip:"Run edge-level alignment without showing the final report."
 
-
     groupBox grp_checks "EDGE CHECKS" pos:[8,148] width:284 height:144
-
 
     label lbl_angle_threshold "Angle:" pos:[20,172] width:46 height:18 tooltip:"Maximum angle away from the requested axis that is still considered a candidate error edge. Range is limited to 0-45 degrees so the opposite axis is ignored."
     spinner spn_angle_threshold "" pos:[64,170] width:58 height:18 range:[0.0,45.0,45.0] type:#float scale:1.0 tooltip:"Candidate angle threshold in degrees. Horizontal Check ignores edges farther than this from horizontal. Vertical Check ignores edges farther than this from vertical."
 
-
     button btn_check_horizontal "CHECK HORIZONTAL" pos:[18,198] width:127 height:42 tooltip:"LMB: select visible near-horizontal error edges.\n\nRMB: straighten currently selected visible near-horizontal edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
     button btn_check_vertical "CHECK VERTICAL" pos:[155,198] width:127 height:42 tooltip:"LMB: select visible near-vertical error edges.\n\nRMB: straighten currently selected visible near-vertical edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
 
-
     button btn_border_check "BORDER CHECK" pos:[18,248] width:264 height:28 tooltip:"Select visible border edges with an unwelded/overlapping local-Z seam, a reflex corner above 180 degrees, or a 360-degree backtracking border. Backtracking does not require the remote vertices to share position."
 
-
     button btn_align "STRAIGHT EDGE FIXER" pos:[8,302] width:284 height:38 tooltip:"Detect repeated horizontal edge levels and align nearby horizontal edges to TOP, BOTTOM, or CENTER target Z."
-
 
     on straightEdgeFixer_ui open do
     (
@@ -16061,42 +15736,35 @@ rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
         chk_quiet_mode.checked = settings_data[5]
     )
 
-
     on straightEdgeFixer_ui moved dialog_position do
     (
         StraightEdgeFixer.saveDialogPosition dialog_position
     )
-
 
     on spn_level_tolerance changed control_value do
     (
         StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
     )
 
-
     on spn_min_level_edges changed control_value do
     (
         StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
     )
-
 
     on spn_search_in_z changed control_value do
     (
         StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
     )
 
-
     on spn_angle_threshold changed control_value do
     (
         StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
     )
 
-
     on chk_quiet_mode changed control_state do
     (
         StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
     )
-
 
     on btn_check_horizontal pressed do
     (
@@ -16105,22 +15773,17 @@ rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
     )
 
 
-
-
     on btn_check_horizontal rightclick do
     (
         StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
         StraightEdgeFixer.straightenSelectedEdges #horizontal spn_level_tolerance.value spn_angle_threshold.value spn_search_in_z.value
     )
 
-
     on btn_check_vertical pressed do
     (
         StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
         StraightEdgeFixer.checkEdgeDirection #vertical spn_level_tolerance.value spn_angle_threshold.value
     )
-
-
 
 
     on btn_check_vertical rightclick do
@@ -16130,19 +15793,15 @@ rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
     )
 
 
-
-
     on btn_border_check pressed do
     (
         StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
         StraightEdgeFixer.checkBorders spn_level_tolerance.value
     )
 
-
     on btn_align pressed do
     (
         StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
-
 
         StraightEdgeFixer.alignSelection \
             level_tolerance:spn_level_tolerance.value \
@@ -16152,15 +15811,12 @@ rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
     )
 )
 
-
 dialog_position = StraightEdgeFixer.loadDialogPosition()
 createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #style_sysmenu, #style_toolwindow)
 
 
-
-
 /*
-Wall-Fixer UI 0.54
+Wall-Fixer UI 0.58
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -16170,8 +15826,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.54"
-global wall_fixer_ui_tool_version = 0.63
+global wall_fixer_ui_file_version = "0.58"
+global wall_fixer_ui_tool_version = 0.68
 
 
 /*
@@ -16270,6 +15926,7 @@ wall_fixer_ui_source_path = getSourceFileName()
 wall_fixer_ui_ini_path = ((getDir #plugcfg) + "\\Wall-Fixer.ini")
 wall_fixer_default_dialog_size = [344,748]
 wall_fixer_min_dialog_height = 320
+wall_fixer_closed_rollout_height = 24
 
 
 /*
@@ -17474,7 +17131,7 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:236
     label check_result_label "Manual viewport check of geometry fixes." pos:[18,180] width:274 height:18
 
 
-    subRollout edge_fixer_options_subrollout "" pos:[0,208] width:310 height:24
+    subRollout edge_fixer_options_subrollout "" pos:[0,208] width:310 height:wall_fixer_closed_rollout_height
 
 
     /*
@@ -17483,8 +17140,8 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:236
     */
     function setOptionsLayout options_open =
     (
-        edge_fixer_options_subrollout.height = if options_open then 118 else 24
-        WallFixerEdgeFixerRollout.height = if options_open then 330 else 236
+        edge_fixer_options_subrollout.height = if options_open then (118 + wall_fixer_closed_rollout_height) else wall_fixer_closed_rollout_height
+        WallFixerEdgeFixerRollout.height = if options_open then (330 + wall_fixer_closed_rollout_height) else 236
         -- return
     )
 
@@ -22931,11 +22588,11 @@ function testWallFaceOptionsLayout =
 
 
     wallFaceClassifierRollout.setOptionsLayout false
-    collapsed_ok = ((wallFaceClassifierRollout.height == 110) and (slot_control.height == 24))
+    collapsed_ok = ((wallFaceClassifierRollout.height == 110) and (slot_control.height == wall_fixer_closed_rollout_height))
 
 
     wallFaceClassifierRollout.setOptionsLayout true
-    expanded_ok = ((wallFaceClassifierRollout.height == 306) and (slot_control.height == 220))
+    expanded_ok = ((wallFaceClassifierRollout.height == (268 + wall_fixer_closed_rollout_height)) and (slot_control.height == (182 + wall_fixer_closed_rollout_height)))
 
 
     slot_control.height = original_slot_height
@@ -22947,6 +22604,41 @@ function testWallFaceOptionsLayout =
 
 
     test_passed -- return
+)
+
+
+/*
+Verifies Straight Edge result normalization for check and straighten return types.
+The test is scene-independent and does not alter geometry or selection.
+*/
+function testStraightEdgeResultNormalization =
+(
+    zero_count_ok = WallFixerRollout.normalizeStraightEdgeResult 0
+    positive_count_ok = WallFixerRollout.normalizeStraightEdgeResult 5
+    array_success_ok = WallFixerRollout.normalizeStraightEdgeResult #(0, false)
+    array_failed_flag_ok = WallFixerRollout.normalizeStraightEdgeResult #(2, true)
+    boolean_true_ok = WallFixerRollout.normalizeStraightEdgeResult true
+    boolean_false_ok = not (WallFixerRollout.normalizeStraightEdgeResult false)
+    invalid_value_ok = not (WallFixerRollout.normalizeStraightEdgeResult undefined)
+
+
+    test_passed = (
+        zero_count_ok and
+        positive_count_ok and
+        array_success_ok and
+        array_failed_flag_ok and
+        boolean_true_ok and
+        boolean_false_ok and
+        invalid_value_ok
+    )
+
+
+    format "Straight Edge result normalization test | zero:% positive:% array:% arrayFailed:% true:% false:% invalid:% | result:%\n" \
+        zero_count_ok positive_count_ok array_success_ok array_failed_flag_ok boolean_true_ok boolean_false_ok invalid_value_ok test_passed
+
+
+    test_passed
+    -- return
 )
 
 
@@ -22964,11 +22656,11 @@ function testEdgeFixerOptionsLayout =
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout false
-    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 236) and (slot_control.height == 24) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
+    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 236) and (slot_control.height == wall_fixer_closed_rollout_height) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout true
-    expanded_ok = ((WallFixerEdgeFixerRollout.height == 330) and (slot_control.height == 118) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
+    expanded_ok = ((WallFixerEdgeFixerRollout.height == (330 + wall_fixer_closed_rollout_height)) and (slot_control.height == (118 + wall_fixer_closed_rollout_height)) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 236)
@@ -23032,42 +22724,42 @@ function testWallFaceClassRmbRouting =
 )
 
 
-rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:214
+rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
 (
     local working_pivot_syncing = false
 
 
-    checkbutton use_working_pivot_checkbutton "Use Edit Pivot" pos:[8,8] width:131 height:30 \
+    checkbutton use_working_pivot_checkbutton "Use Edit Pivot" pos:[8,8] width:86 height:30 \
         tooltip:"LMB: Use the manually positioned Working Pivot as the INNER \\ OUTTER classification origin.\n\nRMB: Center the Working Pivot to the current geometry selection."
 
 
-    checkbutton edit_working_pivot_checkbutton "Edit Edit Pivot" pos:[147,8] width:131 height:30 \
+    checkbutton edit_working_pivot_checkbutton "Edit Edit Pivot" pos:[100,8] width:86 height:30 \
         tooltip:"LMB: Enable or disable Working Pivot editing in 3ds Max."
 
 
-    checkbutton ground_pivot_checkbutton "GROUND PIVOT" pos:[8,46] width:270 height:30 \
+    checkbutton ground_pivot_checkbutton "GROUND PIVOT" pos:[192,8] width:86 height:30 \
         tooltip:"Force the INNER \\ OUTTER analysis origin and Working Pivot to world ground at Z = 0. X/Y come from Use Edit Pivot or the selection center."
 
 
-    spinner spn_wall_thickness "Wall thickness:" pos:[8,84] width:214 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:76 \
+    spinner spn_wall_thickness "Wall thickness:" pos:[8,46] width:214 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:76 \
         tooltip:"Maximum distance to search for the opposite wall. Default: 1 m."
-    label lbl_wall_units "units" pos:[228,88] width:50 height:18 align:#left tooltip:"Current display unit."
+    label lbl_wall_units "units" pos:[228,50] width:50 height:18 align:#left tooltip:"Current display unit."
 
 
-    spinner spn_connection_threshold "Connect threshold:" pos:[8,110] width:214 height:20 range:[0.001,1000000.0,((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:76 \
+    spinner spn_connection_threshold "Connect threshold:" pos:[8,72] width:214 height:20 range:[0.001,1000000.0,((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:76 \
         tooltip:"Matches neighbor vertices; at least 2 must match. Default is 10% of Wall thickness, and changing Wall thickness resets this value."
-    label lbl_connect_units "units" pos:[228,114] width:50 height:18 align:#left tooltip:"Current display unit."
+    label lbl_connect_units "units" pos:[228,76] width:50 height:18 align:#left tooltip:"Current display unit."
 
 
-    button btn_reset "RESET" pos:[8,138] width:270 height:30 \
+    button btn_reset "RESET" pos:[8,100] width:270 height:30 \
         tooltip:"LMB: Reset face classification, remove the classifier material, clear FORCED OUTER/INNER hints, cached class data, and debug trace."
 
 
-    checkbutton debug_trace_checkbutton "DEBUG TRACE" pos:[8,176] width:131 height:30 \
+    checkbutton debug_trace_checkbutton "DEBUG TRACE" pos:[8,138] width:131 height:30 \
         tooltip:"Record classifier inputs, per-face scores, resolution reasons, and class snapshots in object user properties."
 
 
-    button btn_print_debug "PRINT DEBUG" pos:[147,176] width:131 height:30 \
+    button btn_print_debug "PRINT DEBUG" pos:[147,138] width:131 height:30 \
         tooltip:"Print selected or last analyzed wall geometry, trace properties, vertices, faces, normals, Material IDs, scores, and resolution reasons to the MAXScript Listener."
 
 
@@ -23234,14 +22926,61 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:214
 )
 
 
+/*
+Creates the four wall-class sibling layers beside the current layer.
+Existing layers with the requested names are reused; newly created layers inherit the current layer parent.
+*/
+function createWallFaceClassLayersFromCurrent =
+(
+    current_layer = LayerManager.current
+    created_layers = #()
+
+    if current_layer == undefined then
+    (
+        #()
+    )
+    else
+    (
+        current_name = current_layer.name
+        current_parent = current_layer.getParent()
+        class_suffixes = #("INNER", "OUTTER", "TOP", "BOTTOM")
+
+        for class_suffix in class_suffixes do
+        (
+            layer_name = current_name + "-" + class_suffix
+            target_layer = LayerManager.getLayerFromName layer_name
+
+            if target_layer == undefined then
+            (
+                target_layer = LayerManager.newLayerFromName layer_name
+
+                if target_layer != undefined and current_parent != undefined then
+                (
+                    target_layer.setParent current_parent
+                )
+            )
+
+            if target_layer != undefined then append created_layers target_layer
+        )
+
+        created_layers
+    )
+    -- return
+)
+
+
 rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
 (
-    button btn_classify "INNER \\ OUTTER" pos:[4,8] width:149 height:32 \
+    button btn_classify "INNER \\ OUTTER" pos:[4,8] width:98 height:32 \
         tooltip:"LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. GROUND PIVOT forces the active origin to world Z = 0. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
 
 
-    button btn_explode "EXPLODE" pos:[157,8] width:149 height:32 \
+    button btn_explode "EXPLODE" pos:[106,8] width:98 height:32 \
         tooltip:"LMB: Split each selected classified object into separate OUTER, INNER, TOP, and BOTTOM objects."
+
+
+    button btn_layer "LAYER" pos:[208,8] width:98 height:32 \
+        tooltip:"LMB: Create sibling layers beside the current layer named with -INNER, -OUTTER, -TOP, and -BOTTOM suffixes."
 
 
     button btn_select_outer "OUTER" pos:[4,46] width:72 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing OUTER faces or face mode selects OUTER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces OUTER without AUTO GROW.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. A parallel opposite wall within Wall thickness also stops growth. Auto-grown walls are not marked FORCED. TOP/BOTTOM seams stop growth."
@@ -23250,7 +22989,7 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
     button btn_select_down "BOTTOM" pos:[232,46] width:74 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing BOTTOM faces or face mode selects BOTTOM faces.\n\nRMB: Assign selected faces, or selected-object cap faces, to BOTTOM.\n\nCTRL+RMB: Same BOTTOM assignment; AUTO GROW is intentionally limited to OUTER/INNER wall sides."
 
 
-    subRollout wall_face_options_subrollout "" pos:[0,78] width:310 height:24
+    subRollout wall_face_options_subrollout "" pos:[0,78] width:310 height:wall_fixer_closed_rollout_height
 
 
     /*
@@ -23261,12 +23000,12 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
     (
         if options_open then
         (
-            wallFaceClassifierRollout.height = 306
-            wall_face_options_subrollout.height = 220
+            wallFaceClassifierRollout.height = 268 + wall_fixer_closed_rollout_height
+            wall_face_options_subrollout.height = 182 + wall_fixer_closed_rollout_height
         )
         else
         (
-            wall_face_options_subrollout.height = 24
+            wall_face_options_subrollout.height = wall_fixer_closed_rollout_height
             wallFaceClassifierRollout.height = 110
         )
         -- return
@@ -23323,6 +23062,21 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
         )
         catch
         (
+        )
+    )
+
+
+    on btn_layer pressed do
+    (
+        layer_array = createWallFaceClassLayersFromCurrent()
+
+        if layer_array.count == 4 then
+        (
+            ::WallFixerRollout.setStatus #success "Wall class layers are ready."
+        )
+        else
+        (
+            ::WallFixerRollout.setStatus #warning "Could not create all wall class layers."
         )
     )
 
@@ -26740,6 +26494,38 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
 
 
     /*
+    Converts Straight Edge Fixer result values to an explicit completion Boolean.
+    Integer check counts and #(fixed_count, has_failed_edges) straighten results are valid completed operations.
+    */
+    function normalizeStraightEdgeResult operation_result =
+    (
+        completed = false
+
+
+        if (classOf operation_result == BooleanClass) then
+        (
+            completed = operation_result
+        )
+        else if (classOf operation_result == Integer) then
+        (
+            completed = true
+        )
+        else if (classOf operation_result == Array) then
+        (
+            completed = (
+                (operation_result.count >= 2) and
+                (classOf operation_result[1] == Integer) and
+                (classOf operation_result[2] == BooleanClass)
+            )
+        )
+
+
+        completed
+        -- return
+    )
+
+
+    /*
     Runs the imported Straight Edge Fixer horizontal/vertical check or straighten action.
     LMB checks and RMB straightens the currently selected candidate edges.
     */
@@ -26753,7 +26539,7 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
 
         if fix_selected then
         (
-            completed = StraightEdgeFixer.straightenSelectedEdges \
+            operation_result = StraightEdgeFixer.straightenSelectedEdges \
                 direction_type \
                 WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
                 WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value \
@@ -26761,13 +26547,14 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
         )
         else
         (
-            completed = StraightEdgeFixer.checkEdgeDirection \
+            operation_result = StraightEdgeFixer.checkEdgeDirection \
                 direction_type \
                 WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
                 WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value
         )
 
 
+        completed = normalizeStraightEdgeResult operation_result
         setProgress 100
 
 

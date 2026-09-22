@@ -1,5 +1,5 @@
-/*
-Wall-Fixer UI 0.54
+﻿/*
+Wall-Fixer UI 0.58
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.54"
-global wall_fixer_ui_tool_version = 0.63
+global wall_fixer_ui_file_version = "0.58"
+global wall_fixer_ui_tool_version = 0.68
 
 
 /*
@@ -109,6 +109,7 @@ wall_fixer_ui_source_path = getSourceFileName()
 wall_fixer_ui_ini_path = ((getDir #plugcfg) + "\\Wall-Fixer.ini")
 wall_fixer_default_dialog_size = [344,748]
 wall_fixer_min_dialog_height = 320
+wall_fixer_closed_rollout_height = 24
 
 
 /*
@@ -1313,7 +1314,7 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:236
     label check_result_label "Manual viewport check of geometry fixes." pos:[18,180] width:274 height:18
 
 
-    subRollout edge_fixer_options_subrollout "" pos:[0,208] width:310 height:24
+    subRollout edge_fixer_options_subrollout "" pos:[0,208] width:310 height:wall_fixer_closed_rollout_height
 
 
     /*
@@ -1322,8 +1323,8 @@ rollout WallFixerEdgeFixerRollout "EDGE FIXER" width:310 height:236
     */
     function setOptionsLayout options_open =
     (
-        edge_fixer_options_subrollout.height = if options_open then 118 else 24
-        WallFixerEdgeFixerRollout.height = if options_open then 330 else 236
+        edge_fixer_options_subrollout.height = if options_open then (118 + wall_fixer_closed_rollout_height) else wall_fixer_closed_rollout_height
+        WallFixerEdgeFixerRollout.height = if options_open then (330 + wall_fixer_closed_rollout_height) else 236
         -- return
     )
 
@@ -6770,11 +6771,11 @@ function testWallFaceOptionsLayout =
 
 
     wallFaceClassifierRollout.setOptionsLayout false
-    collapsed_ok = ((wallFaceClassifierRollout.height == 110) and (slot_control.height == 24))
+    collapsed_ok = ((wallFaceClassifierRollout.height == 110) and (slot_control.height == wall_fixer_closed_rollout_height))
 
 
     wallFaceClassifierRollout.setOptionsLayout true
-    expanded_ok = ((wallFaceClassifierRollout.height == 306) and (slot_control.height == 220))
+    expanded_ok = ((wallFaceClassifierRollout.height == (268 + wall_fixer_closed_rollout_height)) and (slot_control.height == (182 + wall_fixer_closed_rollout_height)))
 
 
     slot_control.height = original_slot_height
@@ -6786,6 +6787,41 @@ function testWallFaceOptionsLayout =
 
 
     test_passed -- return
+)
+
+
+/*
+Verifies Straight Edge result normalization for check and straighten return types.
+The test is scene-independent and does not alter geometry or selection.
+*/
+function testStraightEdgeResultNormalization =
+(
+    zero_count_ok = WallFixerRollout.normalizeStraightEdgeResult 0
+    positive_count_ok = WallFixerRollout.normalizeStraightEdgeResult 5
+    array_success_ok = WallFixerRollout.normalizeStraightEdgeResult #(0, false)
+    array_failed_flag_ok = WallFixerRollout.normalizeStraightEdgeResult #(2, true)
+    boolean_true_ok = WallFixerRollout.normalizeStraightEdgeResult true
+    boolean_false_ok = not (WallFixerRollout.normalizeStraightEdgeResult false)
+    invalid_value_ok = not (WallFixerRollout.normalizeStraightEdgeResult undefined)
+
+
+    test_passed = (
+        zero_count_ok and
+        positive_count_ok and
+        array_success_ok and
+        array_failed_flag_ok and
+        boolean_true_ok and
+        boolean_false_ok and
+        invalid_value_ok
+    )
+
+
+    format "Straight Edge result normalization test | zero:% positive:% array:% arrayFailed:% true:% false:% invalid:% | result:%\n" \
+        zero_count_ok positive_count_ok array_success_ok array_failed_flag_ok boolean_true_ok boolean_false_ok invalid_value_ok test_passed
+
+
+    test_passed
+    -- return
 )
 
 
@@ -6803,11 +6839,11 @@ function testEdgeFixerOptionsLayout =
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout false
-    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 236) and (slot_control.height == 24) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
+    collapsed_ok = ((WallFixerEdgeFixerRollout.height == 236) and (slot_control.height == wall_fixer_closed_rollout_height) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout true
-    expanded_ok = ((WallFixerEdgeFixerRollout.height == 330) and (slot_control.height == 118) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
+    expanded_ok = ((WallFixerEdgeFixerRollout.height == (330 + wall_fixer_closed_rollout_height)) and (slot_control.height == (118 + wall_fixer_closed_rollout_height)) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 236)
@@ -6871,42 +6907,42 @@ function testWallFaceClassRmbRouting =
 )
 
 
-rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:214
+rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
 (
     local working_pivot_syncing = false
 
 
-    checkbutton use_working_pivot_checkbutton "Use Edit Pivot" pos:[8,8] width:131 height:30 \
+    checkbutton use_working_pivot_checkbutton "Use Edit Pivot" pos:[8,8] width:86 height:30 \
         tooltip:"LMB: Use the manually positioned Working Pivot as the INNER \\ OUTTER classification origin.\n\nRMB: Center the Working Pivot to the current geometry selection."
 
 
-    checkbutton edit_working_pivot_checkbutton "Edit Edit Pivot" pos:[147,8] width:131 height:30 \
+    checkbutton edit_working_pivot_checkbutton "Edit Edit Pivot" pos:[100,8] width:86 height:30 \
         tooltip:"LMB: Enable or disable Working Pivot editing in 3ds Max."
 
 
-    checkbutton ground_pivot_checkbutton "GROUND PIVOT" pos:[8,46] width:270 height:30 \
+    checkbutton ground_pivot_checkbutton "GROUND PIVOT" pos:[192,8] width:86 height:30 \
         tooltip:"Force the INNER \\ OUTTER analysis origin and Working Pivot to world ground at Z = 0. X/Y come from Use Edit Pivot or the selection center."
 
 
-    spinner spn_wall_thickness "Wall thickness:" pos:[8,84] width:214 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:76 \
+    spinner spn_wall_thickness "Wall thickness:" pos:[8,46] width:214 height:20 range:[0.001,1000000.0,(units.decodeValue "1m")] type:#worldunits fieldwidth:76 \
         tooltip:"Maximum distance to search for the opposite wall. Default: 1 m."
-    label lbl_wall_units "units" pos:[228,88] width:50 height:18 align:#left tooltip:"Current display unit."
+    label lbl_wall_units "units" pos:[228,50] width:50 height:18 align:#left tooltip:"Current display unit."
 
 
-    spinner spn_connection_threshold "Connect threshold:" pos:[8,110] width:214 height:20 range:[0.001,1000000.0,((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:76 \
+    spinner spn_connection_threshold "Connect threshold:" pos:[8,72] width:214 height:20 range:[0.001,1000000.0,((units.decodeValue "1m") * 0.1)] type:#worldunits fieldwidth:76 \
         tooltip:"Matches neighbor vertices; at least 2 must match. Default is 10% of Wall thickness, and changing Wall thickness resets this value."
-    label lbl_connect_units "units" pos:[228,114] width:50 height:18 align:#left tooltip:"Current display unit."
+    label lbl_connect_units "units" pos:[228,76] width:50 height:18 align:#left tooltip:"Current display unit."
 
 
-    button btn_reset "RESET" pos:[8,138] width:270 height:30 \
+    button btn_reset "RESET" pos:[8,100] width:270 height:30 \
         tooltip:"LMB: Reset face classification, remove the classifier material, clear FORCED OUTER/INNER hints, cached class data, and debug trace."
 
 
-    checkbutton debug_trace_checkbutton "DEBUG TRACE" pos:[8,176] width:131 height:30 \
+    checkbutton debug_trace_checkbutton "DEBUG TRACE" pos:[8,138] width:131 height:30 \
         tooltip:"Record classifier inputs, per-face scores, resolution reasons, and class snapshots in object user properties."
 
 
-    button btn_print_debug "PRINT DEBUG" pos:[147,176] width:131 height:30 \
+    button btn_print_debug "PRINT DEBUG" pos:[147,138] width:131 height:30 \
         tooltip:"Print selected or last analyzed wall geometry, trace properties, vertices, faces, normals, Material IDs, scores, and resolution reasons to the MAXScript Listener."
 
 
@@ -7073,14 +7109,61 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:214
 )
 
 
+/*
+Creates the four wall-class sibling layers beside the current layer.
+Existing layers with the requested names are reused; newly created layers inherit the current layer parent.
+*/
+function createWallFaceClassLayersFromCurrent =
+(
+    current_layer = LayerManager.current
+    created_layers = #()
+
+    if current_layer == undefined then
+    (
+        #()
+    )
+    else
+    (
+        current_name = current_layer.name
+        current_parent = current_layer.getParent()
+        class_suffixes = #("INNER", "OUTTER", "TOP", "BOTTOM")
+
+        for class_suffix in class_suffixes do
+        (
+            layer_name = current_name + "-" + class_suffix
+            target_layer = LayerManager.getLayerFromName layer_name
+
+            if target_layer == undefined then
+            (
+                target_layer = LayerManager.newLayerFromName layer_name
+
+                if target_layer != undefined and current_parent != undefined then
+                (
+                    target_layer.setParent current_parent
+                )
+            )
+
+            if target_layer != undefined then append created_layers target_layer
+        )
+
+        created_layers
+    )
+    -- return
+)
+
+
 rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
 (
-    button btn_classify "INNER \\ OUTTER" pos:[4,8] width:149 height:32 \
+    button btn_classify "INNER \\ OUTTER" pos:[4,8] width:98 height:32 \
         tooltip:"LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. GROUND PIVOT forces the active origin to world Z = 0. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
 
 
-    button btn_explode "EXPLODE" pos:[157,8] width:149 height:32 \
+    button btn_explode "EXPLODE" pos:[106,8] width:98 height:32 \
         tooltip:"LMB: Split each selected classified object into separate OUTER, INNER, TOP, and BOTTOM objects."
+
+
+    button btn_layer "LAYER" pos:[208,8] width:98 height:32 \
+        tooltip:"LMB: Create sibling layers beside the current layer named with -INNER, -OUTTER, -TOP, and -BOTTOM suffixes."
 
 
     button btn_select_outer "OUTER" pos:[4,46] width:72 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing OUTER faces or face mode selects OUTER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces OUTER without AUTO GROW.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. A parallel opposite wall within Wall thickness also stops growth. Auto-grown walls are not marked FORCED. TOP/BOTTOM seams stop growth."
@@ -7089,7 +7172,7 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
     button btn_select_down "BOTTOM" pos:[232,46] width:74 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing BOTTOM faces or face mode selects BOTTOM faces.\n\nRMB: Assign selected faces, or selected-object cap faces, to BOTTOM.\n\nCTRL+RMB: Same BOTTOM assignment; AUTO GROW is intentionally limited to OUTER/INNER wall sides."
 
 
-    subRollout wall_face_options_subrollout "" pos:[0,78] width:310 height:24
+    subRollout wall_face_options_subrollout "" pos:[0,78] width:310 height:wall_fixer_closed_rollout_height
 
 
     /*
@@ -7100,12 +7183,12 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
     (
         if options_open then
         (
-            wallFaceClassifierRollout.height = 306
-            wall_face_options_subrollout.height = 220
+            wallFaceClassifierRollout.height = 268 + wall_fixer_closed_rollout_height
+            wall_face_options_subrollout.height = 182 + wall_fixer_closed_rollout_height
         )
         else
         (
-            wall_face_options_subrollout.height = 24
+            wall_face_options_subrollout.height = wall_fixer_closed_rollout_height
             wallFaceClassifierRollout.height = 110
         )
         -- return
@@ -7162,6 +7245,21 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
         )
         catch
         (
+        )
+    )
+
+
+    on btn_layer pressed do
+    (
+        layer_array = createWallFaceClassLayersFromCurrent()
+
+        if layer_array.count == 4 then
+        (
+            ::WallFixerRollout.setStatus #success "Wall class layers are ready."
+        )
+        else
+        (
+            ::WallFixerRollout.setStatus #warning "Could not create all wall class layers."
         )
     )
 
@@ -10579,6 +10677,38 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
 
 
     /*
+    Converts Straight Edge Fixer result values to an explicit completion Boolean.
+    Integer check counts and #(fixed_count, has_failed_edges) straighten results are valid completed operations.
+    */
+    function normalizeStraightEdgeResult operation_result =
+    (
+        completed = false
+
+
+        if (classOf operation_result == BooleanClass) then
+        (
+            completed = operation_result
+        )
+        else if (classOf operation_result == Integer) then
+        (
+            completed = true
+        )
+        else if (classOf operation_result == Array) then
+        (
+            completed = (
+                (operation_result.count >= 2) and
+                (classOf operation_result[1] == Integer) and
+                (classOf operation_result[2] == BooleanClass)
+            )
+        )
+
+
+        completed
+        -- return
+    )
+
+
+    /*
     Runs the imported Straight Edge Fixer horizontal/vertical check or straighten action.
     LMB checks and RMB straightens the currently selected candidate edges.
     */
@@ -10592,7 +10722,7 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
 
         if fix_selected then
         (
-            completed = StraightEdgeFixer.straightenSelectedEdges \
+            operation_result = StraightEdgeFixer.straightenSelectedEdges \
                 direction_type \
                 WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
                 WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value \
@@ -10600,13 +10730,14 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
         )
         else
         (
-            completed = StraightEdgeFixer.checkEdgeDirection \
+            operation_result = StraightEdgeFixer.checkEdgeDirection \
                 direction_type \
                 WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
                 WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value
         )
 
 
+        completed = normalizeStraightEdgeResult operation_result
         setProgress 100
 
 

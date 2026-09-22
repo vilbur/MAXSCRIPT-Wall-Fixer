@@ -1,5 +1,5 @@
 ﻿/*
-Straight Edge Fixer 0.2
+Straight Edge Fixer 0.22
 Detects repeated horizontal edge levels and aligns nearby horizontal edges to them.
 */
 
@@ -7,8 +7,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.2"
-global straight_edge_fixer_tool_version = 0.2
+global straight_edge_fixer_file_version = "0.22"
+global straight_edge_fixer_tool_version = 0.69
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -477,11 +477,11 @@ struct StraightEdgeFixer_v
 
         if (adapter[1] == #editable_poly) then
         (
-            edge_count = polyop.getNumEdges adapter[2]
+            edge_count = polyop.getNumEdges (adapter[2])
         )
         else if (adapter[1] == #edit_poly) then
         (
-            edge_count = EditPolyMod.GetNumEdges adapter[2] node:node
+            edge_count = EditPolyMod.GetNumEdges (adapter[2]) node:node
         )
 
         edge_count
@@ -498,12 +498,12 @@ struct StraightEdgeFixer_v
 
         if (adapter[1] == #editable_poly) then
         (
-            edge_verts = polyop.getEdgeVerts adapter[2] edge_id
+            edge_verts = polyop.getEdgeVerts (adapter[2]) edge_id
         )
         else if (adapter[1] == #edit_poly) then
         (
-            vert_a = EditPolyMod.GetEdgeVertex adapter[2] edge_id 1 node:node
-            vert_b = EditPolyMod.GetEdgeVertex adapter[2] edge_id 2 node:node
+            vert_a = EditPolyMod.GetEdgeVertex (adapter[2]) edge_id 1 node:node
+            vert_b = EditPolyMod.GetEdgeVertex (adapter[2]) edge_id 2 node:node
             edge_verts = #(vert_a, vert_b)
         )
 
@@ -524,7 +524,7 @@ struct StraightEdgeFixer_v
         (
             if (adapter[1] == #editable_poly) then
             (
-                result_value = polyop.getEdgeVis adapter[2] edge_id
+                result_value = polyop.getEdgeVis (adapter[2]) edge_id
             )
             else if (adapter[1] == #edit_poly) then
             (
@@ -568,11 +568,11 @@ struct StraightEdgeFixer_v
 
         if (adapter[1] == #editable_poly) then
         (
-            vertex_position = polyop.getVert adapter[2] vert_id
+            vertex_position = polyop.getVert (adapter[2]) vert_id
         )
         else if (adapter[1] == #edit_poly) then
         (
-            vertex_position = EditPolyMod.GetVertex adapter[2] vert_id node:node
+            vertex_position = EditPolyMod.GetVertex (adapter[2]) vert_id node:node
         )
 
         vertex_position
@@ -607,7 +607,7 @@ struct StraightEdgeFixer_v
             (
                 if (adapter[1] == #editable_poly) then
                 (
-                    edge_faces = polyop.getFacesUsingEdge adapter[2] edge_id
+                    edge_faces = polyop.getFacesUsingEdge (adapter[2]) edge_id
                 )
                 else
                 (
@@ -1197,14 +1197,16 @@ struct StraightEdgeFixer_v
     */
     function setEdgeSelection node adapter edge_selection =
     (
+        geometry_source = adapter[2]
+
         if (adapter[1] == #editable_poly) then
         (
-            polyop.setEdgeSelection adapter[2] edge_selection
+            polyop.setEdgeSelection geometry_source edge_selection
         )
         else if (adapter[1] == #edit_poly) then
         (
-            EditPolyMod.SetEPolySelLevel adapter[2] #Edge
-            EditPolyMod.SetSelection adapter[2] #Edge edge_selection node:node
+            EditPolyMod.SetEPolySelLevel geometry_source #Edge
+            EditPolyMod.SetSelection geometry_source #Edge edge_selection node:node
         )
 
         true
@@ -1219,14 +1221,15 @@ struct StraightEdgeFixer_v
     function getEdgeSelection node adapter =
     (
         edge_selection = #{}
+        geometry_source = adapter[2]
 
         if (adapter[1] == #editable_poly) then
         (
-            edge_selection = polyop.getEdgeSelection adapter[2]
+            edge_selection = polyop.getEdgeSelection geometry_source
         )
         else if (adapter[1] == #edit_poly) then
         (
-            edge_selection = EditPolyMod.GetSelection adapter[2] #Edge node:node
+            edge_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
         )
 
         edge_selection
@@ -1239,14 +1242,16 @@ struct StraightEdgeFixer_v
     */
     function setVertexSelection node adapter vertex_selection =
     (
+        geometry_source = adapter[2]
+
         if (adapter[1] == #editable_poly) then
         (
-            polyop.setVertSelection adapter[2] vertex_selection
+            polyop.setVertSelection geometry_source vertex_selection
         )
         else if (adapter[1] == #edit_poly) then
         (
-            EditPolyMod.SetEPolySelLevel adapter[2] #Vertex
-            EditPolyMod.SetSelection adapter[2] #Vertex vertex_selection node:node
+            EditPolyMod.SetEPolySelLevel geometry_source #Vertex
+            EditPolyMod.SetSelection geometry_source #Vertex vertex_selection node:node
         )
 
         true
@@ -1465,7 +1470,7 @@ struct StraightEdgeFixer_v
             (
                 inverse_tm = inverse node.objectTransform
                 target_local_position = target_world_position * inverse_tm
-                polyop.setVert adapter[2] vert_id target_local_position
+                polyop.setVert (adapter[2]) vert_id target_local_position
                 update node
                 result_value = true
             )
@@ -1479,10 +1484,10 @@ struct StraightEdgeFixer_v
                     one_vertex = #{}
                     one_vertex[vert_id] = true
 
-                    EditPolyMod.SetEPolySelLevel adapter[2] #Vertex
-                    EditPolyMod.SetSelection adapter[2] #Vertex one_vertex node:node
-                    EditPolyMod.MoveSelection adapter[2] move_delta
-                    EditPolyMod.Commit adapter[2]
+                    EditPolyMod.SetEPolySelLevel (adapter[2]) #Vertex
+                    EditPolyMod.SetSelection (adapter[2]) #Vertex one_vertex node:node
+                    EditPolyMod.MoveSelection (adapter[2]) move_delta
+                    EditPolyMod.Commit (adapter[2])
                 )
 
                 update node
@@ -1627,21 +1632,18 @@ struct StraightEdgeFixer_v
 
                         for edge_id in original_edge_selection do
                         (
-                            if (isEdgeVisible node adapter edge_id) then
+                            if (check_type == #horizontal) then
                             (
-                                if (check_type == #horizontal) then
+                                if (isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold) then
                                 (
-                                    if (isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold) then
-                                    (
-                                        pending_edges[edge_id] = true
-                                    )
+                                    pending_edges[edge_id] = true
                                 )
-                                else if (check_type == #vertical) then
+                            )
+                            else if (check_type == #vertical) then
+                            (
+                                if (isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold) then
                                 (
-                                    if (isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold) then
-                                    (
-                                        pending_edges[edge_id] = true
-                                    )
+                                    pending_edges[edge_id] = true
                                 )
                             )
                         )
@@ -1769,21 +1771,18 @@ struct StraightEdgeFixer_v
 
                     for edge_id = 1 to edge_count do
                     (
-                        if (isEdgeVisible node adapter edge_id) then
+                        if (check_type == #horizontal) then
                         (
-                            if (check_type == #horizontal) then
+                            if (isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold) then
                             (
-                                if (isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold) then
-                                (
-                                    bad_edges[edge_id] = true
-                                )
+                                bad_edges[edge_id] = true
                             )
-                            else if (check_type == #vertical) then
+                        )
+                        else if (check_type == #vertical) then
+                        (
+                            if (isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold) then
                             (
-                                if (isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold) then
-                                (
-                                    bad_edges[edge_id] = true
-                                )
+                                bad_edges[edge_id] = true
                             )
                         )
                     )
@@ -2224,16 +2223,16 @@ struct StraightEdgeFixer_v
             (
                 if (adapter[1] == #editable_poly) then
                 (
-                    applyToEditablePoly node adapter[2] adapter levels
+                    applyToEditablePoly node (adapter[2]) adapter levels
                 )
                 else
                 (
-                    applyToEditPoly node adapter[2] adapter levels
+                    applyToEditPoly node (adapter[2]) adapter levels
                 )
             )
             else if (created_new_modifier) then
             (
-                deleteModifier node adapter[2]
+                deleteModifier node (adapter[2])
             )
 
             report_text = buildObjectReport node levels
@@ -2244,7 +2243,7 @@ struct StraightEdgeFixer_v
             (
                 try
                 (
-                    deleteModifier node adapter[2]
+                    deleteModifier node (adapter[2])
                 )
                 catch
                 (
