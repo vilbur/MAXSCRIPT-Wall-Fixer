@@ -1,6 +1,6 @@
 ﻿/*
-Wall-Fixer Bundled Loader 0.63
-Project version 0.69.
+Wall-Fixer Bundled Loader 0.69
+Project version 0.75.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.63"
-global wall_fixer_loader_tool_version = 0.69
+global wall_fixer_loader_file_version = "0.69"
+global wall_fixer_loader_tool_version = 0.75
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -1924,7 +1924,7 @@ struct WMCWallSlicePipeline
 
 
 /*
-Wall-Fixer Core 0.25
+Wall-Fixer Core 0.27
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -1934,8 +1934,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.25"
-global wall_fixer_core_tool_version = 0.56
+global wall_fixer_core_file_version = "0.27"
+global wall_fixer_core_tool_version = 0.73
 
 
 /*
@@ -4788,6 +4788,126 @@ struct WallFixer_v
         -- return
     ),
 
+
+
+    /*
+    Removes live vertices that are not referenced by any face.
+    A top Edit Poly modifier is handled in-place; otherwise an Editable Poly base object is cleaned directly.
+    */
+    function removeRedundantVertices node =
+    (
+        if node == undefined or not(isValidNode node) then return #(false, 0)
+
+        redundant_vertices = #{}
+        removed_count = 0
+        top_edit_poly = undefined
+
+        if node.modifiers.count > 0 and classOf node.modifiers[1] == Edit_Poly then
+        (
+            top_edit_poly = node.modifiers[1]
+        )
+
+        if top_edit_poly != undefined then
+        (
+            evaluated_mesh = snapshotAsMesh node
+            used_vertices = #{}
+
+            for face_index = 1 to getNumFaces evaluated_mesh do
+            (
+                face_vertices = getFace evaluated_mesh face_index
+                used_vertices[face_vertices.x as integer] = true
+                used_vertices[face_vertices.y as integer] = true
+                used_vertices[face_vertices.z as integer] = true
+            )
+
+            vertex_count = top_edit_poly.GetNumVertices node:node
+            for vertex_index = 1 to vertex_count do
+            (
+                vertex_position = undefined
+                try
+                (
+                    vertex_position = top_edit_poly.GetVertex vertex_index node:node
+                )
+                catch
+                (
+                    vertex_position = undefined
+                )
+
+                if vertex_position != undefined and not used_vertices[vertex_index] then redundant_vertices[vertex_index] = true
+            )
+
+            delete evaluated_mesh
+
+            if redundant_vertices.numberSet > 0 then
+            (
+                before_count = getLiveEditPolyVertexCount node top_edit_poly
+                top_edit_poly.SetEPolySelLevel #Vertex
+                top_edit_poly.SetSelection #Vertex redundant_vertices node:node
+                top_edit_poly.ButtonOp #RemoveVertex
+                top_edit_poly.Commit()
+                update node
+                after_count = getLiveEditPolyVertexCount node top_edit_poly
+                removed_count = amax 0 (before_count - after_count)
+                top_edit_poly.SetSelection #Vertex #{} node:node
+            )
+        )
+        else if classOf node.baseObject == Editable_Poly then
+        (
+            base_obj = node.baseObject
+            used_vertices = #{}
+            vertex_count = polyop.getNumVerts base_obj
+            face_count = polyop.getNumFaces base_obj
+
+            for face_index = 1 to face_count do
+            (
+                face_vertices = polyop.getFaceVerts base_obj face_index
+                for vertex_index in face_vertices do used_vertices[vertex_index] = true
+            )
+
+            for vertex_index = 1 to vertex_count do
+            (
+                if not used_vertices[vertex_index] then redundant_vertices[vertex_index] = true
+            )
+
+            if redundant_vertices.numberSet > 0 then
+            (
+                before_count = polyop.getNumVerts base_obj
+                polyop.deleteVerts base_obj redundant_vertices
+                update node
+                after_count = polyop.getNumVerts base_obj
+                removed_count = amax 0 (before_count - after_count)
+            )
+        )
+
+        #(true, removed_count)
+        -- return
+    ),
+
+    /*
+    Removes redundant vertices from a supplied node collection and returns checked/removed counts.
+    Invalid and unsupported nodes are ignored without converting their geometry type.
+    */
+    function removeRedundantVerticesFromNodes nodes =
+    (
+        checked_count = 0
+        removed_count = 0
+
+        for node in nodes do
+        (
+            if node != undefined and isValidNode node and superClassOf node == GeometryClass then
+            (
+                cleanup_result = removeRedundantVertices node
+                if cleanup_result[1] then
+                (
+                    checked_count += 1
+                    removed_count += cleanup_result[2]
+                )
+            )
+        )
+
+        #(checked_count, removed_count)
+        -- return
+    ),
 
     /*
     Welds all vertices of one selected Editable Poly using the requested threshold.
@@ -8297,7 +8417,7 @@ struct WallFixer_v
     Executes one fixed base-object slice-task queue inside one named slicing Edit Poly modifier.
     Each call owns exactly one pass; cleanup never controls or regenerates the fixed base-object task queue.
     */
-    function executeBaseSliceTaskQueue node slice_tasks modifier_name:"SLICE ALL" angle_threshold:5.0 planar_tolerance:1.0 precision_threshold:0.01 task_index_offset:0 total_task_count:undefined =
+    function executeBaseSliceTaskQueue node slice_tasks modifier_name:"SLICE ALL" angle_threshold:5.0 planar_tolerance:1.0 precision_threshold:0.01 task_index_offset:0 total_task_count:undefined progress_callback:undefined =
     (
         local success_count = 0
         local no_change_count = 0
@@ -8377,6 +8497,11 @@ struct WallFixer_v
                     wall_normal:wall_normal \
                     wall_origin:wall_origin \
                     plane_tolerance:(amax 0.0 planar_tolerance)
+
+                if progress_callback != undefined then
+                (
+                    try(progress_callback display_task_index queue_total)catch()
+                )
 
 
                 if slice_result == undefined then
@@ -8623,6 +8748,11 @@ struct WallFixer_v
                     )
 
 
+                    if node_ok and progress_callback != undefined then
+                    (
+                        try(progress_callback 0 total_task_count)catch()
+                    )
+
                     if node_ok and total_task_count == 0 then
                     (
                         node_error = node.name + ": base object has no slice tasks."
@@ -8650,7 +8780,8 @@ struct WallFixer_v
                                 planar_tolerance:planar_tolerance \
                                 precision_threshold:slice_precision \
                                 task_index_offset:task_index_offset \
-                                total_task_count:total_task_count
+                                total_task_count:total_task_count \
+                                progress_callback:progress_callback
 
 
                             if not queue_result[1] then
@@ -8700,10 +8831,6 @@ struct WallFixer_v
 
 
                 processed_count += 1
-                if progress_callback != undefined then
-                (
-                    try(progress_callback processed_count selected_nodes.count)catch()
-                )
             )
         )
 
@@ -15816,7 +15943,7 @@ createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #
 
 
 /*
-Wall-Fixer UI 0.58
+Wall-Fixer UI 0.64
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -15826,8 +15953,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.58"
-global wall_fixer_ui_tool_version = 0.68
+global wall_fixer_ui_file_version = "0.64"
+global wall_fixer_ui_tool_version = 0.75
 
 
 /*
@@ -17064,7 +17191,7 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:112
         (
             if WallFixerEdgeFixerRollout != undefined then
             (
-                WallFixerEdgeFixerRollout.setOptionsLayout (not options_rolled_up)
+                WallFixerEdgeFixerRollout.setOptionsLayout options_rolled_up
             )
         )
         catch
@@ -17224,7 +17351,7 @@ rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
 
 
     button slice_selected_walls_button "9. SLICE SELECTED WALLS" pos:[4,42] width:302 height:38 \
-        tooltip:"Reuse the current directional slicing system. Vertical and Horizontal remain separate Edit Poly modifiers and duplicate slice modifiers are prevented."
+        tooltip:"LMB: Slice selected walls using the active Vertical/Horizontal mode.\n\nRMB: Run both modes; active mode first, then the other mode."
 
 
     groupBox slice_check_result_group "CHECK RESULT" pos:[4,84] width:302 height:40
@@ -17246,6 +17373,12 @@ rollout WallFixerSliceWallsRollout "SLICE WALLS" width:310 height:132
     on slice_selected_walls_button pressed do
     (
         ::WallFixerRollout.runSliceSelectedWalls()
+    )
+
+
+    on slice_selected_walls_button rightclick do
+    (
+        ::WallFixerRollout.runSliceSelectedWallsBothModes()
     )
 )
 
@@ -17296,6 +17429,7 @@ rollout WallFixerPostProcessRollout "POST-PROCESS" width:310 height:308
     on two_edge_verts_button rightclick do
     (
         macros.run "Ribbon - Modeling" "VertexRemove"
+        ::WallFixerRollout.cleanupRedundantVerticesAfterGeometryChange (selection as array)
         ::WallFixerRollout.setStatus #success "Vertex Remove command executed on the current selection."
     )
 
@@ -17329,7 +17463,7 @@ rollout WallFixerPostProcessRollout "POST-PROCESS" width:310 height:308
 HELPERS contains utility actions that are useful outside the numbered wall-fixing workflow.
 These actions operate on the current scene selection.
 */
-rollout WallFixerHelpersRollout "HELPERS" width:310 height:48
+rollout WallFixerHelpersRollout "HELPERS" width:310 height:84
 (
     button attach_button "Attach" pos:[8,8] width:143 height:30 \
         tooltip:"LMB: Attach all selected geometry into the first selected object.\n\nRMB: Attach selection, center the merged pivot, weld all vertices using Wall-Fixer > Options > Weld Threshold, then quadrify when the merged object has at most 12 triangular faces."
@@ -17337,6 +17471,10 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:48
 
     button reset_pivot_button "Reset Pivot to Center" pos:[159,8] width:143 height:30 \
         tooltip:"Move each selected object's pivot to the center of its geometry."
+
+
+    button print_objs_button "Print Objs" pos:[8,44] width:294 height:30 \
+        tooltip:"Clear the Listener and print detailed diagnostics for the selected objects."
 
 
     on attach_button pressed do
@@ -17354,6 +17492,12 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:48
     on reset_pivot_button pressed do
     (
         ::WallFixerRollout.runResetPivotToCenter()
+    )
+
+
+    on print_objs_button pressed do
+    (
+        ::WallFixerRollout.runPrintSelectedObjects()
     )
 )
 
@@ -22927,17 +23071,19 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:176
 
 
 /*
-Creates the four wall-class sibling layers beside the current layer.
-Existing layers with the requested names are reused; newly created layers inherit the current layer parent.
+Creates the four wall-class sibling layers beside the current layer and assigns selected single-class objects.
+Existing layers are reused; newly created layers inherit the current layer parent.
 */
 function createWallFaceClassLayersFromCurrent =
 (
     current_layer = LayerManager.current
     created_layers = #()
+    assigned_count = 0
+    skipped_count = 0
 
     if current_layer == undefined then
     (
-        #()
+        #(created_layers, assigned_count, skipped_count)
     )
     else
     (
@@ -22963,7 +23109,58 @@ function createWallFaceClassLayersFromCurrent =
             if target_layer != undefined then append created_layers target_layer
         )
 
-        created_layers
+        selected_nodes = for object_node in selection where superclassof object_node == GeometryClass collect object_node
+
+        for object_node in selected_nodes do
+        (
+            source_data = getFaceGeometrySource object_node
+            used_class_ids = #()
+
+            if source_data != undefined then
+            (
+                face_count = getSourceNumFaces object_node source_data
+
+                for face_index = 1 to face_count do
+                (
+                    material_id = getSourceFaceMaterialId object_node source_data face_index
+
+                    if material_id >= 1 and material_id <= 4 then
+                    (
+                        if findItem used_class_ids material_id == 0 then append used_class_ids material_id
+                    )
+                )
+            )
+
+            if used_class_ids.count == 1 then
+            (
+                material_id = used_class_ids[1]
+                class_suffix = case material_id of
+                (
+                    1: "OUTTER"
+                    2: "INNER"
+                    3: "TOP"
+                    4: "BOTTOM"
+                    default: ""
+                )
+                target_layer = if class_suffix == "" then undefined else LayerManager.getLayerFromName (current_name + "-" + class_suffix)
+
+                if target_layer != undefined then
+                (
+                    target_layer.addNode object_node
+                    assigned_count += 1
+                )
+                else
+                (
+                    skipped_count += 1
+                )
+            )
+            else
+            (
+                skipped_count += 1
+            )
+        )
+
+        #(created_layers, assigned_count, skipped_count)
     )
     -- return
 )
@@ -22980,7 +23177,7 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
 
 
     button btn_layer "LAYER" pos:[208,8] width:98 height:32 \
-        tooltip:"LMB: Create sibling layers beside the current layer named with -INNER, -OUTTER, -TOP, and -BOTTOM suffixes."
+        tooltip:"LMB: Create/reuse -INNER, -OUTTER, -TOP, and -BOTTOM sibling layers and move selected single-class wall objects to the matching layer."
 
 
     button btn_select_outer "OUTER" pos:[4,46] width:72 height:24 tooltip:"LMB: Analyze selected objects first if needed, then object mode selects objects containing OUTER faces or face mode selects OUTER faces.\n\nRMB: FORCE selected faces or selected-object wall-side faces OUTER without AUTO GROW.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW through cached processed neighbors within Connect threshold. Existing FORCED walls are blockers and are never overwritten or crossed. A parallel opposite wall within Wall thickness also stops growth. Auto-grown walls are not marked FORCED. TOP/BOTTOM seams stop growth."
@@ -23068,11 +23265,18 @@ rollout wallFaceClassifierRollout "GET OUTER WALLS" width:310 height:110
 
     on btn_layer pressed do
     (
-        layer_array = createWallFaceClassLayersFromCurrent()
+        layer_result = createWallFaceClassLayersFromCurrent()
+        layer_array = layer_result[1]
+        assigned_count = layer_result[2]
+        skipped_count = layer_result[3]
 
-        if layer_array.count == 4 then
+        if layer_array.count == 4 and skipped_count == 0 then
         (
-            ::WallFixerRollout.setStatus #success "Wall class layers are ready."
+            ::WallFixerRollout.setStatus #success ((assigned_count as string) + " selected object(s) assigned to wall class layers.")
+        )
+        else if layer_array.count == 4 then
+        (
+            ::WallFixerRollout.setStatus #warning ((assigned_count as string) + " object(s) assigned; " + (skipped_count as string) + " mixed/unclassified object(s) skipped.")
         )
         else
         (
@@ -23407,7 +23611,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
         setProgress progress_percent
-        setStatus #message ((processed_count as string) + " / " + (total_count as string) + " objects")
+        setStatus #message ((processed_count as string) + "/" + (total_count as string) + " tasks")
         -- return
     )
 
@@ -23502,6 +23706,25 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
     )
 
 
+
+    /*
+    Removes face-unreferenced vertices from geometry nodes after a topology-changing operation.
+    The Core handles top Edit Poly and base Editable Poly targets without converting the stack.
+    */
+    function cleanupRedundantVerticesAfterGeometryChange nodes =
+    (
+        cleanup_result = WallFixer.removeRedundantVerticesFromNodes nodes
+
+        if cleanup_result[2] > 0 and not WallFixer.batch_quiet then
+        (
+            format "Wall-Fixer redundant vertex cleanup | checked:% removed:%\n" cleanup_result[1] cleanup_result[2]
+        )
+
+        cleanup_result
+        -- return
+    )
+
+
     /*
     Runs the inherited Auto Smooth action from the Options rollout.
     The operation remains undoable and reports through the shared Wall-Fixer status area.
@@ -23543,6 +23766,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
 
 
+        if operation_success then cleanupRedundantVerticesAfterGeometryChange (selection as array)
         setProgress 100
 
 
@@ -23580,6 +23804,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         )
 
 
+        if operation_success then cleanupRedundantVerticesAfterGeometryChange (selection as array)
         setProgress 100
 
 
@@ -23629,6 +23854,141 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
         operation_success
+        -- return
+    )
+
+
+    /*
+    Clears the Listener and prints detailed diagnostics for every selected object.
+    Evaluated mesh data is read from a snapshot, while sub-object selections are read from Edit Poly or Editable Poly directly.
+    */
+    function runPrintSelectedObjects =
+    (
+        clearListener()
+        selected_nodes = selection as array
+
+        if selected_nodes.count == 0 then
+        (
+            format "Wall-Fixer Print Objs: no objects selected.\n"
+            setStatus #warning "Print Objs: no objects selected."
+            false
+        )
+        else
+        (
+            format "============================================================\n"
+            format "WALL-FIXER OBJECT DIAGNOSTICS | objects:% | project:%\n" selected_nodes.count WallFixerVersion
+            format "============================================================\n"
+
+            for object_index = 1 to selected_nodes.count do
+            (
+                object_node = selected_nodes[object_index]
+
+                if object_node != undefined and isValidNode object_node then
+                (
+                    layer_name = try(object_node.layer.name)catch("<unknown>")
+                    material_name = if object_node.material == undefined then "<none>" else object_node.material.name
+                    material_class = if object_node.material == undefined then undefined else classOf object_node.material
+                    bounding_box = nodeGetBoundingBox object_node (matrix3 1)
+                    vertex_selection = #{}
+                    edge_selection = #{}
+                    face_selection = #{}
+                    selection_source = #none
+                    top_edit_poly = undefined
+
+                    if object_node.modifiers.count > 0 and classOf object_node.modifiers[1] == Edit_Poly then
+                    (
+                        top_edit_poly = object_node.modifiers[1]
+                        selection_source = #editPoly
+                        try(vertex_selection = top_edit_poly.GetSelection #Vertex node:object_node)catch(vertex_selection = #{})
+                        try(edge_selection = top_edit_poly.GetSelection #Edge node:object_node)catch(edge_selection = #{})
+                        try(face_selection = top_edit_poly.GetSelection #Face node:object_node)catch(face_selection = #{})
+                    )
+                    else if classOf object_node.baseObject == Editable_Poly then
+                    (
+                        selection_source = #editablePoly
+                        try(vertex_selection = polyop.getVertSelection object_node.baseObject)catch(vertex_selection = #{})
+                        try(edge_selection = polyop.getEdgeSelection object_node.baseObject)catch(edge_selection = #{})
+                        try(face_selection = polyop.getFaceSelection object_node.baseObject)catch(face_selection = #{})
+                    )
+
+                    format "\n------------------------------------------------------------\n"
+                    format "[%/%] NAME: %\n" object_index selected_nodes.count object_node.name
+                    format "Node class: % | Base class: % | Layer: %\n" (classOf object_node) (classOf object_node.baseObject) layer_name
+                    format "Material: % | Material class: % | Wire color: %\n" material_name material_class object_node.wirecolor
+                    format "Position: %\nRotation: %\nScale: %\n" object_node.pos object_node.rotation object_node.scale
+                    format "Transform: %\nObject transform: %\n" object_node.transform object_node.objectTransform
+                    format "Bounding box world min:% max:%\n" bounding_box[1] bounding_box[2]
+                    format "Selection source: % | verts:% | edges:% | faces:%\n" selection_source vertex_selection edge_selection face_selection
+                    format "Modifiers (%):\n" object_node.modifiers.count
+
+                    for modifier_index = 1 to object_node.modifiers.count do
+                    (
+                        stack_modifier = object_node.modifiers[modifier_index]
+                        format "  [%] % | class:% | enabled:%\n" modifier_index stack_modifier.name (classOf stack_modifier) stack_modifier.enabled
+                    )
+
+                    user_properties = getUserPropBuffer object_node
+                    format "User properties:\n%\n" (if user_properties == "" then "<none>" else user_properties)
+
+                    evaluated_mesh = undefined
+                    try(evaluated_mesh = snapshotAsMesh object_node)catch(evaluated_mesh = undefined)
+
+                    if evaluated_mesh != undefined then
+                    (
+                        vertex_count = getNumVerts evaluated_mesh
+                        face_count = getNumFaces evaluated_mesh
+                        poly_edge_count = undefined
+
+                        if top_edit_poly != undefined then
+                        (
+                            try(poly_edge_count = top_edit_poly.GetNumEdges node:object_node)catch(poly_edge_count = undefined)
+                        )
+                        else if classOf object_node.baseObject == Editable_Poly then
+                        (
+                            try(poly_edge_count = polyop.getNumEdges object_node.baseObject)catch(poly_edge_count = undefined)
+                        )
+
+                        format "Topology: verts:% | faces:% | poly edges:%\n" vertex_count face_count poly_edge_count
+                        format "VERTICES: index | object position | world position | normal\n"
+
+                        for vertex_index = 1 to vertex_count do
+                        (
+                            object_position = getVert evaluated_mesh vertex_index
+                            world_position = object_position * object_node.objectTransform
+                            vertex_normal = getNormal evaluated_mesh vertex_index
+                            format "  V% | obj:% | world:% | N:%\n" vertex_index object_position world_position vertex_normal
+                        )
+
+                        format "FACES: index | verts | center world | normal | matID | smoothing\n"
+
+                        for face_index = 1 to face_count do
+                        (
+                            face_vertices = getFace evaluated_mesh face_index
+                            vertex_a = getVert evaluated_mesh (face_vertices.x as integer)
+                            vertex_b = getVert evaluated_mesh (face_vertices.y as integer)
+                            vertex_c = getVert evaluated_mesh (face_vertices.z as integer)
+                            face_center_world = (((vertex_a + vertex_b + vertex_c) / 3.0) * object_node.objectTransform)
+                            face_normal = getFaceNormal evaluated_mesh face_index
+                            material_id = getFaceMatID evaluated_mesh face_index
+                            smoothing_group = getFaceSmoothGroup evaluated_mesh face_index
+                            format "  F% | verts:% | center:% | N:% | mat:% | smooth:%\n" face_index face_vertices face_center_world face_normal material_id smoothing_group
+                        )
+
+                        delete evaluated_mesh
+                    )
+                    else
+                    (
+                        format "Topology: evaluated mesh snapshot unavailable.\n"
+                    )
+                )
+            )
+
+            format "\n============================================================\n"
+            format "END WALL-FIXER OBJECT DIAGNOSTICS\n"
+            format "============================================================\n"
+            setStatus #success ((selected_nodes.count as string) + " object diagnostic report printed.")
+            true
+        )
         -- return
     )
 
@@ -23855,6 +24215,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
             )
 
 
+            if completed and fix_vertices then cleanupRedundantVerticesAfterGeometryChange (selection as array)
             setProgress 100
 
 
@@ -25006,6 +25367,7 @@ candidate_better = isPlanarCandidateBetter \
 
 
                 subObjectLevel = 0
+                cleanupRedundantVerticesAfterGeometryChange geometry_nodes
                 redrawViews()
                 setProgress 100
 
@@ -26460,6 +26822,7 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
         )
 
 
+        if completed then cleanupRedundantVerticesAfterGeometryChange result_nodes
         redrawViews()
         completed
         -- return
@@ -26555,6 +26918,7 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
 
 
         completed = normalizeStraightEdgeResult operation_result
+        if completed and fix_selected then cleanupRedundantVerticesAfterGeometryChange (selection as array)
         setProgress 100
 
 
@@ -26619,6 +26983,7 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
             quiet_mode:WallFixerEdgeFixerOptionsRollout.straight_quiet_checkbox.checked
 
 
+        if completed then cleanupRedundantVerticesAfterGeometryChange (selection as array)
         setProgress 100
 
 
@@ -26656,6 +27021,7 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
             planar_tolerance:saved_planar_tolerance
 
 
+        if completed then cleanupRedundantVerticesAfterGeometryChange (selection as array)
         setProgress 100
 
 
@@ -26699,12 +27065,79 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
 
         if completed then
         (
+            cleanupRedundantVerticesAfterGeometryChange (selection as array)
             setProgress 100
             setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Slice selected walls completed.")
         )
         else
         (
             setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Slice selected walls stopped.")
+        )
+
+
+        completed
+        -- return
+    )
+
+
+    /*
+    Runs both directional slice modes without changing the visible radio-button selection.
+    The currently active mode runs first, followed by the opposite mode.
+    */
+    function runSliceSelectedWallsBothModes =
+    (
+        saveUiSettings()
+        setProgress 0
+
+
+        first_mode = getSliceCutMode()
+        second_mode = if first_mode == #vertical then #horizontal else #vertical
+
+
+        setStatus #message (("Slicing selected walls: " + (first_mode as string)) + "...")
+        first_completed = WallFixer.debugSliceSelectedWalls \
+            cut_mode:first_mode \
+            slice_plane_mode:(getSlicePlaneMode()) \
+            angle_threshold:saved_angle_threshold \
+            planar_tolerance:saved_planar_tolerance \
+            slice_precision:WallFixerOptionsRollout.slice_precision_spinner.value \
+            display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
+            double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
+            progress_callback:updateSliceProgress \
+            quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
+
+
+        first_report = WallFixer.last_slice_report
+
+
+        setProgress 0
+        setStatus #message (("Slicing selected walls: " + (second_mode as string)) + "...")
+        second_completed = WallFixer.debugSliceSelectedWalls \
+            cut_mode:second_mode \
+            slice_plane_mode:(getSlicePlaneMode()) \
+            angle_threshold:saved_angle_threshold \
+            planar_tolerance:saved_planar_tolerance \
+            slice_precision:WallFixerOptionsRollout.slice_precision_spinner.value \
+            display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
+            double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
+            progress_callback:updateSliceProgress \
+            quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
+
+
+        second_report = WallFixer.last_slice_report
+        completed = first_completed and second_completed
+
+
+        if completed then
+        (
+            cleanupRedundantVerticesAfterGeometryChange (selection as array)
+            setProgress 100
+            setStatus #success "Slice selected walls completed in both modes."
+        )
+        else
+        (
+            failure_report = if not first_completed and first_report != "" then first_report else second_report
+            setStatus #error (if failure_report != "" then failure_report else "Slice selected walls stopped before both modes completed.")
         )
 
 
@@ -26722,6 +27155,7 @@ format "ERROR: % confirmed split could not be completed.\n" source_name
         setProgress 0
         setStatus #message "Removing redundant loops and edges..."
         completed = WallFixer.cleanupRedundantLoopsSelection angle_threshold:0.1 debug_output:true
+        if completed then cleanupRedundantVerticesAfterGeometryChange (selection as array)
         setProgress 100
 
 

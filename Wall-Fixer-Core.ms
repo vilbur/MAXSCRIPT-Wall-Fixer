@@ -1,5 +1,5 @@
-/*
-Wall-Fixer Core 0.25
+﻿/*
+Wall-Fixer Core 0.27
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.25"
-global wall_fixer_core_tool_version = 0.56
+global wall_fixer_core_file_version = "0.27"
+global wall_fixer_core_tool_version = 0.73
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -2549,6 +2549,126 @@ struct WallFixer_v
             y_value = readIniIntFromSection "Window" "Y" 100
             [x_value, y_value]
         )
+        -- return
+    ),
+
+
+    /*
+    Removes live vertices that are not referenced by any face.
+    A top Edit Poly modifier is handled in-place; otherwise an Editable Poly base object is cleaned directly.
+    */
+    function removeRedundantVertices node =
+    (
+        if node == undefined or not(isValidNode node) then return #(false, 0)
+
+        redundant_vertices = #{}
+        removed_count = 0
+        top_edit_poly = undefined
+
+        if node.modifiers.count > 0 and classOf node.modifiers[1] == Edit_Poly then
+        (
+            top_edit_poly = node.modifiers[1]
+        )
+
+        if top_edit_poly != undefined then
+        (
+            evaluated_mesh = snapshotAsMesh node
+            used_vertices = #{}
+
+            for face_index = 1 to getNumFaces evaluated_mesh do
+            (
+                face_vertices = getFace evaluated_mesh face_index
+                used_vertices[face_vertices.x as integer] = true
+                used_vertices[face_vertices.y as integer] = true
+                used_vertices[face_vertices.z as integer] = true
+            )
+
+            vertex_count = top_edit_poly.GetNumVertices node:node
+            for vertex_index = 1 to vertex_count do
+            (
+                vertex_position = undefined
+                try
+                (
+                    vertex_position = top_edit_poly.GetVertex vertex_index node:node
+                )
+                catch
+                (
+                    vertex_position = undefined
+                )
+
+                if vertex_position != undefined and not used_vertices[vertex_index] then redundant_vertices[vertex_index] = true
+            )
+
+            delete evaluated_mesh
+
+            if redundant_vertices.numberSet > 0 then
+            (
+                before_count = getLiveEditPolyVertexCount node top_edit_poly
+                top_edit_poly.SetEPolySelLevel #Vertex
+                top_edit_poly.SetSelection #Vertex redundant_vertices node:node
+                top_edit_poly.ButtonOp #RemoveVertex
+                top_edit_poly.Commit()
+                update node
+                after_count = getLiveEditPolyVertexCount node top_edit_poly
+                removed_count = amax 0 (before_count - after_count)
+                top_edit_poly.SetSelection #Vertex #{} node:node
+            )
+        )
+        else if classOf node.baseObject == Editable_Poly then
+        (
+            base_obj = node.baseObject
+            used_vertices = #{}
+            vertex_count = polyop.getNumVerts base_obj
+            face_count = polyop.getNumFaces base_obj
+
+            for face_index = 1 to face_count do
+            (
+                face_vertices = polyop.getFaceVerts base_obj face_index
+                for vertex_index in face_vertices do used_vertices[vertex_index] = true
+            )
+
+            for vertex_index = 1 to vertex_count do
+            (
+                if not used_vertices[vertex_index] then redundant_vertices[vertex_index] = true
+            )
+
+            if redundant_vertices.numberSet > 0 then
+            (
+                before_count = polyop.getNumVerts base_obj
+                polyop.deleteVerts base_obj redundant_vertices
+                update node
+                after_count = polyop.getNumVerts base_obj
+                removed_count = amax 0 (before_count - after_count)
+            )
+        )
+
+        #(true, removed_count)
+        -- return
+    ),
+
+    /*
+    Removes redundant vertices from a supplied node collection and returns checked/removed counts.
+    Invalid and unsupported nodes are ignored without converting their geometry type.
+    */
+    function removeRedundantVerticesFromNodes nodes =
+    (
+        checked_count = 0
+        removed_count = 0
+
+        for node in nodes do
+        (
+            if node != undefined and isValidNode node and superClassOf node == GeometryClass then
+            (
+                cleanup_result = removeRedundantVertices node
+                if cleanup_result[1] then
+                (
+                    checked_count += 1
+                    removed_count += cleanup_result[2]
+                )
+            )
+        )
+
+        #(checked_count, removed_count)
         -- return
     ),
 
@@ -5699,7 +5819,7 @@ struct WallFixer_v
     Executes one fixed base-object slice-task queue inside one named slicing Edit Poly modifier.
     Each call owns exactly one pass; cleanup never controls or regenerates the fixed base-object task queue.
     */
-    function executeBaseSliceTaskQueue node slice_tasks modifier_name:"SLICE ALL" angle_threshold:5.0 planar_tolerance:1.0 precision_threshold:0.01 task_index_offset:0 total_task_count:undefined =
+    function executeBaseSliceTaskQueue node slice_tasks modifier_name:"SLICE ALL" angle_threshold:5.0 planar_tolerance:1.0 precision_threshold:0.01 task_index_offset:0 total_task_count:undefined progress_callback:undefined =
     (
         local success_count = 0
         local no_change_count = 0
@@ -5770,6 +5890,11 @@ struct WallFixer_v
                     wall_normal:wall_normal \
                     wall_origin:wall_origin \
                     plane_tolerance:(amax 0.0 planar_tolerance)
+
+                if progress_callback != undefined then
+                (
+                    try(progress_callback display_task_index queue_total)catch()
+                )
 
                 if slice_result == undefined then
                 (
@@ -5920,11 +6045,6 @@ struct WallFixer_v
             if not batch_quiet then format "Wall-Fixer Slice Selected Walls: skipped % four-vertex wall(s) before batch.\n" skipped_count
         )
 
-        if progress_callback != undefined then
-        (
-            try(progress_callback processed_count selected_nodes.count)catch()
-        )
-
         if selected_nodes.count == 0 then
         (
             last_slice_report = "Slice Selected Walls: all selected walls have only four vertices; nothing to cut."
@@ -5990,6 +6110,11 @@ struct WallFixer_v
                         )
                     )
 
+                    if node_ok and progress_callback != undefined then
+                    (
+                        try(progress_callback 0 total_task_count)catch()
+                    )
+
                     if node_ok and total_task_count == 0 then
                     (
                         node_error = node.name + ": base object has no slice tasks."
@@ -6015,7 +6140,8 @@ struct WallFixer_v
                                 planar_tolerance:planar_tolerance \
                                 precision_threshold:slice_precision \
                                 task_index_offset:task_index_offset \
-                                total_task_count:total_task_count
+                                total_task_count:total_task_count \
+                                progress_callback:progress_callback
 
                             if not queue_result[1] then
                             (
@@ -6058,10 +6184,6 @@ struct WallFixer_v
                 max create mode
 
                 processed_count += 1
-                if progress_callback != undefined then
-                (
-                    try(progress_callback processed_count selected_nodes.count)catch()
-                )
             )
         )
 
