@@ -1,14 +1,14 @@
 ﻿/*
-Straight Edge Fixer 0.28
-Detects repeated horizontal edge levels and aligns nearby horizontal edges to them.
+Straight Edge Fixer 0.30
+Detects repeated horizontal edge rows and aligns nearby horizontal edges to them.
 */
 
 global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.28"
-global straight_edge_fixer_tool_version = 0.930
+global straight_edge_fixer_file_version = "0.30"
+global straight_edge_fixer_tool_version = 0.933
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -232,14 +232,79 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Loads tool settings from the INI file.
-    Returns #(level_tolerance, min_level_edges, search_in_z, angle_threshold, quiet_mode).
+    Returns the compact label for the current 3ds Max display units.
+    Custom display mode uses its physical CustomUnit suffix instead of the word custom.
+    */
+    function getDisplayUnitLabel =
+    (
+        display_type = units.DisplayType
+        unit_label = "units"
+
+
+        case display_type of
+        (
+            #Generic:
+            (
+                unit_label = "units"
+            )
+            #Metric:
+            (
+                case units.MetricType of
+                (
+                    #Millimeters: unit_label = "mm"
+                    #Centimeters: unit_label = "cm"
+                    #Meters: unit_label = "m"
+                    #Kilometers: unit_label = "km"
+                    default: unit_label = "units"
+                )
+            )
+            #US:
+            (
+                case units.USType of
+                (
+                    #Frac_In: unit_label = "in"
+                    #Dec_In: unit_label = "in"
+                    #Frac_Ft: unit_label = "ft"
+                    #Dec_Ft: unit_label = "ft"
+                    #Ft_Frac_In: unit_label = "ft/in"
+                    #Ft_Dec_In: unit_label = "ft/in"
+                    default: unit_label = "units"
+                )
+            )
+            #Custom:
+            (
+                case units.CustomUnit of
+                (
+                    #Millimeters: unit_label = "mm"
+                    #Centimeters: unit_label = "cm"
+                    #Meters: unit_label = "m"
+                    #Kilometers: unit_label = "km"
+                    #Inches: unit_label = "in"
+                    #Feet: unit_label = "ft"
+                    #Miles: unit_label = "mi"
+                    default: unit_label = "units"
+                )
+            )
+            default:
+            (
+                unit_label = "units"
+            )
+        )
+
+
+        unit_label
+        -- return
+    ),
+
+
+    /*
+    Loads active tool settings from the INI file.
+    Returns #(rows_distance, min_row_edges, angle_threshold, quiet_mode).
     */
     function loadSettings =
     (
         level_tolerance = getIniFloat "Settings" "LevelTolerance" 0.01
         min_level_edges = getIniInteger "Settings" "MinLevelEdges" 3
-        search_in_z = getIniFloat "Settings" "SearchInZ" 10.0
         angle_threshold = getIniFloat "Settings" "AngleThreshold" 45.0
         quiet_mode = getIniBoolean "Settings" "QuietMode" false
 
@@ -253,39 +318,34 @@ struct StraightEdgeFixer_v
             min_level_edges = 3
         )
 
-        if (search_in_z < 0.0) then
+        if (angle_threshold < 0.1) then
         (
-            search_in_z = 10.0
-        )
-
-        if (angle_threshold < 0.0) then
-        (
-            angle_threshold = 0.0
+            angle_threshold = 0.1
         )
         else if (angle_threshold > 45.0) then
         (
             angle_threshold = 45.0
         )
 
-        #(level_tolerance, min_level_edges, search_in_z, angle_threshold, quiet_mode)
+        #(level_tolerance, min_level_edges, angle_threshold, quiet_mode)
         -- return
     ),
 
     /*
-    Saves current tool settings to the INI file.
-    Called whenever a UI value changes and before an operation starts.
+    Saves active tool settings to the INI file.
+    Horizontal and vertical direction matching both use Angle.
     */
-    function saveSettings level_tolerance min_level_edges search_in_z angle_threshold quiet_mode =
+    function saveSettings level_tolerance min_level_edges angle_threshold quiet_mode =
     (
         setIniSetting ini_file "Settings" "LevelTolerance" (level_tolerance as string)
         setIniSetting ini_file "Settings" "MinLevelEdges" (min_level_edges as string)
-        setIniSetting ini_file "Settings" "SearchInZ" (search_in_z as string)
         setIniSetting ini_file "Settings" "AngleThreshold" (angle_threshold as string)
         setIniSetting ini_file "Settings" "QuietMode" (if quiet_mode then "1" else "0")
 
         true
         -- return
     ),
+
 
     /*
     Loads the saved dialog screen position.
@@ -1053,7 +1113,19 @@ struct StraightEdgeFixer_v
                     invalid_edges = copy unwelded_edges
                     invalid_edges += reflex_edges
 
-                    setEdgeSelection node adapter invalid_edges
+                    /*
+                    Select directly here instead of calling the later struct helper.
+                    This avoids MAXScript resolving the forward reference against a Modifier-based selection API.
+                    */
+                    if (adapter[1] == #editable_poly) then
+                    (
+                        polyop.setEdgeSelection (adapter[2]) invalid_edges
+                    )
+                    else if (adapter[1] == #edit_poly) then
+                    (
+                        EditPolyMod.SetEPolySelLevel (adapter[2]) #Edge
+                        EditPolyMod.SetSelection (adapter[2]) #Edge invalid_edges node:node
+                    )
 
                     total_unwelded_edges += countBits unwelded_edges
                     total_reflex_edges += countBits reflex_edges
@@ -1704,11 +1776,10 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Finds the nearest visible straight reference on the same Z level.
-    Search in Z defines how far the target edge center may be from the reference level.
-    Returns #(reference_edge_id, 0, #level) or undefined.
+    Finds the nearest visible straight reference whose direction is within Angle.
+    No Z-position cutoff is used; horizontal and vertical fallback use the same angle rule.
     */
-    function findSameLevelReference node adapter target_edge check_type tolerance angle_threshold search_in_z =
+    function findAngleReference node adapter target_edge check_type tolerance angle_threshold =
     (
         best_reference = undefined
         best_distance = 1.0e30
@@ -1722,25 +1793,16 @@ struct StraightEdgeFixer_v
                 if ((reference_edge != target_edge) and (isStraightReferenceEdge node adapter reference_edge check_type tolerance)) then
                 (
                     reference_center = getEdgeCenterWorld node adapter reference_edge
+                    parallel_angle = getParallelAngle node adapter target_edge reference_edge
 
-                    if (reference_center != undefined) then
+                    if ((reference_center != undefined) and (parallel_angle <= angle_threshold)) then
                     (
-                        z_distance = abs (target_center.z - reference_center.z)
+                        spatial_distance = distance target_center reference_center
 
-                        if (z_distance <= search_in_z) then
+                        if (spatial_distance < best_distance) then
                         (
-                            parallel_angle = getParallelAngle node adapter target_edge reference_edge
-
-                            if (parallel_angle <= angle_threshold) then
-                            (
-                                spatial_distance = distance target_center reference_center
-
-                                if (spatial_distance < best_distance) then
-                                (
-                                    best_distance = spatial_distance
-                                    best_reference = #(reference_edge, 0, #level)
-                                )
-                            )
+                            best_distance = spatial_distance
+                            best_reference = #(reference_edge, 0, #angle)
                         )
                     )
                 )
@@ -1750,6 +1812,7 @@ struct StraightEdgeFixer_v
         best_reference
         -- return
     ),
+
 
     /*
     Moves one vertex to an exact world-space position.
@@ -2179,7 +2242,7 @@ struct StraightEdgeFixer_v
     Reference priority is neighboring straight edge, then nearest straight edge on the same level.
     Failed edge vertices are selected automatically for manual correction.
     */
-    function straightenSelectedEdges check_type tolerance angle_threshold search_in_z =
+    function straightenSelectedEdges check_type tolerance angle_threshold =
     (
         selected_nodes = selection as array
         object_results = #()
@@ -2241,7 +2304,7 @@ struct StraightEdgeFixer_v
 
                                 if (reference_data == undefined) then
                                 (
-                                    reference_data = findSameLevelReference node adapter edge_id check_type tolerance angle_threshold search_in_z
+                                    reference_data = findAngleReference node adapter edge_id check_type tolerance angle_threshold
                                 )
 
                                 if (reference_data != undefined) then
@@ -2405,10 +2468,31 @@ struct StraightEdgeFixer_v
 
 
     /*
-    Reads all visible horizontal edge data used by level detection.
-    Each record is #(edge_id, z_min, z_max, z_center, vert_a, vert_b).
+    Tests the horizontal row angle rule without scene geometry.
+    Zero through Angle qualifies; values above Angle do not.
     */
-    function getHorizontalEdgeData node adapter level_tolerance =
+    function testHorizontalRowAngleThreshold =
+    (
+        horizontal_zero = getDirectionAngles 1.0 0.0
+        horizontal_five = getDirectionAngles 1.0 0.0874886635
+        horizontal_over = getDirectionAngles 1.0 0.087507
+
+        test_passed = (
+            (horizontal_zero[1] <= 5.0) and
+            (horizontal_five[1] <= 5.0) and
+            (horizontal_over[1] > 5.0)
+        )
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Reads visible horizontal-direction edge data using the shared Angle threshold.
+    Rows distance is not used to classify direction; it is reserved for row clustering.
+    */
+    function getHorizontalEdgeData node adapter angle_threshold =
     (
         edge_data = #()
         edge_count = getEdgeCount node adapter
@@ -2417,7 +2501,9 @@ struct StraightEdgeFixer_v
         (
             if (isEdgeVisible node adapter edge_id) then
             (
-                if (isHorizontalEdge node adapter edge_id level_tolerance) then
+                angle_from_horizontal = getEdgeAngleFromHorizontal node adapter edge_id
+
+                if ((angle_from_horizontal != undefined) and (angle_from_horizontal <= angle_threshold)) then
                 (
                     edge_verts = getEdgeVertIds node adapter edge_id
 
@@ -2438,6 +2524,7 @@ struct StraightEdgeFixer_v
         edge_data
         -- return
     ),
+
 
     /*
     Builds one detected Z-level record from defining horizontal edges.
@@ -2524,10 +2611,10 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Assigns every horizontal edge to the nearest detected level inside Search in Z.
-    An edge can belong to only one detected level.
+    Assigns every angle-qualified horizontal edge to its nearest detected row.
+    There is no Z-distance search cutoff; Angle controls horizontal eligibility.
     */
-    function assignEdgesToLevels levels edge_data search_in_z =
+    function assignEdgesToLevels levels edge_data =
     (
         if (levels.count > 0) then
         (
@@ -2549,7 +2636,7 @@ struct StraightEdgeFixer_v
                     )
                 )
 
-                if ((nearest_level > 0) and (nearest_distance <= search_in_z)) then
+                if (nearest_level > 0) then
                 (
                     levels[nearest_level][5][edge_id] = true
                 )
@@ -2559,6 +2646,7 @@ struct StraightEdgeFixer_v
         levels
         -- return
     ),
+
 
     /*
     Finds one horizontal edge record by edge ID.
@@ -2765,7 +2853,7 @@ struct StraightEdgeFixer_v
 
         if (levels.count == 0) then
         (
-            report_text += "  No edge levels found.\n"
+            report_text += "  No edge rows found.\n"
         )
         else
         (
@@ -2777,11 +2865,11 @@ struct StraightEdgeFixer_v
                 outside_count = level_data[8]
 
                 report_text +=
-                    "  Level " + (level_index as string) +
+                    "  Row " + (level_index as string) +
                     " | detected Z: " + (level_data[4] as string) +
                     " | mode: " + (level_data[7] as string) +
                     " | target Z: " + (level_data[6] as string) +
-                    " | level edges: " + (definition_count as string) +
+                    " | row edges: " + (definition_count as string) +
                     " | outside aligned: " + (outside_count as string) +
                     " | total aligned: " + (assigned_count as string) + "\n"
             )
@@ -2795,7 +2883,7 @@ struct StraightEdgeFixer_v
     Processes one selected object using horizontal edges instead of loose vertices.
     Returns a diagnostic text block for that object.
     */
-    function processObject node level_tolerance min_level_edges search_in_z =
+    function processObject node level_tolerance min_level_edges angle_threshold =
     (
         report_text = ""
         adapter = undefined
@@ -2805,9 +2893,9 @@ struct StraightEdgeFixer_v
         (
             adapter = getGeometryAdapter node
             created_new_modifier = adapter[3]
-            edge_data = getHorizontalEdgeData node adapter level_tolerance
+            edge_data = getHorizontalEdgeData node adapter angle_threshold
             levels = findLevels edge_data level_tolerance min_level_edges
-            levels = assignEdgesToLevels levels edge_data search_in_z
+            levels = assignEdgesToLevels levels edge_data
             levels = calculateTargets levels edge_data
 
             if (levels.count > 0) then
@@ -2852,7 +2940,7 @@ struct StraightEdgeFixer_v
     Detects and aligns horizontal edge levels on all selected geometry objects.
     Quiet Mode suppresses the final diagnostic message box.
     */
-    function alignSelection level_tolerance:0.01 min_level_edges:3 search_in_z:10.0 quiet_mode:false =
+    function alignSelection level_tolerance:0.01 min_level_edges:3 angle_threshold:45.0 quiet_mode:false =
     (
         selected_nodes = selection as array
         report_text = "STRAIGHT EDGE FIXER " + version + "\n\n"
@@ -2871,7 +2959,7 @@ struct StraightEdgeFixer_v
                     if (isValidNode node and (superClassOf node == GeometryClass)) then
                     (
                         processed_count += 1
-                        report_text += processObject node level_tolerance min_level_edges search_in_z
+                        report_text += processObject node level_tolerance min_level_edges angle_threshold
                         report_text += "\n"
                     )
                 )
@@ -2911,39 +2999,42 @@ catch
 
 rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
 (
-    groupBox grp_settings "LEVEL SETTINGS" pos:[8,8] width:284 height:132
+    groupBox grp_settings "ROWS SETTINGS" pos:[8,8] width:284 height:132
 
-    label lbl_level_tolerance "Level Tolerance:" pos:[20,32] width:120 height:18
-    spinner spn_level_tolerance "" pos:[150,30] width:125 height:18 range:[0.000001,1000000.0,0.01] type:#worldunits scale:0.001 tooltip:"Maximum world-axis deviation. For level detection it defines horizontal edges and groups their center Z values. The same tolerance is used by the direction checks."
+    label lbl_level_tolerance "Rows distance:" pos:[20,32] width:120 height:18
+    spinner spn_level_tolerance "" pos:[150,30] width:93 height:18 range:[0.000001,1000000.0,0.01] type:#worldunits scale:0.001 tooltip:"Maximum world-space distance used to detect and group horizontal edge rows."
+    label lbl_rows_distance_units "unit" pos:[247,32] width:36 height:18
 
-    label lbl_min_level_edges "Min Level Edges:" pos:[20,60] width:120 height:18
-    spinner spn_min_level_edges "" pos:[150,58] width:125 height:18 range:[1,100000,3] type:#integer scale:1 tooltip:"Minimum number of horizontal edges required inside Level Tolerance to define a valid Z level."
+    label lbl_min_level_edges "Min Edges:" pos:[20,60] width:120 height:18
+    spinner spn_min_level_edges "" pos:[150,58] width:93 height:18 range:[1,100000,3] type:#integer scale:1 tooltip:"Minimum number of horizontal edges required to define a valid edge row."
+    label lbl_min_edges_units "edges" pos:[247,60] width:36 height:18
 
-    label lbl_search_in_z "Search in Z:" pos:[20,88] width:120 height:18
-    spinner spn_search_in_z "" pos:[150,86] width:125 height:18 range:[0.0,1000000.0,10.0] type:#worldunits scale:0.1 tooltip:"Maximum world-Z distance from a detected level. Horizontal edges inside this range are assigned to the nearest level and aligned."
-
-    checkbox chk_quiet_mode "Quiet Mode" pos:[20,116] width:240 height:18 checked:false tooltip:"Run edge-level alignment without showing the final report."
+    checkbox chk_quiet_mode "Quiet Mode" pos:[20,88] width:240 height:18 checked:false tooltip:"Run edge-row alignment without showing the final report."
 
     groupBox grp_checks "EDGE CHECKS" pos:[8,148] width:284 height:144
 
-    label lbl_angle_threshold "Angle:" pos:[20,172] width:46 height:18 tooltip:"Maximum allowed angle away from the requested direction. Edges above this angle are selected as direction errors. At 0 degrees every non-matching edge is selected; 45 degrees is the horizontal/vertical crossover."
-    spinner spn_angle_threshold "" pos:[64,170] width:58 height:18 range:[0.0,45.0,45.0] type:#float scale:1.0 tooltip:"Maximum allowed direction deviation in degrees. CHECK HORIZONTAL selects edges above this deviation from horizontal. CHECK VERTICAL selects edges above this deviation from vertical."
+    label lbl_angle_threshold "Angle:" pos:[20,172] width:46 height:18 tooltip:"Maximum allowed angle away from the requested direction."
+    spinner spn_angle_threshold "" pos:[64,170] width:58 height:18 range:[0.0,45.0,45.0] type:#float scale:1.0 tooltip:"Maximum direction deviation in degrees."
+    label lbl_angle_units "°" pos:[124,172] width:16 height:18
 
     button btn_check_horizontal "CHECK HORIZONTAL" pos:[18,198] width:127 height:42 tooltip:"LMB: select visible edges whose deviation from horizontal is greater than Angle.\n\nRMB: straighten currently selected horizontal-direction error edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
     button btn_check_vertical "CHECK VERTICAL" pos:[155,198] width:127 height:42 tooltip:"LMB: select visible edges whose deviation from vertical is greater than Angle.\n\nRMB: straighten currently selected vertical-direction error edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
 
     button btn_border_check "BORDER CHECK" pos:[18,248] width:264 height:28 tooltip:"Select visible border edges with an unwelded/overlapping local-Z seam, a reflex corner above 180 degrees, or a 360-degree backtracking border. Backtracking does not require the remote vertices to share position."
 
-    button btn_align "STRAIGHT EDGE FIXER" pos:[8,302] width:284 height:38 tooltip:"Detect repeated horizontal edge levels and align nearby horizontal edges to TOP, BOTTOM, or CENTER target Z."
+    button btn_align "STRAIGHT EDGE FIXER" pos:[8,302] width:284 height:38 tooltip:"Detect repeated horizontal edge rows and align nearby horizontal edges to TOP, BOTTOM, or CENTER target Z."
 
     on straightEdgeFixer_ui open do
     (
         settings_data = StraightEdgeFixer.loadSettings()
+        display_unit_label = StraightEdgeFixer.getDisplayUnitLabel()
+
+
         spn_level_tolerance.value = settings_data[1]
         spn_min_level_edges.value = settings_data[2]
-        spn_search_in_z.value = settings_data[3]
-        spn_angle_threshold.value = settings_data[4]
-        chk_quiet_mode.checked = settings_data[5]
+        spn_angle_threshold.value = settings_data[3]
+        chk_quiet_mode.checked = settings_data[4]
+        lbl_rows_distance_units.text = display_unit_label
     )
 
     on straightEdgeFixer_ui moved dialog_position do
@@ -2953,70 +3044,65 @@ rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
 
     on spn_level_tolerance changed control_value do
     (
-        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_angle_threshold.value chk_quiet_mode.checked
     )
 
     on spn_min_level_edges changed control_value do
     (
-        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
-    )
-
-    on spn_search_in_z changed control_value do
-    (
-        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_angle_threshold.value chk_quiet_mode.checked
     )
 
     on spn_angle_threshold changed control_value do
     (
-        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_angle_threshold.value chk_quiet_mode.checked
     )
 
     on chk_quiet_mode changed control_state do
     (
-        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_angle_threshold.value chk_quiet_mode.checked
     )
 
     on btn_check_horizontal pressed do
     (
-        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_angle_threshold.value chk_quiet_mode.checked
         StraightEdgeFixer.checkEdgeDirection #horizontal spn_level_tolerance.value spn_angle_threshold.value
     )
 
 
     on btn_check_horizontal rightclick do
     (
-        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
-        StraightEdgeFixer.straightenSelectedEdges #horizontal spn_level_tolerance.value spn_angle_threshold.value spn_search_in_z.value
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.straightenSelectedEdges #horizontal spn_level_tolerance.value spn_angle_threshold.value
     )
 
     on btn_check_vertical pressed do
     (
-        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_angle_threshold.value chk_quiet_mode.checked
         StraightEdgeFixer.checkEdgeDirection #vertical spn_level_tolerance.value spn_angle_threshold.value
     )
 
 
     on btn_check_vertical rightclick do
     (
-        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
-        StraightEdgeFixer.straightenSelectedEdges #vertical spn_level_tolerance.value spn_angle_threshold.value spn_search_in_z.value
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.straightenSelectedEdges #vertical spn_level_tolerance.value spn_angle_threshold.value
     )
 
 
     on btn_border_check pressed do
     (
-        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_angle_threshold.value chk_quiet_mode.checked
         StraightEdgeFixer.checkBorders spn_level_tolerance.value
     )
 
     on btn_align pressed do
     (
-        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_search_in_z.value spn_angle_threshold.value chk_quiet_mode.checked
+        StraightEdgeFixer.saveSettings spn_level_tolerance.value spn_min_level_edges.value spn_angle_threshold.value chk_quiet_mode.checked
 
         StraightEdgeFixer.alignSelection \
             level_tolerance:spn_level_tolerance.value \
             min_level_edges:spn_min_level_edges.value \
-            search_in_z:spn_search_in_z.value \
+            angle_threshold:spn_angle_threshold.value \
             quiet_mode:chk_quiet_mode.checked
     )
 )

@@ -6,6 +6,14 @@ UI: dialog registration/position persistence: check registered dialog size and p
 
 ## QUEUE
 
+SLICE WALLS > Quiet mode formatting: swap the order of the two status/output formats while processing so the more important message that is currently first remains visible and is not hidden by the second format.
+
+UI: status label / progress bar toggle: enforce mutually exclusive visibility so only one of the two controls can be visible at any time.
+
+DIALOG: set lockWidth = false and prevent registration/restore logic from changing the dialog width.
+
+UI: remove the entire pipeline step/rollout "8. CHECK RESULT".
+
 
 
 

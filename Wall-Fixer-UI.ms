@@ -1,5 +1,5 @@
-/*
-Wall-Fixer UI 0.83
+﻿/*
+Wall-Fixer UI 0.86
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.83"
-global wall_fixer_ui_tool_version = 0.928
+global wall_fixer_ui_file_version = "0.86"
+global wall_fixer_ui_tool_version = 0.933
 
 
 /*
@@ -314,16 +314,20 @@ function wallFixerSaveDockState =
 
 /*
 Returns the compact label for the display units currently shown by 3ds Max.
-Metric, US, Generic and Custom display modes are supported.
+Custom display mode uses its physical CustomUnit suffix instead of the word custom.
 */
 function wallFixerGetDisplayUnitLabel =
 (
     display_type = units.DisplayType
-    unit_label = "unit"
+    unit_label = "units"
 
 
     case display_type of
     (
+        #Generic:
+        (
+            unit_label = "units"
+        )
         #Metric:
         (
             case units.MetricType of
@@ -332,7 +336,7 @@ function wallFixerGetDisplayUnitLabel =
                 #Centimeters: unit_label = "cm"
                 #Meters: unit_label = "m"
                 #Kilometers: unit_label = "km"
-                default: unit_label = "unit"
+                default: unit_label = "units"
             )
         )
         #US:
@@ -345,17 +349,26 @@ function wallFixerGetDisplayUnitLabel =
                 #Dec_Ft: unit_label = "ft"
                 #Ft_Frac_In: unit_label = "ft/in"
                 #Ft_Dec_In: unit_label = "ft/in"
-                default: unit_label = "unit"
+                default: unit_label = "units"
             )
         )
         #Custom:
         (
-            unit_label = units.CustomName
-            if unit_label == "" then unit_label = "custom"
+            case units.CustomUnit of
+            (
+                #Millimeters: unit_label = "mm"
+                #Centimeters: unit_label = "cm"
+                #Meters: unit_label = "m"
+                #Kilometers: unit_label = "km"
+                #Inches: unit_label = "in"
+                #Feet: unit_label = "ft"
+                #Miles: unit_label = "mi"
+                default: unit_label = "units"
+            )
         )
         default:
         (
-            unit_label = "unit"
+            unit_label = "units"
         )
     )
 
@@ -1231,46 +1244,37 @@ rollout WallFixerPreProcessRollout "1 PRE-PROCESS & FIX GEOMETRY" width:310 heig
 EDGE FIXER OPTIONS contains the Straight Edge Fixer tuning controls.
 The controls are separated from the main EDGE FIXER workflow without changing geometry logic.
 */
-rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:112
+rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:82
 (
-    label level_settings_label "LEVEL SETTINGS" pos:[8,8] width:104 height:18
-    label level_tolerance_label "Level Tol:" pos:[8,32] width:58 height:18
-    spinner level_tolerance_spinner "" pos:[66,29] width:72 height:20 \
+    label level_settings_label "ROWS SETTINGS" pos:[8,8] width:104 height:18
+    label level_tolerance_label "Rows distance:" pos:[8,32] width:80 height:18
+    spinner level_tolerance_spinner "" pos:[90,29] width:40 height:20 \
         range:[0.000001,1000000.0,0.01] type:#worldUnits scale:0.001 \
-        tooltip:"Maximum world-axis deviation used for level detection and direction checks."
+        tooltip:"Maximum world-space distance used to detect and group horizontal edge rows."
+    label rows_distance_units_label "unit" pos:[132,32] width:30 height:18
 
 
-    label min_edges_label "Min Edges:" pos:[148,32] width:60 height:18
-    spinner min_level_edges_spinner "" pos:[210,29] width:62 height:20 \
+    label min_edges_label "Min Edges:" pos:[164,32] width:54 height:18
+    spinner min_level_edges_spinner "" pos:[220,29] width:30 height:20 \
         range:[1,100000,3] type:#integer scale:1 \
-        tooltip:"Minimum horizontal edge count needed to define a valid Z level."
+        tooltip:"Minimum horizontal edge count needed to define a valid edge row."
+    label min_edges_units_label "edges" pos:[252,32] width:32 height:18
 
 
-    label search_z_label "Search Z:" pos:[8,58] width:58 height:18
-    spinner search_in_z_spinner "" pos:[66,55] width:72 height:20 \
-        range:[0.0,1000000.0,10.0] type:#worldUnits scale:0.1 \
-        tooltip:"Maximum world-Z distance from a detected level."
-
-
-    checkbox straight_quiet_checkbox "Quiet" pos:[148,57] width:58 height:18 checked:false \
+    checkbox straight_quiet_checkbox "Quiet" pos:[8,57] width:58 height:18 checked:false \
         tooltip:"Suppress the Straight Edge Fixer final report dialog."
-
-
-    label edge_checks_label "EDGE CHECKS" pos:[8,86] width:82 height:18
-    label edge_angle_label "Angle:" pos:[148,86] width:42 height:18
-    spinner edge_angle_spinner "" pos:[192,83] width:80 height:20 \
-        range:[0.0,45.0,45.0] type:#float scale:1.0 \
-        tooltip:"Maximum allowed deviation from the requested horizontal or vertical direction. Edges above this angle are selected as errors; 45 degrees is the crossover."
 
 
     on WallFixerEdgeFixerOptionsRollout open do
     (
         local settings_data = StraightEdgeFixer.loadSettings()
+        local display_unit_label = wallFixerGetDisplayUnitLabel()
+
+
         level_tolerance_spinner.value = wallFixerReadIniFloat "Controls" "LevelTolerance" settings_data[1]
         min_level_edges_spinner.value = wallFixerReadIniInt "Controls" "MinLevelEdges" settings_data[2]
-        search_in_z_spinner.value = wallFixerReadIniFloat "Controls" "SearchInZ" settings_data[3]
-        edge_angle_spinner.value = wallFixerReadIniFloat "Controls" "EdgeAngle" settings_data[4]
-        straight_quiet_checkbox.checked = wallFixerReadIniBool "Controls" "StraightQuiet" settings_data[5]
+        straight_quiet_checkbox.checked = wallFixerReadIniBool "Controls" "StraightQuiet" settings_data[4]
+        rows_distance_units_label.text = display_unit_label
     )
 
 
@@ -1301,18 +1305,6 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:112
     )
 
 
-    on search_in_z_spinner changed control_value do
-    (
-        ::WallFixerRollout.saveStraightEdgeSettings()
-    )
-
-
-    on edge_angle_spinner changed control_value do
-    (
-        ::WallFixerRollout.saveStraightEdgeSettings()
-    )
-
-
     on straight_quiet_checkbox changed control_state do
     (
         ::WallFixerRollout.saveStraightEdgeSettings()
@@ -1326,13 +1318,21 @@ Straight Edge Fixer tuning controls are kept in the OPTIONS subrollout at the bo
 */
 rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
 (
-    groupBox edge_z_group "6. EDGE Z-LEVEL FIXING AND BORDER EDGES CHECK" pos:[4,8] width:302 height:150
+    groupBox edge_z_group "6. EDGE ROW FIXING AND BORDER EDGES CHECK" pos:[4,8] width:302 height:150
 
 
-    button check_horizontal_button "CHECK HORIZONTAL" pos:[18,30] width:127 height:34 \
-        tooltip:"LMB: select exactly horizontal edges at zero tolerance.\n\nRMB: select skewed horizontal edges from above 0° through Angle.\n\nCTRL+RMB: fix selected edges horizontal while preserving the wall-face direction."
-    button check_vertical_button "CHECK VERTICAL" pos:[155,30] width:127 height:34 \
+    button check_vertical_button "VERTICAL \\ SKEWED" pos:[8,30] width:112 height:34 \
         tooltip:"LMB: select exactly vertical edges at zero tolerance.\n\nRMB: select skewed vertical edges from above 0° through Angle.\n\nCTRL+RMB: fix selected edges to world vertical."
+
+
+    spinner edge_angle_spinner "" pos:[124,37] width:48 height:20 \
+        range:[0.1,45.0,45.0] type:#float scale:0.1 \
+        tooltip:"Skew angle limit in degrees.\n\nRMB: toggle between the spinner minimum and maximum."
+    label edge_angle_units_label "°" pos:[174,39] width:12 height:18
+
+
+    button check_horizontal_button "HORIZONTAL \\ SLOPED" pos:[190,30] width:112 height:34 \
+        tooltip:"LMB: select exactly horizontal edges at zero tolerance.\n\nRMB: select sloped horizontal edges from above 0° through Angle.\n\nCTRL+RMB: fix selected edges horizontal while preserving wall direction."
 
 
     button border_check_button "BORDER CHECK" pos:[18,70] width:264 height:30 \
@@ -1340,7 +1340,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
 
 
     button straight_edge_fixer_button "STRAIGHT EDGE FIXER" pos:[18,106] width:264 height:36 \
-        tooltip:"Detect repeated horizontal edge levels and align nearby horizontal edges to TOP, BOTTOM or CENTER target Z."
+        tooltip:"Detect repeated horizontal edge rows and align nearby horizontal edges to TOP, BOTTOM or CENTER target Z."
 
 
     groupBox check_result_group "8. CHECK RESULT" pos:[4,164] width:302 height:38
@@ -1356,8 +1356,8 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
     */
     function setOptionsLayout options_open =
     (
-        edge_fixer_options_subrollout.height = if options_open then (118 + wall_fixer_closed_rollout_height) else wall_fixer_closed_rollout_height
-        WallFixerEdgeFixerRollout.height = if options_open then (330 + wall_fixer_closed_rollout_height) else 236
+        edge_fixer_options_subrollout.height = if options_open then (88 + wall_fixer_closed_rollout_height) else wall_fixer_closed_rollout_height
+        WallFixerEdgeFixerRollout.height = if options_open then (300 + wall_fixer_closed_rollout_height) else 236
         -- return
     )
 
@@ -1366,11 +1366,62 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:236
     (
         try
         (
+            local settings_data = StraightEdgeFixer.loadSettings()
+            local saved_edge_angle = wallFixerReadIniFloat "Controls" "EdgeAngle" settings_data[3]
+
+
             addSubRollout edge_fixer_options_subrollout WallFixerEdgeFixerOptionsRollout rolledUp:saved_edge_options_rolled_up
+            edge_angle_spinner.value = amin 45.0 (amax 0.1 saved_edge_angle)
             setOptionsLayout (not saved_edge_options_rolled_up)
         )
         catch
         (
+        )
+    )
+
+
+    /*
+    Rounds the main EDGE FIXER Angle control to one decimal place and persists it.
+    The spinner remains a float because the supported range includes 0.1 degrees.
+    */
+    on edge_angle_spinner changed control_value do
+    (
+        local rounded_angle = (floor ((control_value * 10.0) + 0.5)) / 10.0
+        rounded_angle = amin 45.0 (amax 0.1 rounded_angle)
+
+
+        if (abs (edge_angle_spinner.value - rounded_angle)) > 0.00001 then
+        (
+            edge_angle_spinner.value = rounded_angle
+        )
+
+
+        ::WallFixerRollout.saveStraightEdgeSettings()
+    )
+
+
+    /*
+    Uses the spinner's native RMB-cancel notification as a range-endpoint toggle.
+    RMB switches min -> max; every other current value switches to min.
+    */
+    on edge_angle_spinner buttonUp canceled do
+    (
+        if canceled then
+        (
+            local angle_range = edge_angle_spinner.range
+
+
+            if edge_angle_spinner.value == angle_range.x then
+            (
+                edge_angle_spinner.value = angle_range.y
+            )
+            else
+            (
+                edge_angle_spinner.value = angle_range.x
+            )
+
+
+            ::WallFixerRollout.saveStraightEdgeSettings()
         )
     )
 
@@ -7154,6 +7205,38 @@ function testStraightEdgeResultNormalization =
 
 
 /*
+Verifies EDGE FIXER direction-control order and compact Angle spinner placement.
+The test checks Vertical left, Angle center, Horizontal right and the requested Angle range.
+*/
+function testEdgeFixerDirectionRow =
+(
+    local vertical_button = WallFixerEdgeFixerRollout.check_vertical_button
+    local angle_spinner = WallFixerEdgeFixerRollout.edge_angle_spinner
+    local horizontal_button = WallFixerEdgeFixerRollout.check_horizontal_button
+
+
+    local order_ok = (
+        (vertical_button.pos.x < angle_spinner.pos.x) and
+        (angle_spinner.pos.x < horizontal_button.pos.x)
+    )
+    local range_ok = (
+        ((abs (angle_spinner.range.x - 0.1)) < 0.00001) and
+        ((abs (angle_spinner.range.y - 45.0)) < 0.00001)
+    )
+    local size_ok = ((abs (angle_spinner.scale - 0.1)) < 0.00001)
+    local unit_ok = (WallFixerEdgeFixerRollout.edge_angle_units_label.text == "°")
+
+
+    local test_passed = order_ok and range_ok and size_ok and unit_ok
+    format "EDGE FIXER direction row test | order:% range:% size:% unit:% | result:%\n" order_ok range_ok size_ok unit_ok test_passed
+
+
+    test_passed
+    -- return
+)
+
+
+/*
 Verifies bottom-mounted EDGE FIXER OPTIONS sizing without changing the final layout.
 The test checks full parent-width slot sizing, fixed action positions and parent rollout height.
 */
@@ -7171,7 +7254,7 @@ function testEdgeFixerOptionsLayout =
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout true
-    expanded_ok = ((WallFixerEdgeFixerRollout.height == (330 + wall_fixer_closed_rollout_height)) and (slot_control.height == (118 + wall_fixer_closed_rollout_height)) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
+    expanded_ok = ((WallFixerEdgeFixerRollout.height == (300 + wall_fixer_closed_rollout_height)) and (slot_control.height == (88 + wall_fixer_closed_rollout_height)) and (WallFixerEdgeFixerRollout.edge_z_group.pos == [4,8]) and (WallFixerEdgeFixerRollout.check_result_group.pos == [4,164]))
 
 
     WallFixerEdgeFixerRollout.setOptionsLayout (original_rollout_height > 236)
@@ -8550,23 +8633,21 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Persists all controls imported from Straight Edge Fixer.
-    Geometry logic continues using its original settings store.
+    Persists active controls imported from Straight Edge Fixer.
+    SearchInZ is retired; both horizontal and vertical direction matching use Angle.
     */
     function saveStraightEdgeSettings =
     (
         setIniSetting wall_fixer_ui_ini_path "Controls" "LevelTolerance" (WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value as string)
         setIniSetting wall_fixer_ui_ini_path "Controls" "MinLevelEdges" (WallFixerEdgeFixerOptionsRollout.min_level_edges_spinner.value as string)
-        setIniSetting wall_fixer_ui_ini_path "Controls" "SearchInZ" (WallFixerEdgeFixerOptionsRollout.search_in_z_spinner.value as string)
-        setIniSetting wall_fixer_ui_ini_path "Controls" "EdgeAngle" (WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value as string)
+        setIniSetting wall_fixer_ui_ini_path "Controls" "EdgeAngle" (WallFixerEdgeFixerRollout.edge_angle_spinner.value as string)
         setIniSetting wall_fixer_ui_ini_path "Controls" "StraightQuiet" (if WallFixerEdgeFixerOptionsRollout.straight_quiet_checkbox.checked then "1" else "0")
 
 
         StraightEdgeFixer.saveSettings \
             WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
             WallFixerEdgeFixerOptionsRollout.min_level_edges_spinner.value \
-            WallFixerEdgeFixerOptionsRollout.search_in_z_spinner.value \
-            WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value \
+            WallFixerEdgeFixerRollout.edge_angle_spinner.value \
             WallFixerEdgeFixerOptionsRollout.straight_quiet_checkbox.checked
         -- return
     )
@@ -11645,7 +11726,7 @@ result_groups
             operation_result = StraightEdgeFixer.checkEdgeDirection \
                 direction_type \
                 WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
-                WallFixerEdgeFixerOptionsRollout.edge_angle_spinner.value \
+                WallFixerEdgeFixerRollout.edge_angle_spinner.value \
                 selection_mode:selection_mode
         )
 
@@ -11708,13 +11789,13 @@ result_groups
     (
         saveStraightEdgeSettings()
         setProgress 0
-        setStatus #message "Fixing edge Z levels..."
+        setStatus #message "Fixing horizontal edge rows by Angle..."
 
 
         completed = StraightEdgeFixer.alignSelection \
             level_tolerance:WallFixerEdgeFixerOptionsRollout.level_tolerance_spinner.value \
             min_level_edges:WallFixerEdgeFixerOptionsRollout.min_level_edges_spinner.value \
-            search_in_z:WallFixerEdgeFixerOptionsRollout.search_in_z_spinner.value \
+            angle_threshold:WallFixerEdgeFixerRollout.edge_angle_spinner.value \
             quiet_mode:WallFixerEdgeFixerOptionsRollout.straight_quiet_checkbox.checked
 
 
@@ -11724,11 +11805,11 @@ result_groups
 
         if completed then
         (
-            setStatus #success "Edge Z-level fixing completed."
+            setStatus #success "Horizontal edge-row fixing completed."
         )
         else
         (
-            setStatus #error "Edge Z-level fixing failed."
+            setStatus #error "Horizontal edge-row fixing failed."
         )
 
 
