@@ -1,4 +1,4 @@
-## NEXT
+﻿## NEXT
 
 
 
@@ -9,12 +9,6 @@
 UI: EDGE FIXER > Options: remove the "Edges" label after the spinner and remove the "ROWS SETTINGS" label.
 
 UI: progress bar: make it 4 px high and place it at the very top of the UI (pos.y = 0); keep it always visible and do not toggle its visibility; reflow/sort the surrounding status labels and message layout after this change.
-
-UI: message/status background: keep the background dark, matching the rollout dark background color.
-
-UI: SLICE WALLS > .NET button: make the button font/text color pink.
-
-UI BUG: top dialog message/status: remove the duplicate so only one message/status display exists at the top of the dialog.
 
 ## DONE TODAY
 

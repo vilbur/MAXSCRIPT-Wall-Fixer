@@ -1,5 +1,5 @@
 /*
-Wall-Fixer UI 0.952
+Wall-Fixer UI 0.949
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.952"
-global wall_fixer_ui_tool_version = 1.0009
+global wall_fixer_ui_file_version = "0.949"
+global wall_fixer_ui_tool_version = 1.0033
 
 
 /*
@@ -1312,7 +1312,7 @@ rollout WallFixerPreProcessRollout "1 PRE-PROCESS & FIX GEOMETRY" width:310 heig
             duplicate_verts_button \
             "2. VERTEX CHECK / WELD" \
             numbered_button_tooltip \
-            "LMB: detect duplicated vertices from evaluated geometry and store them in SELECT DUPLICATED VERTICES.\n\nRMB: weld the stored vertices using WELD DISTANCE and rename that modifier DELETED DUPLICATED VERTICES."
+            "LMB: find unwelded/near-coincident vertices using Options > WELD DISTANCE as the maximum pair distance. Open border edges are also selected when candidates are found.\n\nRMB: weld/fix duplicated vertices using the same WELD DISTANCE."
 
         duplicate_verts_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
 
@@ -1339,7 +1339,14 @@ rollout WallFixerPreProcessRollout "1 PRE-PROCESS & FIX GEOMETRY" width:310 heig
         )
         else if mouse_button == "Right" then
         (
-            ::WallFixerRollout.runDuplicateVerts fix_vertices:true
+            if subObjectLevel == 1 then
+            (
+                ::WallFixerRollout.runSelectedVertexWeld()
+            )
+            else
+            (
+                ::WallFixerRollout.runDuplicateVerts fix_vertices:true
+            )
         )
     )
 
@@ -1810,10 +1817,10 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:348
         )
 
 
-        wallFixerSetupNumberedDarkButton degenerated_faces_button "SELECT AND REMOVE DEGENERATED FACES" numbered_button_tooltip "LMB: Find degenerated faces and store them in SELECT DEGENERATED FACES at Face level.\n\nRMB: Delete the stored faces and rename that modifier DELETED DEGENERATED FACES."
-        wallFixerSetupNumberedDarkButton two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" numbered_button_tooltip "LMB: Find vertices with exactly two visible topology edges and store them in SELECT TWO-EDGE VERTS.\n\nRMB: Remove the stored vertices and rename that modifier DELETED TWO-EDGE VERTS."
-        wallFixerSetupNumberedDarkButton duplicated_vertices_button "10. DUPLICATED VERTICES" numbered_button_tooltip "LMB: Store duplicate-position vertices in SELECT DUPLICATED VERTICES.\n\nRMB: Weld the stored vertices and rename that modifier DELETED DUPLICATED VERTICES."
-        wallFixerSetupNumberedDarkButton redundant_loops_button "11. REMOVE REDUNDANT LOOPS" numbered_button_tooltip "LMB: Store detected redundant loop edges in SELECT REDUNDANT LOOPS.\n\nRMB: Remove the stored edges and rename that modifier DELETED REDUNDANT LOOPS."
+        wallFixerSetupNumberedDarkButton degenerated_faces_button "SELECT AND REMOVE DEGENERATED FACES" numbered_button_tooltip "LMB: Find degenerated faces and store them in SELECT DEGENERATED FACES at Face level.\n\nRMB: Delete the stored degenerated faces and rename that modifier DEGENERATED FACES DELETE."
+        wallFixerSetupNumberedDarkButton two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" numbered_button_tooltip "LMB: select every vertex with exactly two visible topology edges.\n\nRMB: run the native Vertex Remove command on the current selection."
+        wallFixerSetupNumberedDarkButton duplicated_vertices_button "10. DUPLICATED VERTICES" numbered_button_tooltip "LMB: select duplicate-position vertices at 0.01 tolerance.\n\nRMB: run the current duplicate-vertex fix at 0.01 tolerance."
+        wallFixerSetupNumberedDarkButton redundant_loops_button "11. REMOVE REDUNDANT LOOPS" numbered_button_tooltip "LMB: Select redundant loop edges.\n\nRMB: Remove selected edges. If no edges are selected, remove all detected redundant loop edges."
         wallFixerSetupNumberedDarkButton repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" numbered_button_tooltip "Reserved for the new missing-loop completion tool." enabled_state:false
         wallFixerSetupNumberedDarkButton post_fix_ngons_button "13. FIX N-GONS" numbered_button_tooltip "Run the current Wall-Fixer Fix N-gons function again after slicing cleanup."
         wallFixerSetupNumberedDarkButton attach_walls_button "14. ATTACH WALLS TO OBJECTS" numbered_button_tooltip "LMB: attach selected walls into the first selected object, then weld all vertices using Options > WELD DISTANCE."
@@ -1848,7 +1855,9 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:348
         )
         else if mouse_button == "Right" then
         (
-            ::WallFixerRollout.runRemoveTwoEdgeVerts()
+            macros.run "Ribbon - Modeling" "VertexRemove"
+            ::WallFixerRollout.cleanupRedundantVerticesAfterGeometryChange (selection as array)
+            ::WallFixerRollout.setStatus #success "Vertex Remove command executed on the current selection."
         )
     )
 
@@ -1928,7 +1937,7 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:156
 
 
     button align_camera_button "Align Camera" pos:[8,44] width:143 height:30 \
-        tooltip:"LMB: Align the active viewport perpendicular to selected wall faces. If no faces are selected, use the dominant wall-face normal. Switch to orthographic User view and zoom to the selection.\n\nRMB: Rotate the aligned view 90° around world Z for a wall side view."
+        tooltip:"LMB: Align the active viewport perpendicular to selected wall faces. If no faces are selected, use the dominant wall-face normal. Switch to orthographic User view and zoom to the selection."
 
 
     button border_corners_button "90° Corners" pos:[159,44] width:143 height:30 \
@@ -1968,12 +1977,6 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:156
     on align_camera_button pressed do
     (
         ::WallFixerRollout.runAlignCameraToWallFaces()
-    )
-
-
-    on align_camera_button rightclick do
-    (
-        ::WallFixerRollout.runAlignCameraSideView()
     )
 
 
@@ -3616,46 +3619,10 @@ function getSelectedWallFaceAlignmentData =
 )
 
 
-/* Builds the horizontal view normal used by Helpers > Align Camera.
-   Side view rotates the wall-facing direction 90 degrees around world Z.
-*/
-function getWallCameraViewNormal face_normal side_view:false =
-(
-    reference_up = [0.0, 0.0, 1.0]
-    horizontal_normal = [face_normal.x, face_normal.y, 0.0]
-
-
-    if (length horizontal_normal) > 0.0000001 then
-    (
-        view_normal = normalize horizontal_normal
-    )
-    else
-    (
-        view_normal = face_normal
-    )
-
-
-    if side_view then
-    (
-        side_normal = cross reference_up view_normal
-
-
-        if (length side_normal) > 0.0000001 then
-        (
-            view_normal = normalize side_normal
-        )
-    )
-
-
-    view_normal
-    -- return
-)
-
-
 /* Aligns the active viewport perpendicular to selected wall faces through a temporary orthographic camera.
-   Optional side view rotates the wall-facing direction 90 degrees around world Z before building the camera.
+   The camera view is converted to an orthographic User view, deleted, then Zoom Extents Selected frames the selection.
 */
-function alignViewportToSelectedWallFaces side_view:false =
+function alignViewportToSelectedWallFaces =
 (
     alignment_data = getSelectedWallFaceAlignmentData()
     temp_camera = undefined
@@ -3674,7 +3641,19 @@ function alignViewportToSelectedWallFaces side_view:false =
         face_count = alignment_data[3]
         alignment_mode = alignment_data[4]
         reference_up = [0.0, 0.0, 1.0]
-        view_normal = getWallCameraViewNormal face_normal side_view:side_view
+        horizontal_normal = [face_normal.x, face_normal.y, 0.0]
+
+
+        if (length horizontal_normal) > 0.0000001 then
+        (
+            view_normal = normalize horizontal_normal
+        )
+        else
+        (
+            view_normal = face_normal
+        )
+
+
         right_axis = cross reference_up view_normal
 
 
@@ -3736,16 +3715,13 @@ function alignViewportToSelectedWallFaces side_view:false =
 
         if operation_success then
         (
-            view_mode_text = if side_view then "side view 90° from" else "view aligned to"
-
-
             if alignment_mode == #selected then
             (
-                WallFixer.last_slice_report = "Align Camera: User " + view_mode_text + " " + (face_count as string) + " selected wall face(s) and zoomed to selection."
+                WallFixer.last_slice_report = "Align Camera: User view aligned to " + (face_count as string) + " selected wall face(s) and zoomed to selection."
             )
             else
             (
-                WallFixer.last_slice_report = "Align Camera: no faces selected; User " + view_mode_text + " the dominant normal from " + (face_count as string) + " wall face(s) and zoomed to selection."
+                WallFixer.last_slice_report = "Align Camera: no faces selected; User view aligned to the dominant normal from " + (face_count as string) + " wall face(s) and zoomed to selection."
             )
         )
         else
@@ -7704,25 +7680,6 @@ function testWallFaceForceModifier =
 Verifies compact/expanded Get Outer Walls OPTIONS sizing without changing the final layout.
 The test checks full parent-width slot sizing plus collapsed and expanded heights.
 */
-/* Verifies Helpers > Align Camera side view rotates the wall-facing normal by 90 degrees around world Z.
-   The test uses pure vector math and does not change the active viewport.
-*/
-function testAlignCameraSideView =
-(
-    front_normal = getWallCameraViewNormal [0.0, 1.0, 0.0]
-    side_normal = getWallCameraViewNormal [0.0, 1.0, 0.0] side_view:true
-    perpendicular = abs (dot front_normal side_normal) < 0.000001
-    horizontal = abs side_normal.z < 0.000001
-    unit_length = abs ((length side_normal) - 1.0) < 0.000001
-    test_passed = perpendicular and horizontal and unit_length
-
-
-    format "Align Camera side-view test: %\n" test_passed
-    test_passed
-    -- return
-)
-
-
 function testWallFaceOptionsLayout =
 (
     local slot_control = wallFaceClassifierRollout.wall_face_options_subrollout
@@ -7999,27 +7956,18 @@ function testPostProcessDegeneratedFacesControl =
 
 
 /*
-Tests the project-wide SELECT / DELETED modifier naming convention without changing scene geometry.
-All four LMB-select/RMB-delete controls must resolve to their canonical dedicated modifier names.
+Tests POST-PROCESS redundant-loop RMB routing without changing scene geometry.
+Selected edges must win over automatic redundant-loop cleanup; an empty selection must use all redundant loops.
 */
 function testPostProcessRedundantLoopRouting =
 (
-    function_labels = #("DEGENERATED FACES", "DUPLICATED VERTICES", "TWO-EDGE VERTS", "REDUNDANT LOOPS")
-    passed = true
+    selected_mode = WallFixer.getRedundantLoopRemoveMode 3
+    empty_mode = WallFixer.getRedundantLoopRemoveMode 0
+    passed = (selected_mode == #selectedEdges) and (empty_mode == #allRedundant)
 
-    for function_label in function_labels do
-    (
-        select_name = WallFixer.getSelectDeleteModifierName function_label
-        deleted_name = WallFixer.getSelectDeleteModifierName function_label deleted:true
 
-        passed = passed and (findString select_name "SELECT " == 1)
-        passed = passed and (findString deleted_name "DELETED " == 1)
-    )
+    format "POST-PROCESS redundant-loop routing | selected:% | empty:% | passed:%\n" selected_mode empty_mode passed
 
-    passed = passed and ((WallFixer.getSelectDeleteModifierName "REDUNDANT LOOPS") == "SELECT REDUNDANT LOOPS")
-    passed = passed and ((WallFixer.getSelectDeleteModifierName "REDUNDANT LOOPS" deleted:true) == "DELETED REDUNDANT LOOPS")
-
-    format "POST-PROCESS select/delete naming | passed:%\n" passed
 
     passed
     -- return
@@ -9222,33 +9170,6 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Runs Helpers > Align Camera RMB as a 90-degree side view around world Z.
-    The same selected-face or dominant-wall alignment source is used as LMB.
-    */
-    function runAlignCameraSideView =
-    (
-        setProgress 0
-        setStatus #message "Aligning User side view 90° from wall face normal..."
-        operation_success = alignViewportToSelectedWallFaces side_view:true
-        setProgress 100
-
-
-        if operation_success then
-        (
-            setStatus #success WallFixer.last_slice_report
-        )
-        else
-        (
-            setStatus #failed WallFixer.last_slice_report
-        )
-
-
-        operation_success
-        -- return
-    )
-
-
-    /*
     Centers the pivot of every selected scene node using MaxScript CenterPivot.
     Geometry and modifier stacks remain unchanged.
     */
@@ -9887,8 +9808,8 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Runs the project-standard duplicated-vertex SELECT / DELETED modifier workflow.
-    LMB stores evaluated duplicate vertices in SELECT DUPLICATED VERTICES; RMB welds that stored selection and renames the modifier DELETED DUPLICATED VERTICES.
+    Runs the duplicate-vertex check/fix using Options > WELD DISTANCE.
+    LMB finds duplicate vertices; RMB selects the same candidates and welds them with weldSelectedEPolyVerts.
     */
     function runDuplicateVerts fix_vertices:false =
     (
@@ -9897,151 +9818,202 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         saved_weld_threshold = weld_threshold
         saved_double_vert_threshold = weld_threshold
         setIniSetting wall_fixer_ui_ini_path "Controls" "WeldThreshold" (weld_threshold as string)
+        setStatus #message (if fix_vertices then "Welding duplicated vertices..." else "Checking unwelded vertices...")
 
-        if not fix_vertices then
+
+        conversion_nodes = selection as array
+        conversion_failed_count = 0
+
+
+        for scene_node in conversion_nodes do
         (
-            setStatus #message "Selecting duplicated vertices..."
-            selection_result = WallFixer.selectDuplicatedVerticesSelection position_threshold:weld_threshold
-            completed = selection_result[1]
-            selected_count = selection_result[2]
-            setProgress 100
+            if isValidNode scene_node and superClassOf scene_node == GeometryClass then
+            (
+                wallFixerSetNodeCageOff scene_node
 
-            if completed and selected_count > 0 then
-            (
-                setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Duplicated vertices selected.")
-            )
-            else if completed then
-            (
-                setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No duplicated vertices found.")
-            )
-            else
-            (
-                setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Duplicated-vertex selection failed.")
-            )
+                if classOf scene_node.baseObject != Editable_Poly then
+                (
+                    conversion_success = true
 
-            completed
+
+                    try
+                    (
+                        convertToPoly scene_node
+                        wallFixerSetNodeCageOff scene_node
+                    )
+                    catch
+                    (
+                        conversion_success = false
+                    )
+
+
+                    if (not conversion_success) or (classOf scene_node.baseObject != Editable_Poly) then
+                    (
+                        conversion_failed_count += 1
+                    )
+                )
+            )
+        )
+
+
+        if conversion_failed_count > 0 then
+        (
+            setStatus #error ((conversion_failed_count as string) + " selected object(s) could not be converted to Editable Poly.")
+            false
         )
         else
         (
-            setStatus #message "Welding stored duplicated vertices..."
-            selected_nodes = selection as array
+            completed = WallFixer.selectDoubleVerts position_threshold:weld_threshold
 
-            if selected_nodes.count == 0 then
+
+            if completed and fix_vertices then
             (
-                setProgress 100
-                setStatus #warning "Select at least one geometry object."
-                false
-            )
-            else
-            (
-                total_welded = 0
-                failed_count = 0
-                processed_count = 0
-                display_node = undefined
-                display_modifier = undefined
-                report_text = ""
-                deleted_name = WallFixer.getSelectDeleteModifierName "DUPLICATED VERTICES" deleted:true
+                selected_nodes = selection as array
+                removed_count = 0
+                weld_failed_count = 0
+
 
                 for node in selected_nodes do
                 (
-                    if node != undefined and isValidNode node and superclassof node == GeometryClass then
+                    if isValidNode node and classOf node.baseObject == Editable_Poly then
                     (
-                        prepare_result = WallFixer.prepareDuplicatedVerticesDeleteOnNode node position_threshold:weld_threshold
+                        weld_result = weldSelectedEPolyVerts node weld_threshold
 
-                        if prepare_result[1] then
+
+                        if weld_result == false then
                         (
-                            processed_count += 1
-                            selection_modifier = prepare_result[4]
-                            valid_selection = prepare_result[5]
-                            node_failed = false
-                            welded_count = 0
-
-                            if selection_modifier == undefined then
-                            (
-                                node_failed = true
-                                report_text += node.name + ": FAILED - SELECT DUPLICATED VERTICES modifier unavailable.\n"
-                            )
-                            else
-                            (
-                                display_result = WallFixer.activateNamedEditPolySelection node selection_modifier #Vertex valid_selection
-                                if not display_result[1] then
-                                (
-                                    node_failed = true
-                                    report_text += node.name + ": FAILED - stored duplicated-vertex selection could not be restored.\n"
-                                )
-                                else if valid_selection.numberSet > 0 then
-                                (
-                                    welded_count = weldSelectedEPolyVerts node weld_threshold editPolyModifier:selection_modifier
-                                    if welded_count == false then
-                                    (
-                                        node_failed = true
-                                        report_text += node.name + ": FAILED - duplicated vertices could not be welded.\n"
-                                    )
-                                    else
-                                    (
-                                        total_welded += welded_count
-                                    )
-                                )
-
-                                if not node_failed then
-                                (
-                                    selection_modifier.name = deleted_name
-                                    selection_modifier.showCage = off
-                                    update node
-                                    report_text += node.name + ": welded " + (welded_count as string) + " vertex/vertices.\n"
-
-                                    if display_modifier == undefined then
-                                    (
-                                        display_node = node
-                                        display_modifier = selection_modifier
-                                    )
-                                )
-                            )
-
-                            if node_failed then failed_count += 1
+                            weld_failed_count += 1
                         )
                         else
                         (
-                            failed_count += 1
-                            report_text += node.name + ": FAILED - " + prepare_result[3] + ".\n"
+                            removed_count += weld_result
                         )
                     )
                 )
 
-                if display_modifier != undefined then
-                (
-                    try
-                    (
-                        select display_node
-                        max modify mode
-                        display_modifier.showCage = off
-                        display_modifier.useStackSelection = false
-                        modPanel.setCurrentObject display_modifier
-                        display_modifier.SetEPolySelLevel #Vertex
-                        subObjectLevel = 1
-                        completeRedraw()
-                    )
-                    catch()
-                )
 
-                setProgress 100
-
-                if failed_count > 0 then
+                if weld_failed_count > 0 then
                 (
-                    setStatus #error ("Duplicated-vertex weld completed with failures.\n" + report_text)
-                    false
-                )
-                else if processed_count == 0 then
-                (
-                    setStatus #warning "No geometry objects were processed."
-                    false
+                    completed = false
+                    setStatus #error ((weld_failed_count as string) + " object(s) could not be welded.")
                 )
                 else
                 (
-                    setStatus #success ("Duplicated-vertex delete complete. Vertices welded: " + (total_welded as string) + ".\n" + report_text)
-                    true
+                    WallFixer.selectDoubleVerts position_threshold:weld_threshold
+                    remaining_unweld_verts = 0
+
+
+                    for node in selected_nodes do
+                    (
+                        if isValidNode node and classOf node.baseObject == Editable_Poly then
+                        (
+                            selected_verts = polyOp.getVertSelection node.baseObject
+                            remaining_unweld_verts += selected_verts.numberSet
+                        )
+                    )
+
+
+                    if remaining_unweld_verts > 0 then
+                    (
+                        setStatus #warning ((removed_count as string) + " vertices welded; unresolved vertices remain selected.")
+                    )
+                    else if removed_count > 0 then
+                    (
+                        try
+                        (
+                            subObjectLevel = 0
+                        )
+                        catch
+                        (
+                        )
+
+
+                        setStatus #success ((removed_count as string) + " vertices welded.")
+                    )
+                    else
+                    (
+                        try
+                        (
+                            subObjectLevel = 0
+                        )
+                        catch
+                        (
+                        )
+
+
+                        setStatus #success "No vertices needed welding."
+                    )
                 )
             )
+
+
+            if completed and fix_vertices then cleanupRedundantVerticesAfterGeometryChange (selection as array)
+            setProgress 100
+
+
+            if completed and not fix_vertices then
+            (
+                selected_nodes = selection as array
+                total_unweld_verts = 0
+
+
+                for node in selected_nodes do
+                (
+                    if isValidNode node and classOf node.baseObject == Editable_Poly then
+                    (
+                        base_obj = node.baseObject
+                        selected_verts = polyop.getVertSelection base_obj
+                        total_unweld_verts += selected_verts.numberSet
+
+
+                        if selected_verts.numberSet > 0 then
+                        (
+                            open_edges = polyop.getOpenEdges base_obj
+                            polyop.setEdgeSelection base_obj open_edges
+                            update node
+                        )
+                    )
+                )
+
+
+                if total_unweld_verts > 0 then
+                (
+                    try
+                    (
+                        max modify mode
+                        subObjectLevel = 1
+                    )
+                    catch
+                    (
+                    )
+
+
+                    setStatus #warning "Unweld verts selected"
+                )
+                else
+                (
+                    try
+                    (
+                        subObjectLevel = 0
+                    )
+                    catch
+                    (
+                    )
+
+
+                    setStatus #success "All vertices are welded."
+                )
+            )
+            else if not completed then
+            (
+                if fix_vertices == false then
+                (
+                    setStatus #error "Vertex check operation could not be completed."
+                )
+            )
+
+
+            completed
         )
         -- return
     )
@@ -12694,8 +12666,8 @@ result_groups
 
 
     /*
-    Runs the two-visible-edge vertex finder and stores the result in SELECT TWO-EDGE VERTS.
-    RMB uses the same dedicated modifier and never consumes an unrelated vertex selection.
+    Reuses the existing straight two-visible-edge vertex finder.
+    Removal remains the native Vertex Remove RMB action on the workflow button.
     */
     function runFindTwoEdgeVerts =
     (
@@ -12714,31 +12686,6 @@ result_groups
             setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No removable two-edge vertices were found.")
         )
 
-
-        completed
-        -- return
-    )
-
-
-    /*
-    Removes the stored SELECT TWO-EDGE VERTS selection and leaves the committed modifier named DELETED TWO-EDGE VERTS.
-    RMB creates the SELECT modifier through the normal snapshot-based finder when it does not already exist.
-    */
-    function runRemoveTwoEdgeVerts =
-    (
-        setProgress 0
-        setStatus #message "Removing stored two-edge vertices..."
-        completed = WallFixer.removeSelectedTwoEdgeVerts angle_threshold:2.0
-        setProgress 100
-
-        if completed then
-        (
-            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Two-edge vertices removed.")
-        )
-        else
-        (
-            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Two-edge vertex removal failed.")
-        )
 
         completed
         -- return
@@ -13181,36 +13128,7 @@ result_groups
         )
         else
         (
-            failed_nodes = if isProperty WallFixer #last_slice_failed_nodes then WallFixer.last_slice_failed_nodes else #()
-            failure_summary = if failed_nodes.count > 0 then \
-                ("Slice selected walls completed with " + (failed_nodes.count as string) + " failed object(s). Failed objects are selected.") \
-                else \
-                (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Slice selected walls stopped.")
-
-            setProgress 100
-            setStatus #failed failure_summary
-
-            failure_message = failure_summary
-
-            if failed_nodes.count > 0 then
-            (
-                failure_message += "\n\nFAILED OBJECTS:"
-
-                for failed_node in failed_nodes do
-                (
-                    if failed_node != undefined and isValidNode failed_node then
-                    (
-                        failure_message += "\n" + failed_node.name
-                    )
-                )
-            )
-
-            if WallFixer.last_slice_report != "" then
-            (
-                failure_message += "\n\n" + WallFixer.last_slice_report
-            )
-
-            messageBox failure_message title:"Wall-Fixer - Slice Selected Walls"
+            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Slice selected walls stopped.")
         )
 
 
@@ -13319,30 +13237,29 @@ result_groups
 
 
     /*
-    Removes the stored SELECT REDUNDANT LOOPS edges and leaves the committed modifier named DELETED REDUNDANT LOOPS.
-    RMB creates the SELECT modifier through the same snapshot-based detector when it does not already exist.
+    Removes selected edges first; when no edges are selected, removes all detected redundant-loop edges.
+    Manual selected-edge removal does not run the broader redundant-vertex cleanup pass.
     */
     function runRemoveRedundantLoops =
     (
         setProgress 0
-        setStatus #message "Removing stored redundant-loop edges..."
-        removal_result = WallFixer.deleteSelectedRedundantLoopsSelection angle_threshold:0.1 debug_output:true
+        setStatus #message "Removing selected or redundant-loop edges..."
+        removal_result = WallFixer.removeSelectedOrRedundantLoopEdgesSelection angle_threshold:0.1 debug_output:true
         completed = removal_result[1]
-        removed_edge_count = removal_result[2]
+        remove_mode = removal_result[2]
+        if completed and remove_mode == #allRedundant then cleanupRedundantVerticesAfterGeometryChange (selection as array)
         setProgress 100
 
-        if completed and removed_edge_count > 0 then
+
+        if completed then
         (
-            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant loops removed.")
-        )
-        else if completed then
-        (
-            setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No stored redundant loops found to remove.")
+            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Edge removal completed.")
         )
         else
         (
-            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant-loop removal failed.")
+            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Edge removal failed.")
         )
+
 
         completed
         -- return

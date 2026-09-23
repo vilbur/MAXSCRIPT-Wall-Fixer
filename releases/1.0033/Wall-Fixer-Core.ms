@@ -1,5 +1,5 @@
 /*
-Wall-Fixer Core 0.61
+Wall-Fixer Core 0.57
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.61"
-global wall_fixer_core_tool_version = 1.0029
+global wall_fixer_core_file_version = "0.57"
+global wall_fixer_core_tool_version = 1.0033
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -77,7 +77,6 @@ struct WallFixer_v
     last_slice_error = undefined,
     last_slice_count = 0,
     last_slice_report = "",
-    last_slice_failed_nodes = #(),
     last_slice_elapsed_ms = 0,
     last_slice_processed_objects = 0,
     last_slice_processed_vertices = 0,
@@ -436,7 +435,7 @@ struct WallFixer_v
 
     /*
     Returns true only for Edit Poly modifiers owned by Wall-Fixer.
-    WMC, SELECT and DELETED prefixes are project-owned; exact legacy names remain recognized for older scene stacks.
+    New modifiers use the WMC prefix; exact legacy names remain recognized for older scene stacks.
     */
     function isWallFixerEditPolyModifier stack_modifier =
     (
@@ -445,8 +444,6 @@ struct WallFixer_v
 
         modifier_name = stack_modifier.name as string
         if findString modifier_name "WMC - " == 1 then return true
-        if findString modifier_name "SELECT " == 1 then return true
-        if findString modifier_name "DELETED " == 1 then return true
 
         legacy_names = #(
             "Cleanup LOOPS",
@@ -461,177 +458,6 @@ struct WallFixer_v
         (findItem legacy_names modifier_name) > 0
         -- return
     ),
-
-
-    /*
-    Builds the canonical modifier name for one LMB selection or RMB deletion function.
-    Function labels are normalized to uppercase while the SELECT / DELETED prefix remains fixed.
-    */
-    function getSelectDeleteModifierName function_name deleted:false =
-    (
-        prefix_text = if deleted then "DELETED " else "SELECT "
-        prefix_text + (toUpper (function_name as string))
-        -- return
-    ),
-
-
-    /*
-    Finds the highest exact named Edit Poly modifier without changing or removing any existing stack entry.
-    This is the shared no-duplicate lookup used by all SELECT / DELETED workflow controls.
-    */
-    function findNamedEditPolyModifier node modifier_name =
-    (
-        if node == undefined or not(isValidNode node) then return undefined
-
-        for stack_modifier in node.modifiers do
-        (
-            if classOf stack_modifier == Edit_Poly and stack_modifier.name == modifier_name then return stack_modifier
-        )
-
-        undefined
-        -- return
-    ),
-
-
-    /*
-    Creates one named pass-through Edit Poly only when an exact named copy does not already exist.
-    Existing named modifiers are always reused; cage display stays off and no duplicate SELECT modifier is added.
-    */
-    function ensureNamedEditPolyModifier node modifier_name selection_level =
-    (
-        if node == undefined or not(isValidNode node) then return undefined
-
-        stack_modifier = findNamedEditPolyModifier node modifier_name
-        created_modifier = stack_modifier == undefined
-
-        if created_modifier then
-        (
-            stack_modifier = Edit_Poly name:modifier_name
-            addModifier node stack_modifier
-            update node
-        )
-
-        preparation_failed = false
-
-        try
-        (
-            if created_modifier then stack_modifier.SetPrimaryNode node
-            stack_modifier.useStackSelection = false
-            stack_modifier.showCage = off
-            stack_modifier.SetEPolySelLevel selection_level
-            update node
-        )
-        catch
-        (
-            preparation_failed = true
-        )
-
-        if preparation_failed then
-        (
-            if created_modifier and stack_modifier != undefined then
-            (
-                try(deleteModifier node stack_modifier)catch()
-                update node
-            )
-
-            undefined
-        )
-        else
-        (
-            stack_modifier
-        )
-        -- return
-    ),
-
-
-    /*
-    Activates one named SELECT / DELETED Edit Poly and writes the requested component selection.
-    Returns #(success, actual_selection) after final viewport readback; cage display remains off.
-    */
-    function activateNamedEditPolySelection node stack_modifier selection_level component_selection =
-    (
-        if node == undefined or not(isValidNode node) then return #(false, #{})
-        if stack_modifier == undefined or classOf stack_modifier != Edit_Poly then return #(false, #{})
-
-        subobject_level = case selection_level of
-        (
-            #Vertex: 1
-            #Edge: 2
-            #Face: 4
-            default: 0
-        )
-
-        actual_selection = #{}
-        display_ok = false
-
-        try
-        (
-            select node
-            max modify mode
-            stack_modifier.useStackSelection = false
-            stack_modifier.showCage = off
-            modPanel.setCurrentObject stack_modifier
-            stack_modifier.SetEPolySelLevel selection_level
-            if subobject_level > 0 then subObjectLevel = subobject_level
-            stack_modifier.SetSelection selection_level component_selection node:node
-            update node
-            stack_modifier.RefreshScreen()
-            completeRedraw()
-
-            actual_selection = stack_modifier.GetSelection selection_level node:node
-            display_ok = \
-                (modPanel.getCurrentObject() == stack_modifier) and \
-                (actual_selection == component_selection)
-        )
-        catch
-        (
-            actual_selection = #{}
-            display_ok = false
-        )
-
-        #(display_ok, actual_selection)
-        -- return
-    ),
-
-    /*
-    Tests SELECT modifier reuse and cage-off enforcement on a temporary Editable Poly.
-    The second acquisition must return the same modifier and the temporary stack must contain exactly one SELECT TEST RULE entry.
-    */
-    function testSelectDeleteModifierReuse =
-    (
-        test_node = undefined
-        passed = false
-
-        try
-        (
-            test_node = box length:10.0 width:10.0 height:10.0
-            convertToPoly test_node
-
-            first_modifier = ensureNamedEditPolyModifier test_node "SELECT TEST RULE" #Vertex
-            second_modifier = ensureNamedEditPolyModifier test_node "SELECT TEST RULE" #Vertex
-            select_count = 0
-
-            for stack_modifier in test_node.modifiers do
-            (
-                if classOf stack_modifier == Edit_Poly and stack_modifier.name == "SELECT TEST RULE" then select_count += 1
-            )
-
-            cage_off = first_modifier != undefined and first_modifier.showCage == off
-            passed = first_modifier != undefined and first_modifier == second_modifier and select_count == 1 and cage_off
-        )
-        catch
-        (
-            passed = false
-        )
-
-        if test_node != undefined and isValidNode test_node then delete test_node
-
-        format "Select/Delete modifier reuse test | passed:%\n" passed
-
-        passed
-        -- return
-    ),
-
 
     /*
     Removes only Wall-Fixer-owned Edit Poly modifiers from one wall.
@@ -805,41 +631,6 @@ struct WallFixer_v
         -- return
     ),
 
-
-    /*
-    Returns whether Slice Walls should use the active component selection as its source filter.
-    Component filtering is supported only for one selected wall; multi-object batches process complete walls.
-    */
-    function shouldRestrictSliceToSelectedComponents object_count subobject_level =
-    (
-        object_count == 1 and subobject_level != undefined and subobject_level > 0
-        -- return
-    ),
-
-    /*
-    Activates one wall as the only selected object before its batch-slice preflight.
-    This prevents Edit Poly and sub-object context from one wall leaking into the next wall.
-    */
-    function activateBatchSliceNodeContext node =
-    (
-        if node == undefined or not(isValidNode node) then return false
-
-        try
-        (
-            if subObjectLevel != undefined and subObjectLevel > 0 then
-            (
-                subObjectLevel = 0
-            )
-        )
-        catch
-        (
-        )
-
-        select node
-
-        selection.count == 1 and selection[1] == node
-        -- return
-    ),
 
     /*
     Returns true when the requested slicing Edit Poly already owns the active Modify-panel context.
@@ -2366,30 +2157,10 @@ struct WallFixer_v
     ),
 
     /*
-    Returns true when an open-border vertex is a real border corner.
-    Only exactly two border edges continuing straight through the vertex count as a safe border split.
-    */
-    function isRedundantLoopBorderCorner node modifier vertex_index border_edges vertex_edges edge_vertices vertex_points border_corner_angle_threshold:0.1 =
-    (
-        if vertex_index < 1 or vertex_index > vertex_edges.count then return true
-
-        incident_edges = vertex_edges[vertex_index]
-        border_incident_edges = incident_edges * border_edges
-
-        if border_incident_edges.numberSet == 0 then return false
-        if border_incident_edges.numberSet != 2 then return true
-
-        not(areRedundantLoopEdgesStraightPairs node modifier vertex_index border_incident_edges edge_vertices vertex_points angle_threshold:border_corner_angle_threshold)
-        -- return
-    ),
-
-
-    /*
     Returns true when a redundant straight chain may terminate at one topology vertex.
-    Border endpoints are allowed only on a true straight border split; border corners are always protected.
-    Internal T-junctions may leave only straight-paired continuation edges.
+    Open borders must split one straight border segment; internal T-junctions must leave only straight-paired continuation edges.
     */
-    function isRedundantLoopEndpointTopology node modifier vertex_index chain_incident_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:2.0 border_corner_angle_threshold:0.1 =
+    function isRedundantLoopEndpointTopology node modifier vertex_index chain_incident_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:2.0 =
     (
         if vertex_index < 1 or vertex_index > vertex_edges.count then return false
         if chain_incident_edges.numberSet != 1 then return false
@@ -2399,7 +2170,8 @@ struct WallFixer_v
 
         if border_incident_edges.numberSet > 0 then
         (
-            if isRedundantLoopBorderCorner node modifier vertex_index border_edges vertex_edges edge_vertices vertex_points border_corner_angle_threshold:border_corner_angle_threshold then return false
+            if border_incident_edges.numberSet != 2 then return false
+            if not(areRedundantLoopEdgesStraightPairs node modifier vertex_index border_incident_edges edge_vertices vertex_points angle_threshold:straight_angle_threshold) then return false
 
             extra_edges = incident_edges - chain_incident_edges - border_incident_edges
             extra_edges.numberSet == 0
@@ -2418,7 +2190,7 @@ struct WallFixer_v
     Validates a completed straight redundant chain without changing topology.
     Endpoints may be open-border splits or straight T-junctions; internal transverse edges must continue straight and every incident face must stay planar.
     */
-    function validateRedundantLoopChain node modifier chain_edges chain_vertices start_vertex end_vertex border_edges vertex_edges vertex_faces edge_vertices vertex_points face_normals face_valid reference_normal angle_threshold:0.1 straight_angle_threshold:2.0 border_corner_angle_threshold:0.1 =
+    function validateRedundantLoopChain node modifier chain_edges chain_vertices start_vertex end_vertex border_edges vertex_edges vertex_faces edge_vertices vertex_points face_normals face_valid reference_normal angle_threshold:0.1 straight_angle_threshold:2.0 =
     (
         if chain_edges.numberSet == 0 then return #(false, "empty chain")
         if chain_vertices.count < 2 then return #(false, "chain has fewer than two vertices")
@@ -2438,7 +2210,7 @@ struct WallFixer_v
 
             if is_endpoint then
             (
-                if not(isRedundantLoopEndpointTopology node modifier vertex_index chain_incident_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:straight_angle_threshold border_corner_angle_threshold:border_corner_angle_threshold) then
+                if not(isRedundantLoopEndpointTopology node modifier vertex_index chain_incident_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:straight_angle_threshold) then
                 (
                     return #(false, "endpoint is not a straight border split or straight T-junction at vertex " + (vertex_index as string))
                 )
@@ -2477,7 +2249,7 @@ struct WallFixer_v
     Detects geometrically redundant straight internal loops on the current Edit Poly topology.
     Returns #(loop_records, all_redundant_edges); each loop record is #(edge_bitarray, start_vertex, end_vertex).
     */
-    function detectRedundantLoops node modifier angle_threshold:0.1 straight_angle_threshold:2.0 border_corner_angle_threshold:0.1 debug_output:false =
+    function detectRedundantLoops node modifier angle_threshold:0.1 straight_angle_threshold:2.0 debug_output:false =
     (
         loop_records = #()
         all_redundant_edges = #{}
@@ -2632,11 +2404,11 @@ struct WallFixer_v
                 start_chain_edges = #{}
                 start_chain_edges[start_edge] = true
 
-                if isRedundantLoopEndpointTopology node modifier start_edge_vertices[1] start_chain_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:straight_angle_threshold border_corner_angle_threshold:border_corner_angle_threshold then
+                if isRedundantLoopEndpointTopology node modifier start_edge_vertices[1] start_chain_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:straight_angle_threshold then
                 (
                     append possible_start_vertices start_edge_vertices[1]
                 )
-                if isRedundantLoopEndpointTopology node modifier start_edge_vertices[2] start_chain_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:straight_angle_threshold border_corner_angle_threshold:border_corner_angle_threshold then
+                if isRedundantLoopEndpointTopology node modifier start_edge_vertices[2] start_chain_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:straight_angle_threshold then
                 (
                     append possible_start_vertices start_edge_vertices[2]
                 )
@@ -2731,7 +2503,7 @@ struct WallFixer_v
                         (
                             first_edge_faces = edge_faces[start_edge]
                             reference_normal = face_normals[first_edge_faces[1]]
-                            validation_result = validateRedundantLoopChain node modifier chain_edges chain_vertices start_vertex current_vertex border_edges vertex_edges vertex_faces edge_vertices vertex_points face_normals face_valid reference_normal angle_threshold:angle_threshold straight_angle_threshold:straight_angle_threshold border_corner_angle_threshold:border_corner_angle_threshold
+                            validation_result = validateRedundantLoopChain node modifier chain_edges chain_vertices start_vertex current_vertex border_edges vertex_edges vertex_faces edge_vertices vertex_points face_normals face_valid reference_normal angle_threshold:angle_threshold straight_angle_threshold:straight_angle_threshold
                             if not validation_result[1] then rejected_reason = validation_result[2]
                         )
 
@@ -2965,28 +2737,39 @@ struct WallFixer_v
     ),
 
     /*
-    Returns the existing SELECT DEGENERATED FACES modifier without adding a duplicate.
-    The shared exact-name lookup is used even when the modifier is no longer the stack top.
+    Returns the existing top SELECT DEGENERATED FACES modifier when it can be safely reused.
+    Lower copies are not reused because modifiers above them may have changed evaluated Face IDs.
     */
     function getTopDegeneratedFaceSelectionModifier node =
     (
-        findNamedEditPolyModifier node (getSelectDeleteModifierName "DEGENERATED FACES")
+        if node == undefined or not(isValidNode node) then return undefined
+        if node.modifiers.count < 1 then return undefined
+
+        top_modifier = node.modifiers[1]
+        if classOf top_modifier == Edit_Poly and top_modifier.name == "SELECT DEGENERATED FACES" then top_modifier else undefined
         -- return
     ),
 
     /*
-    Finds the existing SELECT DEGENERATED FACES modifier used by RMB deletion.
-    Unrelated Edit Poly modifiers are never modified.
+    Finds the highest existing SELECT DEGENERATED FACES modifier on a node for RMB deletion.
+    The search is name-specific so unrelated Edit Poly modifiers are never modified.
     */
     function findDegeneratedFaceSelectionModifier node =
     (
-        findNamedEditPolyModifier node (getSelectDeleteModifierName "DEGENERATED FACES")
+        if node == undefined or not(isValidNode node) then return undefined
+
+        for modifier in node.modifiers do
+        (
+            if classOf modifier == Edit_Poly and modifier.name == "SELECT DEGENERATED FACES" then return modifier
+        )
+
+        undefined
         -- return
     ),
 
     /*
-    Detects degenerated faces on one node and stores exact evaluated Face IDs in exactly one SELECT DEGENERATED FACES modifier.
-    Modified geometry is preflighted from snapshotAsMesh; an existing exact SELECT modifier is reused and is never deleted/recreated.
+    Detects degenerated faces on one node and stores exact evaluated Face IDs in SELECT DEGENERATED FACES.
+    Modified or non-Editable-Poly nodes are preflighted on snapshotAsMesh; the real modifier stack is never collapsed.
     */
     function selectDegeneratedFacesOnNode node position_tolerance:0.000001 area_tolerance:0.00000001 debug_output:true =
     (
@@ -2994,24 +2777,17 @@ struct WallFixer_v
         if superclassof node != GeometryClass then return #(false, 0, "requires geometry", undefined, #{})
 
         selection_modifier = undefined
+        created_modifier = false
         operation_error = undefined
         degenerated_faces = #{}
         preflight_count = 0
-        snapshot_face_count = undefined
-        evaluated_mesh = undefined
-        select_name = getSelectDeleteModifierName "DEGENERATED FACES"
 
         try
         (
-            use_snapshot = node.modifiers.count > 0 or classOf node.baseObject != Editable_Poly
+            use_snapshot = classOf node.baseObject != Editable_Poly or node.modifiers.count > 0
 
             if use_snapshot then
             (
-                evaluated_mesh = snapshotAsMesh node
-                if evaluated_mesh == undefined then throw "could not create evaluated snapshot"
-                snapshot_face_count = getNumFaces evaluated_mesh
-                free evaluated_mesh
-                evaluated_mesh = undefined
                 preflight_count = countDegeneratedFacesSnapshot node position_tolerance:position_tolerance area_tolerance:area_tolerance
             )
             else
@@ -3020,45 +2796,58 @@ struct WallFixer_v
                 preflight_count = base_faces.numberSet
             )
 
-            selection_modifier = ensureNamedEditPolyModifier node select_name #Face
-            if selection_modifier == undefined then throw (select_name + " could not be created or reused")
+            if preflight_count == 0 then return #(true, 0, "", undefined, #{})
 
-            if snapshot_face_count != undefined then
+            selection_modifier = getTopDegeneratedFaceSelectionModifier node
+            if selection_modifier == undefined then
             (
-                live_face_count = selection_modifier.GetNumFaces node:node
-                if live_face_count < 1 and snapshot_face_count > 0 then
-                (
-                    throw "SELECT DEGENERATED FACES does not expose evaluated face topology"
-                )
+                selection_modifier = Edit_Poly name:"WMC - DEGENERATED FACE SCAN"
+                addModifier node selection_modifier
+                created_modifier = true
+                update node
             )
 
+            selection_modifier.useStackSelection = false
+            selection_modifier.showCage = off
+            selection_modifier.SetEPolySelLevel #Face
             selection_modifier.SetSelection #Face #{} node:node
 
-            if preflight_count > 0 then
+            degenerated_faces = detectDegeneratedFacesEditPoly node selection_modifier position_tolerance:position_tolerance area_tolerance:area_tolerance
+
+            if degenerated_faces.numberSet > 0 then
             (
-                degenerated_faces = detectDegeneratedFacesEditPoly node selection_modifier position_tolerance:position_tolerance area_tolerance:area_tolerance
+                selection_modifier.name = "SELECT DEGENERATED FACES"
+                selection_modifier.SetSelection #Face degenerated_faces node:node
+
+                stored_selection = selection_modifier.GetSelection #Face node:node
+                if stored_selection != degenerated_faces then
+                (
+                    throw ("SELECT DEGENERATED FACES could not store the detected faces. Requested:" + (degenerated_faces as string) + " actual:" + (stored_selection as string))
+                )
             )
-
-            selection_modifier.SetSelection #Face degenerated_faces node:node
-            stored_selection = selection_modifier.GetSelection #Face node:node
-
-            if stored_selection != degenerated_faces then
+            else
             (
-                throw ("SELECT DEGENERATED FACES could not store the detected faces. Requested:" + (degenerated_faces as string) + " actual:" + (stored_selection as string))
+                deleteModifier node selection_modifier
+                selection_modifier = undefined
+                created_modifier = false
+                update node
             )
-
-            selection_modifier.showCage = off
-            update node
 
             if debug_output and not batch_quiet then
             (
-                format "Wall-Fixer Degenerated Faces: node:% snapshotPreflight:% faces:% selection:% modifier:%\n" node.name use_snapshot degenerated_faces.numberSet degenerated_faces selection_modifier.name
+                format "Wall-Fixer Degenerated Faces: node:% snapshotPreflight:% faces:% selection:%\n" node.name use_snapshot degenerated_faces.numberSet degenerated_faces
             )
         )
         catch
         (
-            if evaluated_mesh != undefined then free evaluated_mesh
             operation_error = getCurrentException()
+
+            if selection_modifier != undefined and created_modifier then
+            (
+                try(deleteModifier node selection_modifier)catch()
+                selection_modifier = undefined
+            )
+
             update node
         )
 
@@ -3068,11 +2857,10 @@ struct WallFixer_v
         )
         else
         (
-            #(false, 0, operation_error as string, selection_modifier, #{})
+            #(false, 0, operation_error as string, undefined, #{})
         )
         -- return
     ),
-
 
     /*
     Activates SELECT DEGENERATED FACES in the Modify panel and persists its exact Face selection.
@@ -3163,7 +2951,7 @@ struct WallFixer_v
                     total_faces += selection_result[2]
                     report_text += node.name + ": degenerated faces " + (selection_result[2] as string) + ".\n"
 
-                    if display_modifier == undefined then
+                    if display_modifier == undefined and selection_result[2] > 0 then
                     (
                         display_node = node
                         display_modifier = selection_result[4]
@@ -3217,27 +3005,18 @@ struct WallFixer_v
     ),
 
     /*
-    Deletes only faces stored in SELECT DEGENERATED FACES that are still geometrically degenerated.
-    RMB reuses that modifier when present, creates it through the same snapshot detector when absent, then renames it DELETED DEGENERATED FACES.
+    Deletes only faces that are both selected in SELECT DEGENERATED FACES and still geometrically degenerated.
+    A successful delete is committed in that modifier and renames it to DEGENERATED FACES DELETE.
     */
     function deleteSelectedDegeneratedFacesOnNode node position_tolerance:0.000001 area_tolerance:0.00000001 debug_output:true =
     (
         if node == undefined or not(isValidNode node) then return #(false, 0, "invalid node", undefined)
 
         selection_modifier = findDegeneratedFaceSelectionModifier node
-
-        if selection_modifier == undefined then
-        (
-            select_result = selectDegeneratedFacesOnNode node position_tolerance:position_tolerance area_tolerance:area_tolerance debug_output:debug_output
-            if not select_result[1] then return #(false, 0, select_result[3], select_result[4])
-            selection_modifier = select_result[4]
-        )
-
-        if selection_modifier == undefined then return #(false, 0, "SELECT DEGENERATED FACES modifier unavailable", undefined)
+        if selection_modifier == undefined then return #(true, 0, "no SELECT DEGENERATED FACES modifier", undefined)
 
         operation_error = undefined
         deleted_count = 0
-        deleted_name = getSelectDeleteModifierName "DEGENERATED FACES" deleted:true
 
         try
         (
@@ -3246,6 +3025,8 @@ struct WallFixer_v
 
             current_degenerated = detectDegeneratedFacesEditPoly node selection_modifier position_tolerance:position_tolerance area_tolerance:area_tolerance
             faces_to_delete = stored_selection * current_degenerated
+
+            if faces_to_delete.numberSet == 0 then return #(true, 0, "no selected degenerated faces", selection_modifier)
 
             select node
             max modify mode
@@ -3259,18 +3040,13 @@ struct WallFixer_v
             verified_selection = selection_modifier.GetSelection #Face node:node
             if verified_selection != faces_to_delete then
             (
-                throw ("DELETED DEGENERATED FACES selection mismatch. Requested:" + (faces_to_delete as string) + " actual:" + (verified_selection as string))
+                throw ("DEGENERATED FACES DELETE selection mismatch. Requested:" + (faces_to_delete as string) + " actual:" + (verified_selection as string))
             )
 
-            if faces_to_delete.numberSet > 0 then
-            (
-                deleted_count = faces_to_delete.numberSet
-                selection_modifier.SetOperation #DeleteFace
-                selection_modifier.Commit()
-                update node
-            )
-
-            selection_modifier.name = deleted_name
+            deleted_count = faces_to_delete.numberSet
+            selection_modifier.SetOperation #DeleteFace
+            selection_modifier.Commit()
+            selection_modifier.name = "DEGENERATED FACES DELETE"
             selection_modifier.showCage = off
             update node
             completeRedraw()
@@ -3297,10 +3073,9 @@ struct WallFixer_v
         -- return
     ),
 
-
     /*
-    Deletes degenerated faces through the project-standard SELECT / DELETED modifier workflow on selected objects.
-    Existing SELECT DEGENERATED FACES modifiers are reused; RMB creates the dedicated selector first only when it is missing.
+    Deletes stored degenerated-face selections on selected objects without running a new RMB detection pass.
+    Only exact SELECT DEGENERATED FACES modifiers participate.
     */
     function deleteSelectedDegeneratedFacesSelection position_tolerance:0.000001 area_tolerance:0.00000001 debug_output:true =
     (
@@ -3423,8 +3198,8 @@ struct WallFixer_v
     ),
 
     /*
-    Tests redundant-loop endpoint rules, including strict open-border corner protection.
-    Internal T-junctions may use the relaxed chain tolerance, but border endpoints must be true straight splits.
+    Tests straight T-junction endpoint acceptance and the dedicated redundant-loop straightness tolerance.
+    A T endpoint must pass, a corner must fail, and a 1.2 degree straight continuation must pass 2.0 degrees while failing 0.1 degrees.
     */
     function testRedundantLoopTerminalTopology =
     (
@@ -3434,23 +3209,10 @@ struct WallFixer_v
         chain_edges = #{1}
         border_edges = #{}
 
-        t_junction_ok = isRedundantLoopEndpointTopology undefined undefined 1 chain_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:2.0 border_corner_angle_threshold:0.1
+        t_junction_ok = isRedundantLoopEndpointTopology undefined undefined 1 chain_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:2.0
 
         corner_points = #([0,0,0], [-1,0,0], [0,1,0], [1,0,0])
-        corner_rejected = not(isRedundantLoopEndpointTopology undefined undefined 1 chain_edges border_edges vertex_edges edge_vertices corner_points straight_angle_threshold:2.0 border_corner_angle_threshold:0.1)
-
-        border_vertex_points = #([0,0,0], [0,-1,0], [-1,0,0], [1,0,0])
-        border_vertex_edges = #(#{1,2,3}, #{1}, #{2}, #{3})
-        border_edge_vertices = #(#(1,2), #(1,3), #(1,4))
-        border_chain_edges = #{1}
-        border_edges = #{2,3}
-        straight_border_split_ok = isRedundantLoopEndpointTopology undefined undefined 1 border_chain_edges border_edges border_vertex_edges border_edge_vertices border_vertex_points straight_angle_threshold:2.0 border_corner_angle_threshold:0.1
-
-        border_corner_points = #([0,0,0], [0,-1,0], [-1,0,0], [0,1,0])
-        border_corner_rejected = not(isRedundantLoopEndpointTopology undefined undefined 1 border_chain_edges border_edges border_vertex_edges border_edge_vertices border_corner_points straight_angle_threshold:2.0 border_corner_angle_threshold:0.1)
-
-        shallow_corner_points = #([0,0,0], [0,-1,0], [-1,0,0], [0.9999619,0.00872654,0])
-        shallow_corner_rejected = not(isRedundantLoopEndpointTopology undefined undefined 1 border_chain_edges border_edges border_vertex_edges border_edge_vertices shallow_corner_points straight_angle_threshold:2.0 border_corner_angle_threshold:0.1)
+        corner_rejected = not(isRedundantLoopEndpointTopology undefined undefined 1 chain_edges border_edges vertex_edges edge_vertices corner_points straight_angle_threshold:2.0)
 
         tolerance_points = #([0,0,0], [1,0,0], [-0.9997807,0.0209424,0])
         tolerance_edges = #(#(1,2), #(1,3))
@@ -3458,8 +3220,8 @@ struct WallFixer_v
         relaxed_ok = areRedundantLoopEdgesStraightPairs undefined undefined 1 tolerance_pair tolerance_edges tolerance_points angle_threshold:2.0
         strict_rejected = not(areRedundantLoopEdgesStraightPairs undefined undefined 1 tolerance_pair tolerance_edges tolerance_points angle_threshold:0.1)
 
-        passed = t_junction_ok and corner_rejected and straight_border_split_ok and border_corner_rejected and shallow_corner_rejected and relaxed_ok and strict_rejected
-        format "Redundant-loop terminal topology | tJunction:% | internalCornerRejected:% | borderSplit:% | borderCornerRejected:% | shallowBorderCornerRejected:% | relaxed:% | strictRejected:% | passed:%\n" t_junction_ok corner_rejected straight_border_split_ok border_corner_rejected shallow_corner_rejected relaxed_ok strict_rejected passed
+        passed = t_junction_ok and corner_rejected and relaxed_ok and strict_rejected
+        format "Redundant-loop terminal topology | tJunction:% | cornerRejected:% | relaxed:% | strictRejected:% | passed:%\n" t_junction_ok corner_rejected relaxed_ok strict_rejected passed
 
         passed
         -- return
@@ -3548,45 +3310,29 @@ struct WallFixer_v
 
     /*
     Selects detected redundant-loop edges on one node without removing geometry.
-    Modified objects are preflighted with snapshotAsMesh; exactly one SELECT REDUNDANT LOOPS Edit Poly is created/reused and kept even when empty.
+    Detection reads the fully evaluated top-of-stack topology through a temporary pass-through Edit Poly; the modifier is kept and named SELECT REDUNDANT LOOPS only when edges are found.
     */
     function selectRedundantLoopsOnNode node angle_threshold:0.1 debug_output:true =
     (
         if node == undefined or not(isValidNode node) then return #(false, 0, 0, "invalid node", undefined, #{})
-        if superclassof node != GeometryClass then return #(false, 0, 0, "requires geometry", undefined, #{})
+        if not(isSliceSupportedNode node) then return #(false, 0, 0, "requires Editable Poly geometry or an Edit Poly workflow", undefined, #{})
 
         selection_modifier = undefined
         operation_error = undefined
         loop_count = 0
         redundant_edge_count = 0
         redundant_edges = #{}
-        evaluated_mesh = undefined
-        snapshot_vertex_count = undefined
-        select_name = getSelectDeleteModifierName "REDUNDANT LOOPS"
 
         try
         (
-            if node.modifiers.count > 0 then
-            (
-                evaluated_mesh = snapshotAsMesh node
-                if evaluated_mesh == undefined then throw "could not create evaluated snapshot"
-                snapshot_vertex_count = getNumVerts evaluated_mesh
-                free evaluated_mesh
-                evaluated_mesh = undefined
-            )
+            selection_modifier = Edit_Poly name:"WMC - REDUNDANT LOOP SCAN"
+            addModifier node selection_modifier
+            update node
 
-            selection_modifier = ensureNamedEditPolyModifier node select_name #Edge
-            if selection_modifier == undefined then throw (select_name + " could not be created or reused")
-
-            if snapshot_vertex_count != undefined then
-            (
-                live_vertex_count = selection_modifier.GetNumVertices node:node
-                if live_vertex_count != snapshot_vertex_count then
-                (
-                    throw "evaluated snapshot vertex IDs do not match SELECT REDUNDANT LOOPS"
-                )
-            )
-
+            selection_modifier.SetPrimaryNode node
+            selection_modifier.useStackSelection = false
+            selection_modifier.showCage = off
+            selection_modifier.SetEPolySelLevel #Edge
             selection_modifier.SetSelection #Edge #{} node:node
 
             detection_data = detectRedundantLoops node selection_modifier angle_threshold:angle_threshold debug_output:debug_output
@@ -3595,20 +3341,34 @@ struct WallFixer_v
             loop_count = loop_records.count
             redundant_edge_count = redundant_edges.numberSet
 
-            selection_modifier.SetSelection #Edge redundant_edges node:node
-            stored_selection = selection_modifier.GetSelection #Edge node:node
-            if stored_selection != redundant_edges then
+            if redundant_edge_count > 0 then
             (
-                throw ("SELECT REDUNDANT LOOPS could not store the detected redundant edges. Requested:" + (redundant_edges as string) + " actual:" + (stored_selection as string))
-            )
+                selection_modifier.name = "SELECT REDUNDANT LOOPS"
+                selection_modifier.SetSelection #Edge redundant_edges node:node
 
-            selection_modifier.showCage = off
-            update node
+                stored_selection = selection_modifier.GetSelection #Edge node:node
+                if stored_selection != redundant_edges then
+                (
+                    throw ("SELECT REDUNDANT LOOPS could not store the detected redundant edges. Requested:" + (redundant_edges as string) + " actual:" + (stored_selection as string))
+                )
+            )
+            else
+            (
+                deleteModifier node selection_modifier
+                selection_modifier = undefined
+                update node
+            )
         )
         catch
         (
-            if evaluated_mesh != undefined then free evaluated_mesh
             operation_error = getCurrentException()
+
+            if selection_modifier != undefined then
+            (
+                try(deleteModifier node selection_modifier)catch()
+                selection_modifier = undefined
+            )
+
             update node
         )
 
@@ -3618,11 +3378,10 @@ struct WallFixer_v
         )
         else
         (
-            #(false, 0, 0, operation_error as string, selection_modifier, #{})
+            #(false, 0, 0, operation_error as string, undefined, #{})
         )
         -- return
     ),
-
 
     /*
     Activates SELECT REDUNDANT LOOPS and writes the requested edges only after the modifier is displayed.
@@ -3714,7 +3473,7 @@ struct WallFixer_v
                 total_edges += selection_result[3]
                 report_text += node.name + ": loops " + (selection_result[2] as string) + ", edges selected " + (selection_result[3] as string) + ".\n"
 
-                if display_modifier == undefined then
+                if display_modifier == undefined and selection_result[3] > 0 then
                 (
                     display_node = node
                     display_modifier = selection_result[5]
@@ -3811,182 +3570,6 @@ struct WallFixer_v
             )
 
             test_passed
-        )
-        -- return
-    ),
-
-
-    /*
-    Removes only the redundant-loop edges stored in SELECT REDUNDANT LOOPS and renames that same modifier DELETED REDUNDANT LOOPS.
-    When RMB is used without a preceding LMB, the snapshot-based selector creates the SELECT modifier first so no unrelated selection is consumed.
-    */
-    function deleteSelectedRedundantLoopsOnNode node angle_threshold:0.1 debug_output:true =
-    (
-        if node == undefined or not(isValidNode node) then return #(false, 0, "invalid node", undefined)
-
-        select_name = getSelectDeleteModifierName "REDUNDANT LOOPS"
-        deleted_name = getSelectDeleteModifierName "REDUNDANT LOOPS" deleted:true
-        selection_modifier = findNamedEditPolyModifier node select_name
-
-        if selection_modifier == undefined then
-        (
-            select_result = selectRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output
-            if not select_result[1] then return #(false, 0, select_result[4], select_result[5])
-            selection_modifier = select_result[5]
-        )
-
-        if selection_modifier == undefined then return #(false, 0, "SELECT REDUNDANT LOOPS modifier unavailable", undefined)
-
-        operation_error = undefined
-        removed_edge_count = 0
-        old_remove_ctrl = undefined
-
-        try
-        (
-            stored_selection = selection_modifier.GetSelection #Edge node:node
-            if stored_selection == undefined then stored_selection = #{}
-
-            detection_data = detectRedundantLoops node selection_modifier angle_threshold:angle_threshold debug_output:false
-            current_redundant_edges = detection_data[2]
-            edges_to_remove = stored_selection * current_redundant_edges
-
-            selection_modifier.useStackSelection = false
-            selection_modifier.showCage = off
-            selection_modifier.SetEPolySelLevel #Edge
-            selection_modifier.SetSelection #Edge edges_to_remove node:node
-
-            verified_selection = selection_modifier.GetSelection #Edge node:node
-            if verified_selection != edges_to_remove then
-            (
-                throw ("DELETED REDUNDANT LOOPS selection mismatch. Requested:" + (edges_to_remove as string) + " actual:" + (verified_selection as string))
-            )
-
-            if edges_to_remove.numberSet > 0 then
-            (
-                old_remove_ctrl = selection_modifier.remveEdgeCtrlKey
-                selection_modifier.remveEdgeCtrlKey = false
-                removed_edge_count = edges_to_remove.numberSet
-                selection_modifier.SetOperation #RemoveEdge
-                selection_modifier.Commit()
-                selection_modifier.remveEdgeCtrlKey = old_remove_ctrl
-                old_remove_ctrl = undefined
-                update node
-            )
-
-            selection_modifier.name = deleted_name
-            selection_modifier.showCage = off
-            update node
-
-            if debug_output and not batch_quiet then
-            (
-                format "Wall-Fixer Redundant Loops Delete: node:% removedEdges:% modifier:%\n" node.name removed_edge_count selection_modifier.name
-            )
-        )
-        catch
-        (
-            if old_remove_ctrl != undefined then
-            (
-                try(selection_modifier.remveEdgeCtrlKey = old_remove_ctrl)catch()
-            )
-
-            operation_error = getCurrentException()
-            update node
-        )
-
-        if operation_error == undefined then
-        (
-            #(true, removed_edge_count, "", selection_modifier)
-        )
-        else
-        (
-            #(false, 0, operation_error as string, selection_modifier)
-        )
-        -- return
-    ),
-
-
-    /*
-    Runs project-standard RMB redundant-loop deletion on all selected geometry objects.
-    Each object finishes with the committed modifier named DELETED REDUNDANT LOOPS and cage display disabled.
-    */
-    function deleteSelectedRedundantLoopsSelection angle_threshold:0.1 debug_output:true =
-    (
-        last_slice_error = undefined
-        last_slice_report = ""
-        selected_nodes = selection as array
-
-        if selected_nodes.count == 0 then
-        (
-            last_slice_report = "Select at least one wall object."
-            return #(false, 0)
-        )
-
-        total_removed = 0
-        failed_nodes = #()
-        report_text = ""
-        display_node = undefined
-        display_modifier = undefined
-
-        undo "Wall-Fixer - Delete Redundant Loops" on
-        (
-            for node in selected_nodes do
-            (
-                if superclassof node == GeometryClass then
-                (
-                    delete_result = deleteSelectedRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output
-
-                    if delete_result[1] then
-                    (
-                        total_removed += delete_result[2]
-                        report_text += node.name + ": removed " + (delete_result[2] as string) + " redundant edge(s).\n"
-
-                        if display_modifier == undefined then
-                        (
-                            display_node = node
-                            display_modifier = delete_result[4]
-                        )
-                    )
-                    else
-                    (
-                        append failed_nodes node.name
-                        report_text += node.name + ": FAILED - " + delete_result[3] + ".\n"
-                    )
-                )
-            )
-        )
-
-        if display_modifier != undefined then
-        (
-            try
-            (
-                select display_node
-                max modify mode
-                display_modifier.showCage = off
-                display_modifier.useStackSelection = false
-                modPanel.setCurrentObject display_modifier
-                display_modifier.SetEPolySelLevel #Edge
-                subObjectLevel = 2
-                completeRedraw()
-            )
-            catch()
-        )
-        else
-        (
-            select selected_nodes
-            completeRedraw()
-        )
-
-        if failed_nodes.count == 0 then
-        (
-            last_slice_report = "Redundant Loop Delete complete. Edges removed: " + (total_removed as string) + ".\n" + report_text
-            if not batch_quiet then format "%" last_slice_report
-            #(true, total_removed)
-        )
-        else
-        (
-            last_slice_report = "Redundant Loop Delete completed with failures.\n" + report_text
-            if not batch_quiet then format "%" last_slice_report
-            #(false, total_removed)
         )
         -- return
     ),
@@ -4285,16 +3868,83 @@ struct WallFixer_v
     ),
 
     /*
-    Compatibility wrapper for POST-PROCESS redundant-loop RMB.
-    RMB now always consumes the dedicated SELECT REDUNDANT LOOPS modifier and finishes as DELETED REDUNDANT LOOPS.
+    POST-PROCESS RMB removes live selected edges first; with no selected edges it removes all detected redundant-loop edges.
+    The result is #(completed, mode, removed_selected_edge_count).
     */
     function removeSelectedOrRedundantLoopEdgesSelection angle_threshold:0.1 debug_output:true =
     (
-        delete_result = deleteSelectedRedundantLoopsSelection angle_threshold:angle_threshold debug_output:debug_output
-        #(delete_result[1], #storedSelection, delete_result[2])
+        last_slice_error = undefined
+        last_slice_report = ""
+        selected_nodes = selection as array
+
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select at least one wall object."
+            return #(false, #none, 0)
+        )
+
+        edge_source_records = #()
+        selected_edge_count = 0
+
+        for node in selected_nodes do
+        (
+            source_data = getRedundantLoopSelectedEdgeSource node
+            if source_data[3].numberSet > 0 then
+            (
+                append edge_source_records #(node, source_data[1], source_data[2], source_data[3])
+                selected_edge_count += source_data[3].numberSet
+            )
+        )
+
+        remove_mode = getRedundantLoopRemoveMode selected_edge_count
+
+        if remove_mode == #allRedundant then
+        (
+            completed = cleanupRedundantLoopsSelection angle_threshold:angle_threshold debug_output:debug_output reuse_top_modifier:true
+            return #(completed, remove_mode, 0)
+        )
+
+        removed_edge_count = 0
+        failed_nodes = #()
+        report_text = ""
+
+        undo "Wall-Fixer - Remove Selected Edges" on
+        (
+            for source_record in edge_source_records do
+            (
+                node = source_record[1]
+                remove_result = removeRedundantLoopSelectedEdgesOnNode node source_record[2] source_record[3] source_record[4]
+
+                if remove_result[1] then
+                (
+                    removed_edge_count += remove_result[2]
+                    report_text += node.name + ": selected edges removed " + (remove_result[2] as string) + ".\n"
+                )
+                else
+                (
+                    append failed_nodes node.name
+                    report_text += node.name + ": FAILED - " + remove_result[3] + ".\n"
+                )
+            )
+        )
+
+        select selected_nodes
+        completeRedraw()
+
+        if failed_nodes.count == 0 then
+        (
+            last_slice_report = "Selected edge removal complete. Edges removed: " + (removed_edge_count as string) + ".\n" + report_text
+            if not batch_quiet then format "%" last_slice_report
+            #(true, remove_mode, removed_edge_count)
+        )
+        else
+        (
+            last_slice_report = "Selected edge removal completed with failures.\n" + report_text
+            if not batch_quiet then format "%" last_slice_report
+            #(false, remove_mode, removed_edge_count)
+        )
         -- return
     ),
-
 
     /*
     Returns the permanent development loader path for Restart.
@@ -5958,11 +5608,38 @@ struct WallFixer_v
             if node.modifiers.count > 0 do
                 if classOf node.modifiers[1] == Edit_Poly do modifier = node.modifiers[1]
 
-            /* SELECT / DELETED TWO-EDGE VERTS are dedicated inspection/history modifiers, not slicing modifiers.
-               Preserve them in place and always build Slice Walls work above instead of deleting or reusing them. */
-            if modifier != undefined and (modifier.name == "SELECT TWO-EDGE VERTS" or modifier.name == "DELETED TWO-EDGE VERTS") then
+            /* WMC - FIX TWO-EDGE VERTS is a dedicated selection holder, not a slicing modifier.
+               Repair/delete stale zero-topology copies before building a slicing modifier above it. */
+            if modifier != undefined and modifier.name == "WMC - FIX TWO-EDGE VERTS" then
             (
-                try(modifier.showCage = off)catch()
+                local two_edge_live_vertices = 0
+                local two_edge_modifier = modifier
+                try
+                (
+                    two_edge_modifier.SetPrimaryNode node
+                    two_edge_modifier.useStackSelection = false
+                    try (two_edge_modifier.showCage = off) catch ()
+                    update node
+                    local two_edge_evaluated_mesh = snapshotAsMesh node
+                    if two_edge_evaluated_mesh != undefined then free two_edge_evaluated_mesh
+                    two_edge_live_vertices = two_edge_modifier.GetNumVertices node:node
+                )
+                catch
+                (
+                    two_edge_live_vertices = 0
+                )
+
+                if two_edge_live_vertices <= 0 then
+                (
+                    if not batch_quiet then format "Wall-Fixer: removing invalid WMC - FIX TWO-EDGE VERTS modifier with zero live vertices from %.\n" node.name
+                    deleteModifier node two_edge_modifier
+                    update node
+                    if oldCurrent == two_edge_modifier then
+                    (
+                        if node.modifiers.count > 0 then oldCurrent = node.modifiers[1] else oldCurrent = node.baseObject
+                    )
+                )
+
                 modifier = undefined
             )
 
@@ -8580,11 +8257,10 @@ modifier.split = false
         local original_panel_mode = undefined
         local original_current_object = undefined
         local original_subobject_level = subObjectLevel
-        local restrict_to_selected_vertices = shouldRestrictSliceToSelectedComponents all_selected_nodes.count original_subobject_level
+        local restrict_to_selected_vertices = (original_subobject_level != undefined and original_subobject_level > 0)
         local selected_vertex_filters = #()
         local selected_live_task_filters = #()
         local automatic_live_task_filters = #()
-        local failed_nodes = #()
         local final_sliced_node = undefined
         local processed_count = 0
         local processed_vertex_count = 0
@@ -8630,7 +8306,6 @@ modifier.split = false
         local skipped_count = all_selected_nodes.count - selected_nodes.count
         last_slice_report = ""
         last_slice_error = undefined
-        last_slice_failed_nodes = #()
         last_slice_elapsed_ms = 0
         last_slice_processed_objects = 0
         last_slice_processed_vertices = 0
@@ -8667,220 +8342,193 @@ modifier.split = false
             (
                 local node_ok = true
                 local node_error = undefined
-                local node_exception = undefined
                 local current_vertex_count = 0
 
-                try
+                if node == undefined or not(isValidNode node) then
                 (
-                    if node == undefined or not(isValidNode node) then
+                    node_error = "Selected wall became invalid during Slice Selected Walls."
+                    node_ok = false
+                )
+                else
+                (
+                    current_vertex_count = getEvaluatedVertexCount node
+                    processed_vertex_count += current_vertex_count
+
+                    /* Rebuild only the requested slice direction.
+                       Preserve an existing opposite-direction slice modifier so a second mode stacks above it. */
+                    if not(::WallFixer.removeWallFixerSliceModifiers node cut_mode:cut_mode) then
                     (
-                        node_error = "Selected wall became invalid during Slice Selected Walls."
+                        node_error = node.name + ": could not clear conflicting Wall-Fixer slicing modifiers."
                         node_ok = false
                     )
                     else
                     (
-                        if not(::WallFixer.activateBatchSliceNodeContext node) then
+                        if not restrict_to_selected_vertices then
                         (
-                            node_error = node.name + ": could not activate an isolated batch-slice context."
+                            local preserved_opposite_modifier = getTopOppositeSliceModifier node cut_mode
+                            local automatic_live_tasks = captureAutomaticLiveSliceTasks                                 node                                 preserved_opposite_modifier                                 cut_mode:cut_mode                                 slice_plane_mode:slice_plane_mode                                 match_tolerance:0.01
+
+                            append automatic_live_task_filters #(node, automatic_live_tasks)
+
+                            if not batch_quiet and automatic_live_tasks.count > 0 then
+                            (
+                                format "Wall-Fixer Automatic Live Slice Anchors: node:% tasks:%\n" node.name automatic_live_tasks.count
+                            )
+                        )
+
+                        ::WallFixer.clearResetInnerVertSelection node
+                        ::WallFixer.clearLastDebugSliceContext node:node
+
+                        if not(::WallFixer.initializeBaseSliceAnalysis \
+                            node \
+                            angle_threshold:angle_threshold \
+                            planar_tolerance:planar_tolerance \
+                            update_viewport_selection:false) then
+                        (
+                            node_error = node.name + ": base-object planar-region analysis failed before fixed base-object queue. " + (last_slice_error as string)
                             node_ok = false
                         )
+                        else if restrict_to_selected_vertices then
+                        (
+                            local selected_source_vertices = #{}
 
-                        if node_ok then
-                        (
-                            current_vertex_count = getEvaluatedVertexCount node
-                            processed_vertex_count += current_vertex_count
-                        )
-
-                        /* Rebuild only the requested slice direction.
-                           Preserve an existing opposite-direction slice modifier so a second mode stacks above it. */
-                        if node_ok and not(::WallFixer.removeWallFixerSliceModifiers node cut_mode:cut_mode) then
-                        (
-                            node_error = node.name + ": could not clear conflicting Wall-Fixer slicing modifiers."
-                            node_ok = false
-                        )
-                        else if node_ok then
-                        (
-                            if not restrict_to_selected_vertices then
+                            for filter_item in selected_vertex_filters do
                             (
-                                local preserved_opposite_modifier = getTopOppositeSliceModifier node cut_mode
-                                local automatic_live_tasks = captureAutomaticLiveSliceTasks \
-                                    node \
-                                    preserved_opposite_modifier \
-                                    cut_mode:cut_mode \
-                                    slice_plane_mode:slice_plane_mode \
-                                    match_tolerance:0.01
-
-                                append automatic_live_task_filters #(node, automatic_live_tasks)
-
-                                if not batch_quiet and automatic_live_tasks.count > 0 then
+                                if filter_item[1] == node then
                                 (
-                                    format "Wall-Fixer Automatic Live Slice Anchors: node:% tasks:%\n" node.name automatic_live_tasks.count
+                                    selected_source_vertices = copy filter_item[2]
+                                    exit
                                 )
                             )
 
-                            ::WallFixer.clearResetInnerVertSelection node
-                            ::WallFixer.clearLastDebugSliceContext node:node
+                            setResetInnerVertSelection node selected_source_vertices
 
-                            if not(::WallFixer.initializeBaseSliceAnalysis \
-                                node \
-                                angle_threshold:angle_threshold \
-                                planar_tolerance:planar_tolerance \
-                                update_viewport_selection:false) then
-                            (
-                                node_error = node.name + ": base-object planar-region analysis failed before fixed base-object queue. " + (last_slice_error as string)
-                                node_ok = false
-                            )
-                            else if restrict_to_selected_vertices then
-                            (
-                                local selected_source_vertices = #{}
+                            if not batch_quiet then format "Wall-Fixer Slice Selected Walls Vertex Filter: node:% selectedBaseVerts:%\n" node.name selected_source_vertices
+                        )
+                    )
 
-                                for filter_item in selected_vertex_filters do
+                    local slice_passes = #()
+                    local total_task_count = 0
+
+                    if node_ok then
+                    (
+                        slice_passes = ::WallFixer.buildBaseSlicePassQueue \
+                            node \
+                            cut_mode:cut_mode \
+                            slice_plane_mode:slice_plane_mode \
+                            angle_threshold:angle_threshold \
+                            planar_tolerance:planar_tolerance
+
+                        local extra_live_tasks = #()
+
+                        if restrict_to_selected_vertices then
+                        (
+                            for live_filter_item in selected_live_task_filters do
+                            (
+                                if live_filter_item[1] == node then
                                 (
-                                    if filter_item[1] == node then
-                                    (
-                                        selected_source_vertices = copy filter_item[2]
-                                        exit
-                                    )
+                                    extra_live_tasks = live_filter_item[2]
+                                    exit
                                 )
-
-                                setResetInnerVertSelection node selected_source_vertices
-
-                                if not batch_quiet then format "Wall-Fixer Slice Selected Walls Vertex Filter: node:% selectedBaseVerts:%\n" node.name selected_source_vertices
+                            )
+                        )
+                        else
+                        (
+                            for live_filter_item in automatic_live_task_filters do
+                            (
+                                if live_filter_item[1] == node then
+                                (
+                                    extra_live_tasks = live_filter_item[2]
+                                    exit
+                                )
                             )
                         )
 
-                        local slice_passes = #()
-                        local total_task_count = 0
-
-                        if node_ok then
+                        for live_task in extra_live_tasks do
                         (
-                            slice_passes = ::WallFixer.buildBaseSlicePassQueue \
-                                node \
-                                cut_mode:cut_mode \
-                                slice_plane_mode:slice_plane_mode \
-                                angle_threshold:angle_threshold \
-                                planar_tolerance:planar_tolerance
-
-                            local extra_live_tasks = #()
-
-                            if restrict_to_selected_vertices then
-                            (
-                                for live_filter_item in selected_live_task_filters do
-                                (
-                                    if live_filter_item[1] == node then
-                                    (
-                                        extra_live_tasks = live_filter_item[2]
-                                        exit
-                                    )
-                                )
-                            )
-                            else
-                            (
-                                for live_filter_item in automatic_live_task_filters do
-                                (
-                                    if live_filter_item[1] == node then
-                                    (
-                                        extra_live_tasks = live_filter_item[2]
-                                        exit
-                                    )
-                                )
-                            )
-
-                            for live_task in extra_live_tasks do
-                            (
-                                local live_kind = live_task[2]
-
-                                for slice_pass in slice_passes do
-                                (
-                                    if slice_pass[1] == live_kind or slice_pass[1] == #all then
-                                    (
-                                        appendUniqueLiveSliceTasks slice_pass[3] #(live_task) match_tolerance:0.01
-                                    )
-                                )
-                            )
+                            local live_kind = live_task[2]
 
                             for slice_pass in slice_passes do
                             (
-                                total_task_count += slice_pass[3].count
-                            )
-                        )
-
-                        if node_ok and progress_callback != undefined then
-                        (
-                            try(progress_callback 0 total_task_count object_index:(processed_count + 1) object_total:selected_nodes.count object_name:node.name vertex_count:current_vertex_count)catch()
-                        )
-
-                        if node_ok and total_task_count == 0 then
-                        (
-                            node_error = node.name + ": base object has no slice tasks."
-                            node_ok = false
-                        )
-                        else if node_ok then
-                        (
-                            local task_index_offset = 0
-                            local total_sliced_count = 0
-                            local total_no_change_count = 0
-
-                            for slice_pass in slice_passes while node_ok do
-                            (
-                                local pass_kind = slice_pass[1]
-                                local modifier_name = slice_pass[2]
-                                local pass_tasks = slice_pass[3]
-
-                                local queue_result = ::WallFixer.executeBaseSliceTaskQueue \
-                                    node \
-                                    pass_tasks \
-                                    modifier_name:modifier_name \
-                                    angle_threshold:angle_threshold \
-                                    planar_tolerance:planar_tolerance \
-                                    precision_threshold:slice_precision \
-                                    cleanup_edges:cleanup_edges \
-                                    task_index_offset:task_index_offset \
-                                    total_task_count:total_task_count \
-                                    progress_callback:progress_callback \
-                                    object_index:(processed_count + 1) \
-                                    object_total:selected_nodes.count \
-                                    object_name:node.name \
-                                    vertex_count:current_vertex_count
-
-                                if not queue_result[1] then
+                                if slice_pass[1] == live_kind or slice_pass[1] == #all then
                                 (
-                                    node_error = node.name + ": fixed base-object slice pass failed in " + modifier_name + ". " + last_slice_report
-                                    node_ok = false
+                                    appendUniqueLiveSliceTasks slice_pass[3] #(live_task) match_tolerance:0.01
                                 )
-                                else
-                                (
-                                    total_sliced_count += queue_result[2]
-                                    total_no_change_count += queue_result[3]
-
-                                    if not batch_quiet then format "Wall-Fixer Slice Selected Walls Pass Result: node:% modifier:% direction:% tasks:% sliced:% noChange:%\n" \
-                                        node.name modifier_name pass_kind pass_tasks.count queue_result[2] queue_result[3]
-                                )
-
-                                task_index_offset += pass_tasks.count
                             )
+                        )
 
-                            if node_ok and total_sliced_count > 0 then
-                            (
-                                final_sliced_node = node
-                            )
-
-                            if node_ok and not batch_quiet then
-                            (
-                                format "Wall-Fixer Slice Selected Walls Queue Result: node:% passes:% tasks:% sliced:% noChange:%\n" \
-                                    node.name slice_passes.count total_task_count total_sliced_count total_no_change_count
-                            )
+                        for slice_pass in slice_passes do
+                        (
+                            total_task_count += slice_pass[3].count
                         )
                     )
-                )
-                catch
-                (
-                    node_exception = getCurrentException()
-                    node_error = if node != undefined and isValidNode node then \
-                        (node.name + ": unexpected Slice Walls error. " + (node_exception as string)) \
-                        else \
-                        ("Slice Walls unexpected object error. " + (node_exception as string))
-                    node_ok = false
+
+                    if node_ok and progress_callback != undefined then
+                    (
+                        try(progress_callback 0 total_task_count object_index:(processed_count + 1) object_total:selected_nodes.count object_name:node.name vertex_count:current_vertex_count)catch()
+                    )
+
+                    if node_ok and total_task_count == 0 then
+                    (
+                        node_error = node.name + ": base object has no slice tasks."
+                        node_ok = false
+                    )
+                    else if node_ok then
+                    (
+                        local task_index_offset = 0
+                        local total_sliced_count = 0
+                        local total_no_change_count = 0
+
+                        for slice_pass in slice_passes while node_ok do
+                        (
+                            local pass_kind = slice_pass[1]
+                            local modifier_name = slice_pass[2]
+                            local pass_tasks = slice_pass[3]
+
+                            local queue_result = ::WallFixer.executeBaseSliceTaskQueue \
+                                node \
+                                pass_tasks \
+                                modifier_name:modifier_name \
+                                angle_threshold:angle_threshold \
+                                planar_tolerance:planar_tolerance \
+                                precision_threshold:slice_precision \
+                                cleanup_edges:cleanup_edges \
+                                task_index_offset:task_index_offset \
+                                total_task_count:total_task_count \
+                                progress_callback:progress_callback \
+                                object_index:(processed_count + 1) \
+                                object_total:selected_nodes.count \
+                                object_name:node.name \
+                                vertex_count:current_vertex_count
+
+                            if not queue_result[1] then
+                            (
+                                node_error = node.name + ": fixed base-object slice pass failed in " + modifier_name + ". " + last_slice_report
+                                node_ok = false
+                            )
+                            else
+                            (
+                                total_sliced_count += queue_result[2]
+                                total_no_change_count += queue_result[3]
+
+                                if not batch_quiet then format "Wall-Fixer Slice Selected Walls Pass Result: node:% modifier:% direction:% tasks:% sliced:% noChange:%\n" \
+                                    node.name modifier_name pass_kind pass_tasks.count queue_result[2] queue_result[3]
+                            )
+
+                            task_index_offset += pass_tasks.count
+                        )
+
+                        if node_ok and total_sliced_count > 0 then
+                        (
+                            final_sliced_node = node
+                        )
+
+                        if node_ok and not batch_quiet then
+                        (
+                            format "Wall-Fixer Slice Selected Walls Queue Result: node:% passes:% tasks:% sliced:% noChange:%\n" \
+                                node.name slice_passes.count total_task_count total_sliced_count total_no_change_count
+                        )
+                    )
                 )
 
                 if node_ok then
@@ -8891,25 +8539,8 @@ modifier.split = false
                 else
                 (
                     all_ok = false
-
-                    if node_error == undefined then
-                    (
-                        node_error = "Slice Selected Walls stopped before completion."
-                    )
-
-                    if last_slice_error == undefined then
-                    (
-                        last_slice_error = node_error
-                    )
-
-                    if node != undefined and isValidNode node then
-                    (
-                        if (findItem failed_nodes node) == 0 then
-                        (
-                            append failed_nodes node
-                        )
-                    )
-
+                    if node_error == undefined then node_error = "Slice Selected Walls stopped before completion."
+                    if last_slice_error == undefined then last_slice_error = node_error
                     automation_report += node_error + "\n"
                 )
 
@@ -8943,85 +8574,67 @@ modifier.split = false
             )
         )
 
-        last_slice_failed_nodes = #()
+        select all_selected_nodes
 
-        for failed_node in failed_nodes do
+        if final_sliced_node != undefined and isValidNode final_sliced_node and final_sliced_node.modifiers.count > 0 then
         (
-            if failed_node != undefined and isValidNode failed_node then
+            local top_modifier = final_sliced_node.modifiers[1]
+
+            select final_sliced_node
+            max modify mode
+
+            try
             (
-                append last_slice_failed_nodes failed_node
+                if classOf top_modifier == Edit_Poly then
+                (
+                    top_modifier.SetPrimaryNode final_sliced_node
+                )
+
+                modPanel.setCurrentObject top_modifier
+
+                if classOf top_modifier == Edit_Poly then
+                (
+                    top_modifier.SetEPolySelLevel #Edge
+                    subObjectLevel = 2
+                )
+            )
+            catch
+            (
             )
         )
-
-        if last_slice_failed_nodes.count > 0 then
+        else if original_panel_mode == #modify then
         (
-            try(subObjectLevel = 0)catch()
-            select last_slice_failed_nodes
-        )
-        else
-        (
-            select all_selected_nodes
+            max modify mode
 
-            if final_sliced_node != undefined and isValidNode final_sliced_node and final_sliced_node.modifiers.count > 0 then
+            if original_current_object != undefined then
             (
-                local top_modifier = final_sliced_node.modifiers[1]
-
-                select final_sliced_node
-                max modify mode
-
                 try
                 (
-                    if classOf top_modifier == Edit_Poly then
-                    (
-                        top_modifier.SetPrimaryNode final_sliced_node
-                    )
-
-                    modPanel.setCurrentObject top_modifier
-
-                    if classOf top_modifier == Edit_Poly then
-                    (
-                        top_modifier.SetEPolySelLevel #Edge
-                        subObjectLevel = 2
-                    )
+                    modPanel.setCurrentObject original_current_object
                 )
                 catch
                 (
                 )
             )
-            else if original_panel_mode == #modify then
+
+            if original_subobject_level != undefined then
             (
-                max modify mode
-
-                if original_current_object != undefined then
+                try
                 (
-                    try
-                    (
-                        modPanel.setCurrentObject original_current_object
-                    )
-                    catch
-                    (
-                    )
+                    subObjectLevel = original_subobject_level
                 )
-
-                if original_subobject_level != undefined then
+                catch
                 (
-                    try
-                    (
-                        subObjectLevel = original_subobject_level
-                    )
-                    catch
-                    (
-                    )
                 )
             )
-            else if original_panel_mode != undefined then
-            (
-                setCommandPanelTaskMode original_panel_mode
-            )
-            else
-            (
-                max create mode
-            )
+        )
+        else if original_panel_mode != undefined then
+        (
+            setCommandPanelTaskMode original_panel_mode
+        )
+        else
+        (
+            max create mode
         )
 
         last_slice_processed_objects = processed_count
@@ -9102,172 +8715,22 @@ modifier.split = false
 
 
     /*
-    Tests that component filtering is allowed only for a single selected wall.
-    Multi-object Slice Walls must ignore stale Vertex or Edge sub-object state.
+    Tests whether Slice Selected Walls should restrict source vertices while any subobject level is active.
     */
     function testSliceSelectedVertexMode =
     (
-        local test_passed = true
+        object_mode = undefined
+        vertex_mode = 1
+        edge_mode = 2
 
-        test_passed = test_passed and not (shouldRestrictSliceToSelectedComponents 1 undefined)
-        test_passed = test_passed and shouldRestrictSliceToSelectedComponents 1 1
-        test_passed = test_passed and shouldRestrictSliceToSelectedComponents 1 2
-        test_passed = test_passed and not (shouldRestrictSliceToSelectedComponents 2 1)
-        test_passed = test_passed and not (shouldRestrictSliceToSelectedComponents 2 2)
-
-        test_passed
-        -- return
-    ),
-
-    /*
-    Tests the batch policy that one failed wall does not stop later walls from being processed.
-    Uses synthetic object outcomes and does not modify the scene.
-    */
-    function testSliceBatchFailureContinuationPolicy =
-    (
-        local sample_results = #(true, false, true)
-        local processed_count = 0
-        local failed_count = 0
-
-        for sample_result in sample_results do
-        (
-            processed_count += 1
-
-            if not sample_result then
-            (
-                failed_count += 1
-            )
-        )
-
-        processed_count == 3 and failed_count == 1
-        -- return
-    ),
-
-    /*
-    Tests per-wall Modify-panel isolation used by multi-object Slice Walls.
-    Creates two temporary Editable Poly boxes with independent Edit Poly modifiers and removes them afterward.
-    */
-    function testSliceBatchContextIsolation =
-    (
-        local original_selection = selection as array
-        local original_panel_mode = undefined
-        local original_current_object = undefined
-        local original_subobject_level = subObjectLevel
-        local test_node_a = undefined
-        local test_node_b = undefined
-        local test_modifier_a = undefined
-        local test_modifier_b = undefined
-        local test_passed = false
-
-        try
-        (
-            original_panel_mode = getCommandPanelTaskMode()
-        )
-        catch
-        (
-            original_panel_mode = undefined
-        )
-
-        if original_panel_mode == #modify then
-        (
-            try(original_current_object = modPanel.getCurrentObject())catch()
-        )
-
-        try
-        (
-            test_node_a = box name:"WF_SLICE_BATCH_CONTEXT_A" length:10.0 width:10.0 height:10.0
-            test_node_b = box name:"WF_SLICE_BATCH_CONTEXT_B" length:10.0 width:10.0 height:10.0
-            test_node_b.pos.x = 20.0
-
-            convertToPoly test_node_a
-            convertToPoly test_node_b
-
-            test_modifier_a = Edit_Poly()
-            test_modifier_b = Edit_Poly()
-
-            addModifier test_node_a test_modifier_a
-            addModifier test_node_b test_modifier_b
-
-            test_passed = activateBatchSliceNodeContext test_node_a
-
-            if test_passed then
-            (
-                test_passed = ensureSliceModifyContext test_node_a test_modifier_a
-            )
-
-            if test_passed then
-            (
-                test_passed = activateBatchSliceNodeContext test_node_b
-            )
-
-            if test_passed then
-            (
-                test_passed = ensureSliceModifyContext test_node_b test_modifier_b
-            )
-
-            if test_passed then
-            (
-                test_passed = selection.count == 1 and selection[1] == test_node_b and modPanel.getCurrentObject() == test_modifier_b
-            )
-        )
-        catch
-        (
-            test_passed = false
-        )
-
-        try(if test_node_a != undefined and isValidNode test_node_a then delete test_node_a)catch()
-        try(if test_node_b != undefined and isValidNode test_node_b then delete test_node_b)catch()
-
-        try
-        (
-            if original_selection.count > 0 then
-            (
-                select original_selection
-            )
-            else
-            (
-                clearSelection()
-            )
-        )
-        catch
-        (
-        )
-
-        try
-        (
-            if original_panel_mode == #modify then
-            (
-                max modify mode
-
-                if original_current_object != undefined then
-                (
-                    modPanel.setCurrentObject original_current_object
-                )
-            )
-            else if original_panel_mode != undefined then
-            (
-                setCommandPanelTaskMode original_panel_mode
-            )
-        )
-        catch
-        (
-        )
-
-        try
-        (
-            if original_subobject_level != undefined then
-            (
-                subObjectLevel = original_subobject_level
-            )
-        )
-        catch
-        (
-        )
+        test_passed = true
+        test_passed = test_passed and not (object_mode != undefined and object_mode > 0)
+        test_passed = test_passed and (vertex_mode > 0)
+        test_passed = test_passed and (edge_mode > 0)
 
         test_passed
         -- return
     ),
-
 
 
     /*
@@ -11081,7 +10544,7 @@ modifier.split = false
     Initializes the dedicated two-edge-vertex Edit Poly as a live pass-through modifier.
     Returns false when the modifier still exposes no live vertices after forced evaluation.
     */
-    function prepareDebugTwoEdgeVertsModifier node modifier bind_primary:true =
+    function prepareDebugTwoEdgeVertsModifier node modifier =
     (
         if node == undefined or not(isValidNode node) or modifier == undefined then return false
 
@@ -11093,7 +10556,7 @@ modifier.split = false
             select node
             max modify mode
             modPanel.setCurrentObject modifier
-            if bind_primary then modifier.SetPrimaryNode node
+            modifier.SetPrimaryNode node
             modifier.useStackSelection = false
             try (modifier.showCage = off) catch ()
             modifier.SetEPolySelLevel #Vertex
@@ -11121,32 +10584,46 @@ modifier.split = false
 
 
     /*
-    Returns the project-standard SELECT TWO-EDGE VERTS Edit Poly used by Find Two-Edge Verts.
-    An existing exact SELECT modifier is reused in place; it is never deleted or duplicated merely because topology preparation fails.
+    Returns the dedicated Edit Poly used by Find Two-Edge Verts.
+    Existing zero-topology copies are rebuilt instead of being left on the stack.
     */
     function getDebugTwoEdgeVertsModifier node create_if_missing:true =
     (
         if node == undefined or not(isValidNode node) then return undefined
 
-        select_name = getSelectDeleteModifierName "TWO-EDGE VERTS"
-        found_modifier = findNamedEditPolyModifier node select_name
+        local found_modifier = undefined
+
+        for modifier_index = 1 to node.modifiers.count while found_modifier == undefined do
+        (
+            local candidate_modifier = node.modifiers[modifier_index]
+
+            if classOf candidate_modifier == Edit_Poly and candidate_modifier.name == "WMC - FIX TWO-EDGE VERTS" then
+            (
+                found_modifier = candidate_modifier
+            )
+        )
 
         if found_modifier != undefined then
         (
-            if not prepareDebugTwoEdgeVertsModifier node found_modifier bind_primary:false then return undefined
-            return found_modifier
+            if not prepareDebugTwoEdgeVertsModifier node found_modifier then
+            (
+                deleteModifier node found_modifier
+                found_modifier = undefined
+                update node
+            )
         )
 
-        if not create_if_missing then return undefined
-
-        found_modifier = Edit_Poly name:select_name
-        addModifier node found_modifier
-
-        if not prepareDebugTwoEdgeVertsModifier node found_modifier bind_primary:true then
+        if found_modifier == undefined and create_if_missing then
         (
-            try(deleteModifier node found_modifier)catch()
-            update node
-            found_modifier = undefined
+            found_modifier = Edit_Poly name:"WMC - FIX TWO-EDGE VERTS"
+            addModifier node found_modifier
+
+            if not prepareDebugTwoEdgeVertsModifier node found_modifier then
+            (
+                deleteModifier node found_modifier
+                found_modifier = undefined
+                update node
+            )
         )
 
         found_modifier
@@ -11181,7 +10658,7 @@ modifier.split = false
 
         if modifier == undefined then
         (
-            last_slice_report = node.name + ": SELECT TWO-EDGE VERTS could not be created or reused."
+            last_slice_report = node.name + ": WMC - FIX TWO-EDGE VERTS could not be created."
             return false
         )
 
@@ -11236,117 +10713,6 @@ modifier.split = false
 
             last_slice_report = node.name + ": Find Two-Edge Verts selected " + (candidates.numberSet as string) + " two-visible-edge vertices."
             completeRedraw()
-        )
-        catch
-        (
-            if evaluated_mesh != undefined then free evaluated_mesh
-            failure = getCurrentException()
-            last_slice_error = failure
-            last_slice_report = node.name + ": " + (failure as string)
-        )
-
-        failure == undefined
-        -- return
-    ),
-
-
-    /*
-    Removes the vertices stored by SELECT TWO-EDGE VERTS and renames that same modifier DELETED TWO-EDGE VERTS.
-    When RMB is used without a preceding LMB, the normal snapshot-based finder creates the SELECT modifier first.
-    */
-    function removeSelectedTwoEdgeVerts angle_threshold:2.0 =
-    (
-        last_slice_error = undefined
-        last_slice_report = ""
-
-        selected_nodes = selection as array
-        if selected_nodes.count == 0 then
-        (
-            last_slice_report = "Select one processed wall before removing two-edge vertices."
-            return false
-        )
-
-        node = selected_nodes[1]
-        modifier = getDebugTwoEdgeVertsModifier node create_if_missing:false
-
-        if modifier == undefined then
-        (
-            if not debugFindTwoEdgeVerts angle_threshold:angle_threshold then return false
-            modifier = getDebugTwoEdgeVertsModifier node create_if_missing:false
-        )
-
-        if modifier == undefined then
-        (
-            last_slice_report = node.name + ": SELECT TWO-EDGE VERTS modifier unavailable."
-            return false
-        )
-
-        failure = undefined
-        evaluated_mesh = undefined
-        removed_count = 0
-        deleted_name = getSelectDeleteModifierName "TWO-EDGE VERTS" deleted:true
-
-        try
-        (
-            stored_selection = modifier.GetSelection #Vertex node:node
-            if stored_selection == undefined then stored_selection = #{}
-
-            evaluated_mesh = snapshotAsMesh node
-            if evaluated_mesh == undefined then throw "Could not evaluate current wall mesh."
-
-            live_vertex_count = modifier.GetNumVertices node:node
-            if getNumVerts evaluated_mesh != live_vertex_count then
-            (
-                throw "Evaluated snapshot vertex IDs do not match SELECT TWO-EDGE VERTS."
-            )
-
-            current_candidates = #{}
-            for vertex_index = 1 to live_vertex_count do
-            (
-                visible_neighbors = ::WallFixer.getDebugVisibleTopologyEdgeNeighborVertices node modifier evaluated_mesh vertex_index
-                if visible_neighbors.count == 2 then current_candidates[vertex_index] = true
-            )
-
-            free evaluated_mesh
-            evaluated_mesh = undefined
-
-            vertices_to_remove = stored_selection * current_candidates
-            display_result = activateNamedEditPolySelection node modifier #Vertex vertices_to_remove
-            if not display_result[1] then throw "Could not restore SELECT TWO-EDGE VERTS before removal."
-
-            if vertices_to_remove.numberSet > 0 then
-            (
-                before_vertex_count = modifier.GetNumVertices node:node
-                modifier.ButtonOp #RemoveVertex
-                update node
-                modifier.RefreshScreen()
-                after_vertex_count = modifier.GetNumVertices node:node
-
-                if after_vertex_count >= before_vertex_count then
-                (
-                    modifier.SetSelection #Vertex vertices_to_remove node:node
-                    modifier.SetOperation #RemoveVertex
-                    modifier.Commit()
-                    update node
-                    modifier.RefreshScreen()
-                    after_vertex_count = modifier.GetNumVertices node:node
-                )
-
-                if after_vertex_count >= before_vertex_count then
-                (
-                    throw "Remove Vertex did not reduce live topology."
-                )
-
-                removed_count = before_vertex_count - after_vertex_count
-            )
-
-            modifier.name = deleted_name
-            modifier.showCage = off
-            update node
-            completeRedraw()
-
-            last_slice_report = node.name + ": removed " + (removed_count as string) + " two-edge vertex/vertices in " + deleted_name + "."
-            if not batch_quiet then format "Wall-Fixer Two-Edge Verts Delete: %\n" last_slice_report
         )
         catch
         (
@@ -13457,52 +12823,8 @@ modifier.split = false
 
 
     /*
-    Collects near-coincident vertices from one evaluated mesh snapshot.
-    Both vertices of every pair inside the requested position threshold are returned without changing scene geometry.
-    */
-    function collectDoubleVertsFromMesh mesh_value position_threshold:1.0 =
-    (
-        double_verts = #{}
-
-        if mesh_value == undefined then return double_verts
-
-        vert_count = getNumVerts mesh_value
-        threshold_value = if position_threshold < 0.0 then 0.0 else position_threshold
-        threshold_sq = threshold_value * threshold_value
-
-        if vert_count > 1 then
-        (
-            for vert_a = 1 to (vert_count - 1) do
-            (
-                pos_a = getVert mesh_value vert_a
-
-                for vert_b = (vert_a + 1) to vert_count do
-                (
-                    pos_b = getVert mesh_value vert_b
-                    delta_pos = pos_b - pos_a
-
-                    if (abs delta_pos.x <= threshold_value) and \
-                       (abs delta_pos.y <= threshold_value) and \
-                       (abs delta_pos.z <= threshold_value) then
-                    (
-                        if (dot delta_pos delta_pos) <= threshold_sq then
-                        (
-                            double_verts[vert_a] = true
-                            double_verts[vert_b] = true
-                        )
-                    )
-                )
-            )
-        )
-
-        double_verts
-        -- return
-    ),
-
-
-    /*
-    Collects duplicate-position vertices from an Editable Poly base for legacy callers.
-    New LMB/RMB workflow controls use evaluated snapshots through selectDuplicatedVerticesOnNode.
+    Collects vertices that have another vertex on the same object within the requested position threshold.
+    Both vertices of every near-coincident pair are returned; geometry is not modified.
     */
     function collectDoubleVerts node position_threshold:1.0 =
     (
@@ -13545,255 +12867,49 @@ modifier.split = false
         -- return
     ),
 
-
     /*
-    Detects duplicated vertices from the evaluated snapshot and stores them in exactly one SELECT DUPLICATED VERTICES Edit Poly.
-    Existing exact SELECT modifiers are reused; no duplicate selection modifier is created and cage display remains off.
-    */
-    function selectDuplicatedVerticesOnNode node position_threshold:1.0 =
-    (
-        if node == undefined or not(isValidNode node) then return #(false, 0, "invalid node", undefined, #{})
-        if superclassof node != GeometryClass then return #(false, 0, "requires geometry", undefined, #{})
-
-        evaluated_mesh = undefined
-        operation_error = undefined
-        selection_modifier = undefined
-        double_verts = #{}
-        snapshot_vertex_count = 0
-        select_name = getSelectDeleteModifierName "DUPLICATED VERTICES"
-
-        try
-        (
-            evaluated_mesh = snapshotAsMesh node
-            if evaluated_mesh == undefined then throw "could not create evaluated snapshot"
-
-            snapshot_vertex_count = getNumVerts evaluated_mesh
-            double_verts = collectDoubleVertsFromMesh evaluated_mesh position_threshold:position_threshold
-            free evaluated_mesh
-            evaluated_mesh = undefined
-
-            if double_verts.numberSet > 0 then
-            (
-                selection_modifier = ensureNamedEditPolyModifier node select_name #Vertex
-                if selection_modifier == undefined then throw (select_name + " could not be created or reused")
-
-                live_vertex_count = selection_modifier.GetNumVertices node:node
-                if live_vertex_count != snapshot_vertex_count then
-                (
-                    throw "evaluated snapshot vertex IDs do not match the existing SELECT DUPLICATED VERTICES modifier"
-                )
-
-                selection_modifier.SetSelection #Vertex double_verts node:node
-                stored_selection = selection_modifier.GetSelection #Vertex node:node
-                if stored_selection != double_verts then
-                (
-                    throw ("SELECT DUPLICATED VERTICES selection mismatch. Requested:" + (double_verts as string) + " actual:" + (stored_selection as string))
-                )
-
-                selection_modifier.showCage = off
-                update node
-            )
-        )
-        catch
-        (
-            if evaluated_mesh != undefined then free evaluated_mesh
-            operation_error = getCurrentException()
-        )
-
-        if operation_error == undefined then
-        (
-            #(true, double_verts.numberSet, "", selection_modifier, copy double_verts)
-        )
-        else
-        (
-            #(false, 0, operation_error as string, selection_modifier, #{})
-        )
-        -- return
-    ),
-
-
-    /*
-    Runs duplicated-vertex LMB selection on every selected geometry node.
-    A SELECT DUPLICATED VERTICES modifier is created and activated only when at least one duplicated vertex is detected.
-    */
-    function selectDuplicatedVerticesSelection position_threshold:1.0 =
-    (
-        last_slice_error = undefined
-        last_slice_report = ""
-        selected_nodes = selection as array
-
-        if selected_nodes.count == 0 then
-        (
-            last_slice_report = "Select at least one geometry object."
-            return #(false, 0)
-        )
-
-        total_double_verts = 0
-        failed_nodes = #()
-        report_text = ""
-        display_node = undefined
-        display_modifier = undefined
-        display_selection = #{}
-
-        for node in selected_nodes do
-        (
-            if superclassof node == GeometryClass then
-            (
-                select_result = selectDuplicatedVerticesOnNode node position_threshold:position_threshold
-
-                if select_result[1] then
-                (
-                    total_double_verts += select_result[2]
-                    report_text += node.name + ": duplicated vertices " + (select_result[2] as string) + ".\n"
-
-                    if display_modifier == undefined and select_result[4] != undefined then
-                    (
-                        display_node = node
-                        display_modifier = select_result[4]
-                        display_selection = select_result[5]
-                    )
-                )
-                else
-                (
-                    append failed_nodes node.name
-                    report_text += node.name + ": FAILED - " + select_result[3] + ".\n"
-                )
-            )
-        )
-
-        if display_modifier != undefined then
-        (
-            display_result = activateNamedEditPolySelection display_node display_modifier #Vertex display_selection
-            if not display_result[1] then
-            (
-                append failed_nodes display_node.name
-                report_text += display_node.name + ": FAILED - SELECT DUPLICATED VERTICES final selection mismatch.\n"
-            )
-        )
-
-        if failed_nodes.count == 0 then
-        (
-            last_slice_report = "Duplicated Vertex Selection complete. Vertices selected: " + (total_double_verts as string) + ".\n" + report_text
-            if not batch_quiet then format "%" last_slice_report
-            #(true, total_double_verts)
-        )
-        else
-        (
-            last_slice_report = "Duplicated Vertex Selection completed with failures.\n" + report_text
-            if not batch_quiet then format "%" last_slice_report
-            #(false, total_double_verts)
-        )
-        -- return
-    ),
-
-
-    /*
-    Verifies zero duplicated vertices do not create a SELECT DUPLICATED VERTICES modifier.
-    Returns true only when detection succeeds with zero matches and the named modifier is absent.
-    */
-    function testDuplicatedVertexSelectionSkipsEmptyModifier =
-    (
-        test_node = undefined
-        test_result = false
-        select_name = getSelectDeleteModifierName "DUPLICATED VERTICES"
-
-        try
-        (
-            test_node = box name:"WALL_FIXER_TEST_NO_DUPLICATES" length:100.0 width:100.0 height:100.0
-            convertToPoly test_node
-
-            select_result = selectDuplicatedVerticesOnNode test_node position_threshold:0.0
-            selection_modifier = findNamedEditPolyModifier test_node select_name
-            test_result = select_result[1] and (select_result[2] == 0) and (selection_modifier == undefined)
-
-            format "TEST duplicated-vertex empty selection: % | count:% | modifier:%\n" test_result select_result[2] selection_modifier
-        )
-        catch
-        (
-            format "TEST duplicated-vertex empty selection FAILED: %\n" (getCurrentException() as string)
-            test_result = false
-        )
-
-        if test_node != undefined and isValidNode test_node then
-        (
-            delete test_node
-        )
-
-        test_result
-        -- return
-    ),
-
-
-    /*
-    Prepares the stored SELECT DUPLICATED VERTICES selection for RMB welding.
-    When no SELECT modifier exists, the same snapshot-based detector creates it first; stored IDs are revalidated against the current snapshot.
-    */
-    function prepareDuplicatedVerticesDeleteOnNode node position_threshold:1.0 =
-    (
-        select_name = getSelectDeleteModifierName "DUPLICATED VERTICES"
-        selection_modifier = findNamedEditPolyModifier node select_name
-
-        if selection_modifier == undefined then
-        (
-            return selectDuplicatedVerticesOnNode node position_threshold:position_threshold
-        )
-
-        evaluated_mesh = undefined
-        operation_error = undefined
-        valid_selection = #{}
-
-        try
-        (
-            evaluated_mesh = snapshotAsMesh node
-            if evaluated_mesh == undefined then throw "could not create evaluated snapshot"
-
-            snapshot_vertex_count = getNumVerts evaluated_mesh
-            current_double_verts = collectDoubleVertsFromMesh evaluated_mesh position_threshold:position_threshold
-            free evaluated_mesh
-            evaluated_mesh = undefined
-
-            live_vertex_count = selection_modifier.GetNumVertices node:node
-            if live_vertex_count != snapshot_vertex_count then
-            (
-                throw "evaluated snapshot vertex IDs do not match SELECT DUPLICATED VERTICES"
-            )
-
-            stored_selection = selection_modifier.GetSelection #Vertex node:node
-            if stored_selection == undefined then stored_selection = #{}
-            valid_selection = stored_selection * current_double_verts
-
-            selection_modifier.useStackSelection = false
-            selection_modifier.showCage = off
-            selection_modifier.SetEPolySelLevel #Vertex
-            selection_modifier.SetSelection #Vertex valid_selection node:node
-            update node
-        )
-        catch
-        (
-            if evaluated_mesh != undefined then free evaluated_mesh
-            operation_error = getCurrentException()
-        )
-
-        if operation_error == undefined then
-        (
-            #(true, valid_selection.numberSet, "", selection_modifier, copy valid_selection)
-        )
-        else
-        (
-            #(false, 0, operation_error as string, selection_modifier, #{})
-        )
-        -- return
-    ),
-
-
-    /*
-    Compatibility wrapper for older callers of selectDoubleVerts.
-    The operation now follows the project-wide SELECT DUPLICATED VERTICES modifier rule.
+    Selects all near-coincident vertices on the currently selected supported wall objects.
+    The position threshold is measured in 3ds Max system units and the operation is selection-only.
     */
     function selectDoubleVerts position_threshold:1.0 =
     (
-        result = selectDuplicatedVerticesSelection position_threshold:position_threshold
-        result[1]
+        selected_nodes = selection as array
+        supported_nodes = #()
+        total_double_verts = 0
+
+        for node in selected_nodes do
+        (
+            if isSupportedNode node then
+            (
+                append supported_nodes node
+                double_verts = collectDoubleVerts node position_threshold:position_threshold
+                polyop.setVertSelection node.baseObject double_verts
+                update node
+                total_double_verts += double_verts.numberSet
+
+            )
+        )
+
+        if supported_nodes.count == 0 then
+        (
+            messageBox "Wall-Fixer: Select at least one supported Editable Poly wall object."
+            false
+        )
+        else
+        (
+            try
+            (
+                max modify mode
+                subObjectLevel = 1
+            )
+            catch
+            (
+            )
+
+            if not batch_quiet then format "FIND DOUBLE VERTS: % selected\n" total_double_verts
+            completeRedraw()
+            true
+        )
         -- return
     ),
 

@@ -8,7 +8,7 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global straight_edge_fixer_file_version = "0.44"
-global straight_edge_fixer_tool_version = 0.9994
+global straight_edge_fixer_tool_version = 1.0003
 
 /*
 Registers this file's shared Wall-Fixer tool version.
