@@ -1,6 +1,6 @@
-/*
-Wall-Fixer Bundled Loader 0.995
-Project version 1.0049.
+﻿/*
+Wall-Fixer Bundled Loader 1.031
+Project version 1.0399.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.996"
-global wall_fixer_loader_tool_version = 1.0049
+global wall_fixer_loader_file_version = "1.031"
+global wall_fixer_loader_tool_version = 1.0399
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -117,7 +117,7 @@ Bundled dependency order:
 
 
 /*
-Wall-Fixer Pipeline 0.26
+Wall-Fixer Pipeline 0.27
 Native Edit Poly topology snapshot and wall slicing pipeline.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -126,8 +126,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_pipeline_file_version = "0.26"
-global wall_fixer_pipeline_tool_version = 0.968
+global wall_fixer_pipeline_file_version = "0.27"
+global wall_fixer_pipeline_tool_version = 1.0279
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -781,14 +781,24 @@ struct WMCWallSlicePipeline
         )
         true
     ),
-    fn applyOperation level ids operation =
+    function applyOperation level ids operation slice_plane_transform:undefined =
     (
         ep.SetEPolySelLevel level
         refreshTopology()
         ep.SetSelection level #{} node:node
-        local selectedOK = ep.Select level ids node:node
-        if not selectedOK or (ep.GetSelection level node:node) != ids do throw ("Edit Poly selection failed for " + (level as string) + " result=" + (selectedOK as string) + " requested=" + (ids as string) + " actual=" + ((ep.GetSelection level node:node) as string))
+        local selected_ok = ep.Select level ids node:node
+        if not selected_ok or (ep.GetSelection level node:node) != ids then
+        (
+            throw ("Edit Poly selection failed for " + (level as string) + " result=" + (selected_ok as string) + " requested=" + (ids as string) + " actual=" + ((ep.GetSelection level node:node) as string))
+        )
+
         ep.SetOperation operation
+
+        if slice_plane_transform != undefined then
+        (
+            ep.slice_plane.transform = slice_plane_transform
+        )
+
         ep.Commit()
         refreshTopology()
     ),
@@ -1743,7 +1753,7 @@ struct WMCWallSlicePipeline
     Performs one debug slice using a plane defined entirely by the unchanged base object.
     The current Edit Poly only executes the plane and no longer rediscovers a border edge.
     */
-    function makeOneSliceFromBasePlane sourceVertex worldAnchor worldAxis sliceKind wall_normal:undefined wall_origin:undefined plane_tolerance:1.0 =
+    function makeOneSliceFromBasePlane sourceVertex worldAnchor worldAxis sliceKind wall_normal:undefined wall_origin:undefined plane_tolerance:1.0 slice_plane_transform:undefined =
     (
         if worldAnchor == undefined or worldAxis == undefined then return undefined
         if length worldAxis <= tolerance then return undefined
@@ -1811,14 +1821,17 @@ struct WMCWallSlicePipeline
             completeRedraw()
         )
 
-        local tm = node.objectTransform
-        local local_normal = normalize [dot tm.row1 axis,dot tm.row2 axis,dot tm.row3 axis]
-        local local_point = worldAnchor * inverse tm
-        ep.SetSlicePlane local_normal local_point
+        if slice_plane_transform == undefined then
+        (
+            local tm = node.objectTransform
+            local local_normal = normalize [dot tm.row1 axis,dot tm.row2 axis,dot tm.row3 axis]
+            local local_point = worldAnchor * inverse tm
+            ep.SetSlicePlane local_normal local_point
+        )
 
         local slice_operation = if slice_faces.numberSet == t.validFaces.numberSet then #Slice else #SliceSelectedFaces
-        format "Wall-Fixer Base Plane Slice: source:% direction:% alignedCurrentVerts:% axis:% regionFaces:%/% operation:% split:%\n"             sourceVertex sliceKind aligned_vertices axis slice_faces.numberSet t.validFaces.numberSet slice_operation ep.split
-        t = applyOperation #Face slice_faces slice_operation
+        format "Wall-Fixer Base Plane Slice: source:% direction:% alignedCurrentVerts:% axis:% regionFaces:%/% operation:% split:% directGizmo:%\n"             sourceVertex sliceKind aligned_vertices axis slice_faces.numberSet t.validFaces.numberSet slice_operation ep.split (slice_plane_transform != undefined)
+        t = applyOperation #Face slice_faces slice_operation slice_plane_transform:slice_plane_transform
 
         local topology_changed = (t.validVertices.numberSet != original_vertex_count or t.validEdges.numberSet != original_edge_count or t.validFaces.numberSet != original_face_count)
 
@@ -2178,7 +2191,7 @@ struct WMCWallSlicePipeline
 
 
 /*
-Wall-Fixer Core 0.62
+Wall-Fixer Core 0.79
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -2187,8 +2200,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.63"
-global wall_fixer_core_tool_version = 1.0049
+global wall_fixer_core_file_version = "0.79"
+global wall_fixer_core_tool_version = 1.0399
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -2241,18 +2254,31 @@ if WallFixerRollout != undefined then
 
 
 /*
-Stable Redundant Loop Detector 0.08 integration.
+Stable Redundant Loop Detector 0.13 integration.
 Used by POST-PROCESS step 11; standalone dialog code is intentionally omitted.
 */
 global RedundantLoopDetector
 
 struct RedundantLoopDetector_v
 (
-    file_version = 0.08,
+    file_version = 0.13,
     face_angle_threshold = 0.1,
     straight_angle_threshold = 2.0,
     coincidence_tolerance = 0.001,
     crease_epsilon = 0.000001,
+
+    /*
+    Forces Editable Poly and Edit Poly selection mode to normal component selection.
+    Every selection read/write path in this tool uses selectMode 0.
+    */
+    function forceSelectModeZero editable_poly =
+    (
+        if editable_poly == undefined then return false
+
+        try(editable_poly.selectMode = 0)catch()
+        true
+        -- return
+    ),
 
     /*
     Returns the opposite vertex of an incident edge.
@@ -2528,6 +2554,7 @@ struct RedundantLoopDetector_v
 
         if classOf node.baseObject == Editable_Poly and node.modifiers.count == 0 then
         (
+            forceSelectModeZero node.baseObject
             #(node, node.baseObject, false)
         )
         else
@@ -2544,6 +2571,7 @@ struct RedundantLoopDetector_v
                     convertToPoly temp_node
 
                     if classOf temp_node.baseObject != Editable_Poly then throw "evaluated copy is not Editable Poly"
+                    forceSelectModeZero temp_node.baseObject
                     result_data = #(temp_node, temp_node.baseObject, true)
                 )
             )
@@ -2819,6 +2847,51 @@ struct RedundantLoopDetector_v
     ),
 
     /*
+    Tests one isolated internal divider edge separately from open-chain terminal logic.
+    It must be an internal coplanar candidate with no other candidate edge incident at either endpoint.
+    */
+    function isValidIsolatedDivider edge_index candidate_edges topology_data face_threshold:0.1 =
+    (
+        if edge_index < 1 or edge_index > topology_data[2] then return false
+        if not candidate_edges[edge_index] then return false
+
+        vertex_edges = topology_data[5]
+        vertex_faces = topology_data[6]
+        edge_vertices = topology_data[7]
+        edge_faces = topology_data[8]
+        face_normals = topology_data[11]
+        face_valid = topology_data[12]
+
+        edge_pair = edge_vertices[edge_index]
+        face_pair = edge_faces[edge_index]
+        if edge_pair == undefined or edge_pair.count != 2 then return false
+        if face_pair == undefined or face_pair.count != 2 then return false
+
+        face_a = face_pair[1]
+        face_b = face_pair[2]
+        if face_a < 1 or face_b < 1 then return false
+        if face_a > face_normals.count or face_b > face_normals.count then return false
+        if not face_valid[face_a] or not face_valid[face_b] then return false
+
+        reference_normal = face_normals[face_a]
+        if reference_normal == undefined then return false
+
+        divider_edge = #{}
+        divider_edge[edge_index] = true
+
+        for vertex_index in edge_pair do
+        (
+            other_candidates = (vertex_edges[vertex_index] * candidate_edges) - divider_edge
+            if other_candidates.numberSet > 0 then return false
+
+            if not(isVertexPlanar vertex_index vertex_faces face_normals face_valid reference_normal angle_threshold:face_threshold) then return false
+        )
+
+        true
+        -- return
+    ),
+
+    /*
     Validates a completed chain as one planar, straight, terminal-to-terminal topology feature.
     Any invalid endpoint, branch, border incidence, or non-planar incident face rejects the whole chain.
     */
@@ -2921,8 +2994,39 @@ struct RedundantLoopDetector_v
         straight_limit = cos straight_threshold
         accepted_keys = #()
         attempted_keys = #()
+        isolated_edges = #{}
 
-        for start_edge in candidate_edges do
+        for divider_edge in candidate_edges do
+        (
+            if isValidIsolatedDivider divider_edge candidate_edges topology_data face_threshold:face_threshold then
+            (
+                divider_pair = edge_vertices[divider_edge]
+                divider_bits = #{}
+                divider_bits[divider_edge] = true
+                divider_vertices = #(divider_pair[1], divider_pair[2])
+                divider_key = makeChainKey divider_bits
+
+                if findItem accepted_keys divider_key == 0 then
+                (
+                    append accepted_keys divider_key
+                    append loop_records #(divider_bits, divider_vertices, divider_pair[1], divider_pair[2])
+                    redundant_edges = redundant_edges + divider_bits
+                    isolated_edges[divider_edge] = true
+
+                    if debug_output then
+                    (
+                        vertex_bits = #{}
+                        vertex_bits[divider_pair[1]] = true
+                        vertex_bits[divider_pair[2]] = true
+                        format "REDUNDANT DIVIDER | node:% | verts:% | edges:%\n" node.name vertex_bits divider_bits
+                    )
+                )
+            )
+        )
+
+        traversal_candidates = candidate_edges - isolated_edges
+
+        for start_edge in traversal_candidates do
         (
             start_pair = edge_vertices[start_edge]
 
@@ -2991,7 +3095,7 @@ struct RedundantLoopDetector_v
                                 (
                                     incoming_direction = normalize incoming_direction
                                     forward_edges = #()
-                                    incident_candidates = vertex_edges[current_vertex] * candidate_edges
+                                    incident_candidates = vertex_edges[current_vertex] * traversal_candidates
 
                                     for candidate_edge in incident_candidates do
                                     (
@@ -3072,7 +3176,7 @@ struct RedundantLoopDetector_v
 
                         if rejected_reason == "" and completed_chain then
                         (
-                            validation = validateChain chain_edges chain_vertices start_vertex current_vertex candidate_edges topology_data reference_normal face_threshold:face_threshold straight_threshold:straight_threshold
+                            validation = validateChain chain_edges chain_vertices start_vertex current_vertex traversal_candidates topology_data reference_normal face_threshold:face_threshold straight_threshold:straight_threshold
 
                             if validation[1] then
                             (
@@ -3113,8 +3217,57 @@ struct RedundantLoopDetector_v
     ),
 
     /*
+    Returns the currently selected edge IDs from the active Editable Poly or Edit Poly object.
+    The selection source is never inferred from a debug spinner.
+    */
+    function getCurrentSelectedEdges node =
+    (
+        selected_edges = #{}
+        if node == undefined or not(isValidNode node) then return selected_edges
+
+        current_object = undefined
+        try(current_object = modPanel.getCurrentObject())catch()
+
+        if current_object != undefined and classOf current_object == Edit_Poly then
+        (
+            current_on_node = false
+
+            for modifier_index = 1 to node.modifiers.count while not current_on_node do
+            (
+                if node.modifiers[modifier_index] == current_object then current_on_node = true
+            )
+
+            if current_on_node then
+            (
+                forceSelectModeZero current_object
+                try(selected_edges = current_object.GetSelection #Edge node:node)catch()
+            )
+        )
+
+        if selected_edges.numberSet == 0 and node.modifiers.count > 0 then
+        (
+            top_modifier = node.modifiers[1]
+
+            if classOf top_modifier == Edit_Poly then
+            (
+                forceSelectModeZero top_modifier
+                try(selected_edges = top_modifier.GetSelection #Edge node:node)catch()
+            )
+        )
+
+        if selected_edges.numberSet == 0 and classOf node.baseObject == Editable_Poly then
+        (
+            forceSelectModeZero node.baseObject
+            try(selected_edges = polyop.getEdgeSelection node.baseObject)catch()
+        )
+
+        selected_edges
+        -- return
+    ),
+
+    /*
     Prints detailed classification for one analyzed edge ID without changing the object.
-    This is intended for diagnosing a specific expected redundant edge such as edge 31.
+    The UI calls this for every currently selected edge on the active object.
     */
     function debugEdge node edge_index face_threshold:0.1 straight_threshold:2.0 =
     (
@@ -3147,7 +3300,8 @@ struct RedundantLoopDetector_v
         vertex_edges = topology_data[5]
         vertex_points = topology_data[4]
 
-        format "DEBUG EDGE % | verts:% | faces:% | candidate:% | border:% | crease:%\n" edge_index edge_pair face_pair candidate_edges[edge_index] border_edges[edge_index] crease_edges[edge_index]
+        isolated_ok = isValidIsolatedDivider edge_index candidate_edges topology_data face_threshold:face_threshold
+        format "DEBUG EDGE % | verts:% | faces:% | candidate:% | isolatedDivider:% | border:% | crease:%\n" edge_index edge_pair face_pair candidate_edges[edge_index] isolated_ok border_edges[edge_index] crease_edges[edge_index]
 
         if edge_pair != undefined then
         (
@@ -3167,6 +3321,31 @@ struct RedundantLoopDetector_v
 
         releaseAnalysisSource analysis_source
         true
+        -- return
+    ),
+
+    /*
+    Debugs every currently selected edge on one object.
+    No explicit edge ID input is required.
+    */
+    function debugSelectedEdges node face_threshold:0.1 straight_threshold:2.0 =
+    (
+        selected_edges = getCurrentSelectedEdges node
+
+        if selected_edges.numberSet == 0 then
+        (
+            messageBox "Select one or more edges first." title:"Redundant Loop Detector"
+            return false
+        )
+
+        debug_ok = true
+
+        for edge_index in selected_edges do
+        (
+            if not(debugEdge node edge_index face_threshold:face_threshold straight_threshold:straight_threshold) then debug_ok = false
+        )
+
+        debug_ok
         -- return
     ),
 
@@ -3207,10 +3386,12 @@ struct RedundantLoopDetector_v
         (
             select node
             max modify mode
+            if classOf node.baseObject == Editable_Poly then forceSelectModeZero node.baseObject
+            forceSelectModeZero selection_modifier
             selection_modifier.SetPrimaryNode node
             selection_modifier.useStackSelection = false
             selection_modifier.showCage = false
-            selection_modifier.selectMode = 1
+            selection_modifier.selectMode = 0
             modPanel.setCurrentObject selection_modifier
             selection_modifier.SetEPolySelLevel #Edge
             subObjectLevel = 2
@@ -3303,6 +3484,8 @@ struct RedundantLoopDetector_v
                 created_now = modifier_data[2]
 
                 if not(activateSelectionModifier node selection_modifier) then throw "could not activate SELECT REDUNDANT LOOPS"
+                forceSelectModeZero selection_modifier
+                if classOf node.baseObject == Editable_Poly then forceSelectModeZero node.baseObject
                 if not(verifyEdgeIdMapping node topology_data) then throw "evaluated edge IDs changed before selection storage"
 
                 /* EditPolyMod selection BitArrays must span the complete mesh edge range.
@@ -3374,7 +3557,7 @@ struct RedundantLoopDetector_v
     ),
 
     /*
-    Processes every selected object independently and focuses the first object containing accepted redundant edges.
+    Processes every selected object independently and finishes with only matching objects selected.
     Each matching object receives its own SELECT REDUNDANT LOOPS modifier and Edge selection.
     */
     function selectRedundantLoops face_threshold:0.1 straight_threshold:2.0 debug_output:true =
@@ -3392,6 +3575,7 @@ struct RedundantLoopDetector_v
         failed_count = 0
         first_match_node = undefined
         first_match_modifier = undefined
+        matching_nodes = #()
 
         for node in selected_nodes do
         (
@@ -3404,10 +3588,15 @@ struct RedundantLoopDetector_v
 
                 format "Redundant Loop Detector | node:% | chains:% | selectedEdges:%\n" node.name result_data[2] result_data[3]
 
-                if first_match_modifier == undefined and result_data[3] > 0 then
+                if result_data[3] > 0 then
                 (
-                    first_match_node = node
-                    first_match_modifier = result_data[5]
+                    append matching_nodes node
+
+                    if first_match_modifier == undefined then
+                    (
+                        first_match_node = node
+                        first_match_modifier = result_data[5]
+                    )
                 )
             )
             else
@@ -3417,14 +3606,19 @@ struct RedundantLoopDetector_v
             )
         )
 
-        if first_match_modifier != undefined then
+        if matching_nodes.count > 0 then
         (
-            activateSelectionModifier first_match_node first_match_modifier
-            first_match_modifier.RefreshScreen()
+            select matching_nodes
+
+            if matching_nodes.count == 1 and first_match_modifier != undefined then
+            (
+                activateSelectionModifier first_match_node first_match_modifier
+                first_match_modifier.RefreshScreen()
+            )
         )
         else
         (
-            select selected_nodes
+            clearSelection()
         )
 
         completeRedraw()
@@ -3436,7 +3630,7 @@ struct RedundantLoopDetector_v
 
     /*
     Removes the currently selected edges from the dedicated selection modifier.
-    The operation uses Edit Poly Remove Edge + Vertices so adjacent faces are preserved and redundant edge vertices are removed.
+    The operation uses Edge-level Remove with the Remove Edge CTRL state enabled so adjacent faces are preserved and redundant edge vertices are removed.
     */
     function removeSelectedEdges =
     (
@@ -3468,6 +3662,8 @@ struct RedundantLoopDetector_v
             return false
         )
 
+        forceSelectModeZero selection_modifier
+        if classOf node.baseObject == Editable_Poly then forceSelectModeZero node.baseObject
         selected_edges = EditPolyMod.GetSelection selection_modifier #Edge node:node
 
         if selected_edges.numberSet == 0 then
@@ -3484,8 +3680,10 @@ struct RedundantLoopDetector_v
         (
             undo "Remove Redundant Loops" on
             (
-                selection_modifier.remveEdgeCtrlKey = false
-                selection_modifier.ButtonOp #RemoveEdgeRemoveVertices
+                selection_modifier.remveEdgeCtrlKey = true
+                selection_modifier.SetEPolySelLevel #Edge
+                subObjectLevel = 2
+                selection_modifier.ButtonOp #RemoveEdge
                 update node
                 selection_modifier.showCage = false
                 selection_modifier.RefreshScreen()
@@ -3543,6 +3741,7 @@ struct RedundantLoopDetector_v
         test_node = editable_mesh name:(uniqueName "REDUNDANT_LOOP_TEST_")
         convertTo test_node Editable_Poly
         test_poly = test_node.baseObject
+        forceSelectModeZero test_poly
 
         vertex_1 = polyop.createVert test_poly [x_offset + 0.0, 0.0, 0.0]
         vertex_2 = polyop.createVert test_poly [x_offset + 10.0, 0.0, 0.0]
@@ -3577,6 +3776,7 @@ struct RedundantLoopDetector_v
         test_node = editable_mesh name:(uniqueName "REDUNDANT_T_TEST_")
         convertTo test_node Editable_Poly
         test_poly = test_node.baseObject
+        forceSelectModeZero test_poly
 
         vertex_1 = polyop.createVert test_poly [x_offset + 0.0, 0.0, 0.0]
         vertex_2 = polyop.createVert test_poly [x_offset + 5.0, 0.0, 0.0]
@@ -3600,14 +3800,15 @@ struct RedundantLoopDetector_v
     ),
 
     /*
-    Creates a divider that ends on a real border corner.
-    The divider must never be classified as redundant even though its adjacent faces are planar.
+    Creates one isolated planar divider whose endpoint is also a polygon border corner.
+    As a single divider edge it is valid; the border-corner rejection applies to multi-edge chain terminals.
     */
     function createBorderCornerTestObject x_offset:60.0 =
     (
         test_node = editable_mesh name:(uniqueName "REDUNDANT_CORNER_TEST_")
         convertTo test_node Editable_Poly
         test_poly = test_node.baseObject
+        forceSelectModeZero test_poly
 
         vertex_1 = polyop.createVert test_poly [x_offset + 0.0, 0.0, 0.0]
         vertex_2 = polyop.createVert test_poly [x_offset + 10.0, 0.0, 0.0]
@@ -3660,8 +3861,8 @@ struct RedundantLoopDetector_v
     ),
 
     /*
-    Runs regression tests for direct Editable Poly analysis and terminal behavior.
-    The tests verify divider selection, crease rejection, valid T-junction acceptance, and border-corner rejection.
+    Runs regression tests for direct Editable Poly analysis, isolated dividers, and chain terminal behavior.
+    The tests verify divider selection, crease rejection, valid T-junction acceptance, and isolated single-edge acceptance.
     */
     function runTests =
     (
@@ -3722,8 +3923,12 @@ struct RedundantLoopDetector_v
             corner_test = corner_data[1]
             corner_edge = corner_data[2]
             corner_result = selectRedundantLoopsOnNode corner_test face_threshold:0.1 straight_threshold:2.0 debug_output:true
-            corner_ok = corner_result[1] and corner_result[3] == 0
-            format "TEST border-corner divider rejected: % | cornerEdge:% | selectedCount:% | error:%\n" corner_ok corner_edge corner_result[3] corner_result[4]
+            corner_selection = #{}
+
+            if corner_result[1] and corner_result[5] != undefined then corner_selection = EditPolyMod.GetSelection corner_result[5] #Edge node:corner_test
+
+            corner_ok = corner_result[1] and corner_selection[corner_edge]
+            format "TEST isolated single divider selected: % | expectedEdge:% | stored:% | error:%\n" corner_ok corner_edge corner_selection corner_result[4]
             if not corner_ok then test_passed = false
         )
         catch
@@ -4461,16 +4666,24 @@ struct WallFixer_v
 
 
     /*
-    Returns true only for Edit Poly modifiers used by the slicing workflow.
-    Directional slice modifiers use exact user-facing names; legacy topology names remain supported.
+    Returns true for Wall-Fixer Edit Poly slice modifiers and real Slice Force modifiers.
+    Legacy fake Edit Poly Force modifiers remain recognized so stale stacks can still be cleaned safely.
     */
     function isWallFixerSliceModifier stack_modifier =
     (
         if stack_modifier == undefined then return false
+
+        local modifier_name = stack_modifier.name as string
+        local normalized_name = toUpper modifier_name
+
+        if classOf stack_modifier == SliceModifier then
+        (
+            return findString normalized_name "SLICE FORCE " == 1
+        )
+
         if classOf stack_modifier != Edit_Poly then return false
 
-        modifier_name = stack_modifier.name as string
-        slice_modifier_names = #(
+        local slice_modifier_names = #(
             "SLICE ALL",
             "SLICE HORIZONTAL",
             "SLICE VERTICAL",
@@ -4478,7 +4691,7 @@ struct WallFixer_v
             "Wall topology cleanup"
         )
 
-        (findItem slice_modifier_names modifier_name) > 0
+        ((findItem slice_modifier_names modifier_name) > 0) or (findString normalized_name "SLICE FORCE " == 1)
         -- return
     ),
     /*
@@ -4515,6 +4728,49 @@ struct WallFixer_v
     function shouldRestrictSliceToSelectedComponents object_count subobject_level =
     (
         object_count == 1 and subobject_level != undefined and subobject_level > 0
+        -- return
+    ),
+
+    /*
+    Returns whether an already-active top Slice modifier is eligible for selected-vertex continuation.
+    Continuation is intentionally limited to Vertex mode with a non-empty selection and matching direction.
+    */
+    function shouldContinueOnActiveSliceModifier modifier_name cut_mode subobject_level has_vertex_selection =
+    (
+        local normalized_name = toUpper (modifier_name as string)
+
+        if subobject_level != 1 or not has_vertex_selection then return false
+
+        case cut_mode of
+        (
+            #vertical: normalized_name == "SLICE VERTICAL"
+            #horizontal: normalized_name == "SLICE HORIZONTAL"
+            default: normalized_name == "SLICE ALL"
+        )
+        -- return
+    ),
+
+    /*
+    Returns the active top Slice modifier when selected-vertex continuation is valid.
+    No modifier is created or activated by this lookup.
+    */
+    function getActiveTopSliceContinuationModifier node cut_mode =
+    (
+        if node == undefined or not(isValidNode node) then return undefined
+        if selection.count != 1 or selection[1] != node then return undefined
+        if subObjectLevel != 1 then return undefined
+        if node.modifiers.count == 0 then return undefined
+
+        local top_modifier = node.modifiers[1]
+        local current_object = undefined
+        local selected_vertices = #{}
+
+        try(current_object = modPanel.getCurrentObject())catch(current_object = undefined)
+        if current_object != top_modifier or classOf top_modifier != Edit_Poly then return undefined
+
+        try(selected_vertices = top_modifier.GetSelection #Vertex node:node)catch(selected_vertices = #{})
+
+        if shouldContinueOnActiveSliceModifier top_modifier.name cut_mode subObjectLevel (selected_vertices.numberSet > 0) then top_modifier else undefined
         -- return
     ),
 
@@ -4650,6 +4906,7 @@ struct WallFixer_v
 
         if normalized_name == "WMC - WALL TOPOLOGY CLEANUP" or normalized_name == "WALL TOPOLOGY CLEANUP" then return true
         if normalized_name == "SLICE ALL" then return true
+        if findString normalized_name "SLICE FORCE " == 1 then return true
 
         case cut_mode of
         (
@@ -4669,7 +4926,7 @@ struct WallFixer_v
     Removes only the slicing modifiers that conflict with the requested mode.
     Horizontal preserves SLICE VERTICAL; Vertical preserves SLICE HORIZONTAL.
     */
-    function removeWallFixerSliceModifiers node cut_mode:#all =
+    function removeWallFixerSliceModifiers node cut_mode:#all preserve_modifier:undefined =
     (
         if node == undefined or not(isValidNode node) then return false
 
@@ -4680,7 +4937,7 @@ struct WallFixer_v
 
             if isWallFixerSliceModifier stack_modifier then
             (
-                if shouldRemoveWallFixerSliceModifierName stack_modifier.name cut_mode then
+                if stack_modifier != preserve_modifier and shouldRemoveWallFixerSliceModifierName stack_modifier.name cut_mode then
                 (
                     deleteModifier node stack_modifier
                 )
@@ -10331,8 +10588,47 @@ struct WallFixer_v
     ),
 
     /*
+    Returns the matching directional plane-group index inside one planar wall region.
+    Plane identity uses parallel normals plus signed plane position, so different hole corners on the same cut plane collapse to one task.
+    */
+    function findBaseSlicePlaneGroupIndex plane_groups world_anchor world_axis region_id match_tolerance:0.001 =
+    (
+        if world_anchor == undefined or world_axis == undefined then return 0
+        if length world_axis <= epsilon then return 0
+
+        local normalized_axis = normalize world_axis
+        local axis_cos = cos 0.1
+        local plane_tolerance = amax epsilon match_tolerance
+        local group_index = 0
+
+        for index = 1 to plane_groups.count while group_index == 0 do
+        (
+            local group_item = plane_groups[index]
+            local group_anchor = group_item[1]
+            local group_axis = group_item[2]
+            local group_region_id = group_item[6]
+
+            if group_region_id == region_id and group_anchor != undefined and group_axis != undefined and length group_axis > epsilon then
+            (
+                local normalized_group_axis = normalize group_axis
+                local parallel = abs(dot normalized_group_axis normalized_axis) >= axis_cos
+                local same_plane = abs(dot(world_anchor - group_anchor) normalized_axis) <= plane_tolerance
+
+                if parallel and same_plane then
+                (
+                    group_index = index
+                )
+            )
+        )
+
+        group_index
+        -- return
+    ),
+
+
+    /*
     Builds one fixed slice-task queue from unchanged base-object INNER VERTS.
-    Horizontal tasks are grouped only inside the same planar wall region so cuts stop at wall corners.
+    Both directions group equal geometric planes inside the same planar wall region so one plane is cut only once even when multiple holes contribute anchors.
     */
     function buildBaseSliceTaskQueue node cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 horizontal_level_tolerance:0.001 planar_tolerance:1.0 =
     (
@@ -10348,9 +10644,13 @@ struct WallFixer_v
             source_vertices:reset_inner_vertices \
             planar_tolerance:planar_tolerance
 
-        /* Vertical mode keeps one task per candidate and planar wall region. */
+        local plane_group_tolerance = amax epsilon horizontal_level_tolerance
+
+        /* Vertical mode groups equal vertical planes inside the same planar wall region. */
         if cut_mode == #all or cut_mode == #vertical then
         (
+            local vertical_groups = #()
+
             for candidate in base_candidates do
             (
                 local base_vertex = candidate[1]
@@ -10358,35 +10658,75 @@ struct WallFixer_v
                 local base_edge = candidate[4]
                 local base_anchor = candidate[6]
                 local base_axis = if slice_plane_mode == #nextVert then candidate[7] else candidate[9]
-                local wall_normal = candidate[11]
-                local wall_origin = candidate[12]
                 local region_id = candidate[13]
 
                 if direction_available and base_axis != undefined then
                 (
-                    local task_edges = #{}
-                    local task_vertices = #{}
-                    if base_edge > 0 then task_edges[base_edge] = true
-                    task_vertices[base_vertex] = true
+                    local group_index = findBaseSlicePlaneGroupIndex \
+                        vertical_groups \
+                        base_anchor \
+                        base_axis \
+                        region_id \
+                        match_tolerance:plane_group_tolerance
 
-                    append result #(
-                        base_vertex,
-                        #vertical,
-                        base_edge,
-                        base_anchor,
-                        base_axis,
-                        task_edges,
-                        task_vertices,
-                        base_anchor.z,
-                        wall_normal,
-                        wall_origin,
-                        region_id
+                    if group_index == 0 then
+                    (
+                        local group_edges = #{}
+                        local group_vertices = #{}
+                        if base_edge > 0 then group_edges[base_edge] = true
+                        group_vertices[base_vertex] = true
+
+                        append vertical_groups #(
+                            base_anchor,
+                            base_axis,
+                            candidate,
+                            group_edges,
+                            group_vertices,
+                            region_id
+                        )
+                    )
+                    else
+                    (
+                        local group_item = vertical_groups[group_index]
+                        if base_edge > 0 then group_item[4][base_edge] = true
+                        group_item[5][base_vertex] = true
                     )
                 )
             )
+
+            for group_item in vertical_groups do
+            (
+                local representative = group_item[3]
+                local group_edges = copy group_item[4]
+                local group_vertices = copy group_item[5]
+                local region_id = group_item[6]
+                local base_vertex = representative[1]
+                local base_edge = representative[4]
+                local base_anchor = representative[6]
+                local base_axis = if slice_plane_mode == #nextVert then representative[7] else representative[9]
+                local wall_normal = representative[11]
+                local wall_origin = representative[12]
+
+                append result #(
+                    base_vertex,
+                    #vertical,
+                    base_edge,
+                    base_anchor,
+                    base_axis,
+                    group_edges,
+                    group_vertices,
+                    base_anchor.z,
+                    wall_normal,
+                    wall_origin,
+                    region_id
+                )
+
+                if not batch_quiet then format "Wall-Fixer Vertical Slice Plane Group: node:% region:% anchor:% verts:% edges:% representative:%\n" \
+                    node.name region_id base_anchor group_vertices group_edges base_vertex
+            )
         )
 
-        /* Horizontal mode groups equal Z levels only within the same planar wall region. */
+        /* Horizontal mode groups equal horizontal planes inside the same planar wall region. */
         if cut_mode == #all or cut_mode == #horizontal then
         (
             local horizontal_groups = #()
@@ -10402,19 +10742,12 @@ struct WallFixer_v
 
                 if direction_available and base_axis != undefined then
                 (
-                    local level_z = base_anchor.z
-                    local group_index = 0
-
-                    for index = 1 to horizontal_groups.count while group_index == 0 do
-                    (
-                        local same_level = abs(horizontal_groups[index][1] - level_z) <= horizontal_level_tolerance
-                        local same_region = horizontal_groups[index][5] == region_id
-
-                        if same_level and same_region then
-                        (
-                            group_index = index
-                        )
-                    )
+                    local group_index = findBaseSlicePlaneGroupIndex \
+                        horizontal_groups \
+                        base_anchor \
+                        base_axis \
+                        region_id \
+                        match_tolerance:plane_group_tolerance
 
                     if group_index == 0 then
                     (
@@ -10422,24 +10755,31 @@ struct WallFixer_v
                         local group_vertices = #{}
                         if base_edge > 0 then group_edges[base_edge] = true
                         group_vertices[base_vertex] = true
-                        append horizontal_groups #(level_z, candidate, group_edges, group_vertices, region_id)
+
+                        append horizontal_groups #(
+                            base_anchor,
+                            base_axis,
+                            candidate,
+                            group_edges,
+                            group_vertices,
+                            region_id
+                        )
                     )
                     else
                     (
                         local group_item = horizontal_groups[group_index]
-                        if base_edge > 0 then group_item[3][base_edge] = true
-                        group_item[4][base_vertex] = true
+                        if base_edge > 0 then group_item[4][base_edge] = true
+                        group_item[5][base_vertex] = true
                     )
                 )
             )
 
             for group_item in horizontal_groups do
             (
-                local level_z = group_item[1]
-                local representative = group_item[2]
-                local group_edges = copy group_item[3]
-                local group_vertices = copy group_item[4]
-                local region_id = group_item[5]
+                local representative = group_item[3]
+                local group_edges = copy group_item[4]
+                local group_vertices = copy group_item[5]
+                local region_id = group_item[6]
                 local base_vertex = representative[1]
                 local base_edge = representative[5]
                 local base_anchor = representative[6]
@@ -10455,14 +10795,14 @@ struct WallFixer_v
                     base_axis,
                     group_edges,
                     group_vertices,
-                    level_z,
+                    base_anchor.z,
                     wall_normal,
                     wall_origin,
                     region_id
                 )
 
-                if not batch_quiet then format "Wall-Fixer Horizontal Slice Level Group: node:% region:% z:% verts:% edges:% representative:%\n" \
-                    node.name region_id level_z group_vertices group_edges base_vertex
+                if not batch_quiet then format "Wall-Fixer Horizontal Slice Plane Group: node:% region:% anchor:% verts:% edges:% representative:%\n" \
+                    node.name region_id base_anchor group_vertices group_edges base_vertex
             )
         )
 
@@ -10470,6 +10810,30 @@ struct WallFixer_v
         result
         -- return
     ),
+
+
+    /*
+    Tests directional plane grouping math used to collapse multiple hole anchors onto one slice task.
+    */
+    function testBaseSlicePlaneGroupingRule =
+    (
+        local groups = #(
+            #([0,0,10], [0,0,1], undefined, #{}, #{}, 1),
+            #([5,0,0], [1,0,0], undefined, #{}, #{}, 1)
+        )
+
+        local same_horizontal = findBaseSlicePlaneGroupIndex groups [25,40,10] [0,0,1] 1 match_tolerance:0.001
+        local same_vertical = findBaseSlicePlaneGroupIndex groups [5,30,20] [1,0,0] 1 match_tolerance:0.001
+        local different_horizontal = findBaseSlicePlaneGroupIndex groups [25,40,11] [0,0,1] 1 match_tolerance:0.001
+        local different_region = findBaseSlicePlaneGroupIndex groups [25,40,10] [0,0,1] 2 match_tolerance:0.001
+
+        same_horizontal == 1 and
+        same_vertical == 2 and
+        different_horizontal == 0 and
+        different_region == 0
+        -- return
+    ),
+
 
     /*
     Returns the exact directional pass list requested by Slice Selected Walls.
@@ -10586,12 +10950,14 @@ struct WallFixer_v
     Executes one fixed base-object slice-task queue inside one named slicing Edit Poly modifier.
     Each call owns exactly one pass; cleanup never controls or regenerates the fixed base-object task queue.
     */
-    function executeBaseSliceTaskQueue node slice_tasks modifier_name:"SLICE ALL" angle_threshold:5.0 planar_tolerance:1.0 precision_threshold:0.01 cleanup_edges:true task_index_offset:0 total_task_count:undefined progress_callback:undefined object_index:0 object_total:0 object_name:"" vertex_count:0 =
+    function executeBaseSliceTaskQueue node slice_tasks modifier_name:"SLICE ALL" existing_modifier:undefined angle_threshold:5.0 planar_tolerance:1.0 precision_threshold:0.01 cleanup_edges:true direct_slice_transform:false task_index_offset:0 total_task_count:undefined progress_callback:undefined object_index:0 object_total:0 object_name:"" vertex_count:0 =
     (
         local success_count = 0
         local no_change_count = 0
         local failure = undefined
+        local failure_stage = ""
         local modifier = undefined
+        local created_modifier = false
         local queue_total = if total_task_count == undefined then slice_tasks.count else total_task_count
 
         if node == undefined or not(isValidNode node) then return #(false, 0, 0)
@@ -10599,11 +10965,36 @@ struct WallFixer_v
 
         try
         (
-            modifier = Edit_Poly name:modifier_name
-            addModifier node modifier
+            if existing_modifier != undefined then
+            (
+                modifier = existing_modifier
+            )
+            else
+            (
+                modifier = Edit_Poly name:modifier_name
+                addModifier node modifier
+                created_modifier = true
+            )
 
-            ensureSliceModifyContext node modifier
-modifier.split = false
+            if direct_slice_transform then
+            (
+                /*
+                Direct gizmo placement still uses the explicit slice_plane.transform matrix,
+                but Edit Poly operation methods are executed with the modifier active once.
+                This avoids undefined off-panel Edit Poly interface calls while still avoiding
+                vertex-driven gizmo placement or interactive picking.
+                */
+                ensureSliceModifyContext node modifier
+                modifier.SetPrimaryNode node
+                try(modifier.showCage = off)catch()
+                update node
+            )
+            else
+            (
+                ensureSliceModifyContext node modifier
+            )
+
+            modifier.split = false
             modifier.useStackSelection = false
             modifier.useSoftSel = false
             modifier.remveEdgeCtrlKey = false
@@ -10646,6 +11037,7 @@ modifier.split = false
                         node.name modifier_name display_task_index queue_total region_id base_vertex base_edge slice_kind task_level_z task_base_vertices
                 )
 
+                if direct_slice_transform then failure_stage = "existing-slice check"
                 local slice_already_exists = pipeline.hasExistingSliceLoopOnPlane \
                     base_vertex \
                     base_anchor \
@@ -10656,17 +11048,23 @@ modifier.split = false
                     plane_tolerance:(amax 0.0 planar_tolerance)
 
                 local slice_result = undefined
+                local slice_plane_transform = undefined
+
+                if not slice_already_exists and direct_slice_transform then
+                (
+                    failure_stage = "direct gizmo transform"
+                    slice_plane_transform = getSliceForcePlaneTransform                         node                         modifier                         base_anchor                         base_axis                         wall_normal:wall_normal
+
+                    if slice_plane_transform == undefined then
+                    (
+                        throw ("Slice Force could not build the slice-plane gizmo transform for " + modifier_name)
+                    )
+                )
 
                 if not slice_already_exists then
                 (
-                    slice_result = pipeline.makeOneSliceFromBasePlane \
-                        base_vertex \
-                        base_anchor \
-                        base_axis \
-                        slice_kind \
-                        wall_normal:wall_normal \
-                        wall_origin:wall_origin \
-                        plane_tolerance:(amax 0.0 planar_tolerance)
+                    if direct_slice_transform then failure_stage = "slice operation / commit"
+                    slice_result = pipeline.makeOneSliceFromBasePlane                         base_vertex                         base_anchor                         base_axis                         slice_kind                         wall_normal:wall_normal                         wall_origin:wall_origin                         plane_tolerance:(amax 0.0 planar_tolerance)                         slice_plane_transform:slice_plane_transform
                 )
 
                 if progress_callback != undefined then
@@ -10726,6 +11124,7 @@ modifier.split = false
 
                     /* 2. Fix Slice Precision only when this slice produced precision candidates.
                        Batch uses the same candidate rules but removes only new verts so base-object ids stay unchanged. */
+                    if direct_slice_transform then failure_stage = "slice precision"
                     local precision_data = ::WallFixer.getMassSlicePrecisionCandidates node precision_threshold:precision_threshold
                     local precision_candidates = precision_data[1]
                     local precision_ok = true
@@ -10749,6 +11148,7 @@ modifier.split = false
 
                     /* 3. Clean Up Sliced Edges only when enabled and redundant edge candidates actually exist.
                        No-edge-cleanup mode intentionally preserves every slice-created edge for inspection. */
+                    if direct_slice_transform then failure_stage = "edge cleanup"
                     if not cleanup_edges then
                     (
                         if not batch_quiet then format "Wall-Fixer Batch Clean Up Sliced Edges Skip: node:% modifier:% baseVert:% direction:% reason:disabled by Slice Walls option.\n" \
@@ -10782,8 +11182,13 @@ modifier.split = false
                             node.name modifier_name base_vertex slice_kind
                     )
 
-                    /* Keep the required Edit Poly context without refreshing the command panel when it is already correct. */
-                    ensureSliceModifyContext node modifier
+                    /* Normal slicing keeps its Edit Poly context.
+                       Slice Force leaves the command panel alone unless precision/edge cleanup explicitly needed Modify mode. */
+                    if not direct_slice_transform then
+                    (
+                        ensureSliceModifyContext node modifier
+                    )
+
                     modifier.split = false
                     modifier.useStackSelection = false
                     modifier.useSoftSel = false
@@ -10796,7 +11201,7 @@ modifier.split = false
                 throw ("Base-object vertex ids/positions changed in " + modifier_name + ".")
             )
 
-            if success_count == 0 and modifier != undefined then
+            if success_count == 0 and modifier != undefined and created_modifier then
             (
                 local modifier_still_present = false
 
@@ -10816,7 +11221,15 @@ modifier.split = false
         )
         catch
         (
-            failure = getCurrentException()
+            local current_exception = getCurrentException()
+            if direct_slice_transform and failure_stage != "" then
+            (
+                failure = ("Slice Force stage [" + failure_stage + "]: " + (current_exception as string))
+            )
+            else
+            (
+                failure = current_exception
+            )
         )
 
         if failure != undefined then
@@ -10890,22 +11303,1760 @@ modifier.split = false
     ),
 
     /*
-    Runs a fixed base-object candidate queue on all selected walls.
-    The queue is captured once from Reset Slicing and executed entirely in one Wall topology cleanup Edit Poly.
+    Builds an orthonormal Slice Force plane basis from the requested world-space plane normal.
+    The wall normal is preferred as the in-plane side vector; a stable world-axis fallback is used when no wall normal is available.
     */
-    function debugSliceSelectedWallsInternal cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 cleanup_edges:true display_hidden_edges:undefined double_side:undefined progress_callback:undefined =
+    function getSliceForcePlaneBasis world_axis wall_normal:undefined =
+    (
+        if world_axis == undefined or length world_axis <= epsilon then return undefined
+
+        local plane_axis = normalize world_axis
+        local side_axis = undefined
+
+        if wall_normal != undefined and length wall_normal > epsilon then
+        (
+            side_axis = normalize wall_normal
+            side_axis = side_axis - (plane_axis * (dot side_axis plane_axis))
+
+            if length side_axis <= epsilon then
+            (
+                side_axis = undefined
+            )
+        )
+
+        if side_axis == undefined then
+        (
+            local fallback_axis = if abs(dot plane_axis [0,0,1]) < 0.95 then [0,0,1] else [0,1,0]
+            side_axis = fallback_axis - (plane_axis * (dot fallback_axis plane_axis))
+
+            if length side_axis <= epsilon then
+            (
+                fallback_axis = [1,0,0]
+                side_axis = fallback_axis - (plane_axis * (dot fallback_axis plane_axis))
+            )
+        )
+
+        if side_axis == undefined or length side_axis <= epsilon then return undefined
+
+        side_axis = normalize side_axis
+
+        /*
+        Matches the proven three-point gizmo math:
+        vect1 = plane tangent, vect2 = wall/side vector, vect3 = cross vect2 vect1.
+        */
+        local vect1 = cross plane_axis side_axis
+        if length vect1 <= epsilon then return undefined
+        vect1 = normalize vect1
+
+        local vect2 = side_axis
+        local vect3 = cross vect2 vect1
+        if length vect3 <= epsilon then return undefined
+        vect3 = normalize vect3
+
+        vect2 = cross vect3 vect1
+        if length vect2 <= epsilon then return undefined
+        vect2 = normalize vect2
+
+        #(vect1, vect2, vect3)
+        -- return
+    ),
+
+
+    /*
+    Builds a Slice Force gizmo transform directly from world-space plane data.
+    Supports the real SliceModifier used by Force and the legacy Edit Poly caller retained by the normal slice pipeline.
+    */
+    function getSliceForcePlaneTransform node modifier world_anchor world_axis wall_normal:undefined =
+    (
+        if node == undefined or not(isValidNode node) then return undefined
+        if modifier == undefined then return undefined
+        if classOf modifier != SliceModifier and classOf modifier != Edit_Poly then return undefined
+        if world_anchor == undefined then return undefined
+
+        local basis = getSliceForcePlaneBasis world_axis wall_normal:wall_normal
+        if basis == undefined then return undefined
+
+        local modifier_tm = undefined
+
+        try
+        (
+            modifier_tm = getModContextTM node modifier
+        )
+        catch
+        (
+            modifier_tm = undefined
+        )
+
+        /*
+        Slice Force collapses the incoming stack before adding only object-space Slice modifiers.
+        In that stack shape the modifier context is object space, so identity is a safe fallback
+        when getModContextTM is unavailable in the current 3ds Max runtime.
+        */
+        if modifier_tm == undefined then
+        (
+            modifier_tm = matrix3 1
+        )
+
+        local object_tm = node.objectTransform
+        local world_plane_tm = matrix3 basis[1] basis[2] basis[3] world_anchor
+
+        world_plane_tm * modifier_tm * (inverse object_tm)
+        -- return
+    ),
+
+
+    /*
+    Builds a full BitArray from component index 1 through component_count.
+    Used by Slice Force so every temporary modifier owns whole-object Face and Edge selections.
+    */
+    function makeSliceForceFullSelection component_count =
+    (
+        local result = #{}
+
+        if component_count > 0 then
+        (
+            for component_index = 1 to component_count do
+            (
+                result[component_index] = true
+            )
+        )
+
+        result
+        -- return
+    ),
+
+
+    /*
+    Builds world-space face normals and connected-face component IDs for Force-only non-planar analysis.
+    This does not alter the normal Slice Walls planar-region analyzer.
+    */
+    function getSliceForceSurfaceData node =
+    (
+        local result = undefined
+        if node == undefined or not(isValidNode node) then return result
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then return result
+
+        local vert_count = polyop.getNumVerts base_obj
+        local edge_count = polyop.getNumEdges base_obj
+        local face_count = polyop.getNumFaces base_obj
+        if vert_count < 3 or edge_count < 3 or face_count < 1 then return result
+
+        local object_tm = node.objectTransform
+        local world_points = #()
+        for vertex_index = 1 to vert_count do
+        (
+            append world_points ((polyop.getVert base_obj vertex_index) * object_tm)
+        )
+
+        local face_normals = #()
+        for face_index = 1 to face_count do
+        (
+            local face_verts = polyop.getFaceVerts base_obj face_index
+            local face_normal = undefined
+
+            if face_verts != undefined and face_verts.count >= 3 then
+            (
+                local face_origin = world_points[face_verts[1]]
+                local normal_sum = [0.0,0.0,0.0]
+
+                for corner_index = 2 to (face_verts.count - 1) do
+                (
+                    local point_b = world_points[face_verts[corner_index]]
+                    local point_c = world_points[face_verts[corner_index + 1]]
+                    normal_sum += cross (point_b - face_origin) (point_c - face_origin)
+                )
+
+                if length normal_sum > epsilon then
+                (
+                    face_normal = normalize normal_sum
+                )
+            )
+
+            append face_normals face_normal
+        )
+
+        local face_component_ids = for face_index = 1 to face_count collect 0
+        local component_id = 0
+
+        for seed_face = 1 to face_count do
+        (
+            if face_component_ids[seed_face] == 0 then
+            (
+                component_id += 1
+                local face_queue = #(seed_face)
+                local queue_index = 1
+                face_component_ids[seed_face] = component_id
+
+                while queue_index <= face_queue.count do
+                (
+                    local current_face = face_queue[queue_index]
+                    queue_index += 1
+
+                    local current_edges = polyop.getEdgesUsingFace base_obj #{current_face}
+                    for edge_index in current_edges do
+                    (
+                        local adjacent_faces = polyop.getFacesUsingEdge base_obj #{edge_index}
+                        for adjacent_face in adjacent_faces do
+                        (
+                            if face_component_ids[adjacent_face] == 0 then
+                            (
+                                face_component_ids[adjacent_face] = component_id
+                                append face_queue adjacent_face
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        result = #(world_points, face_normals, face_component_ids, component_id)
+        result
+        -- return
+    ),
+
+
+    /*
+    Builds real open-border loops for Slice Force without requiring a planar wall region.
+    Each loop records its owning connected face component and 3D perimeter.
+    */
+    function getSliceForceOpenBorderLoops node world_points face_component_ids =
+    (
+        local loops = #()
+        if node == undefined or not(isValidNode node) then return loops
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then return loops
+
+        local vert_count = polyop.getNumVerts base_obj
+        local edge_count = polyop.getNumEdges base_obj
+        local border_edges = #{}
+        local vertex_border_edges = for vertex_index = 1 to vert_count collect #{}
+
+        for edge_index = 1 to edge_count do
+        (
+            local edge_faces = polyop.getFacesUsingEdge base_obj #{edge_index}
+
+            if edge_faces.numberSet == 1 then
+            (
+                local edge_verts = polyop.getEdgeVerts base_obj edge_index
+
+                if edge_verts != undefined and edge_verts.count == 2 then
+                (
+                    border_edges[edge_index] = true
+                    vertex_border_edges[edge_verts[1]][edge_index] = true
+                    vertex_border_edges[edge_verts[2]][edge_index] = true
+                )
+            )
+        )
+
+        local remaining_edges = copy border_edges
+
+        while remaining_edges.numberSet > 0 do
+        (
+            local start_edge = (remaining_edges as array)[1]
+            local start_edge_verts = polyop.getEdgeVerts base_obj start_edge
+
+            if start_edge_verts == undefined or start_edge_verts.count != 2 then
+            (
+                remaining_edges[start_edge] = false
+            )
+            else
+            (
+                local start_vertex = start_edge_verts[1]
+                local current_vertex = start_vertex
+                local current_edge = start_edge
+                local loop_vertices = #()
+                local loop_edges = #()
+                local closed = false
+                local safety = 0
+
+                while not closed and safety <= edge_count do
+                (
+                    safety += 1
+                    append loop_vertices current_vertex
+                    append loop_edges current_edge
+                    remaining_edges[current_edge] = false
+
+                    local current_edge_verts = polyop.getEdgeVerts base_obj current_edge
+                    local next_vertex = if current_edge_verts[1] == current_vertex then current_edge_verts[2] else current_edge_verts[1]
+
+                    if next_vertex == start_vertex then
+                    (
+                        closed = true
+                    )
+                    else
+                    (
+                        local next_edges = (vertex_border_edges[next_vertex] * border_edges) as array
+
+                        if next_edges.count != 2 then
+                        (
+                            safety = edge_count + 1
+                        )
+                        else
+                        (
+                            local next_edge = if next_edges[1] == current_edge then next_edges[2] else next_edges[1]
+                            current_vertex = next_vertex
+                            current_edge = next_edge
+                        )
+                    )
+                )
+
+                if closed and loop_vertices.count >= 3 then
+                (
+                    local perimeter = 0.0
+
+                    for loop_position = 1 to loop_vertices.count do
+                    (
+                        local next_position = if loop_position == loop_vertices.count then 1 else loop_position + 1
+                        perimeter += distance world_points[loop_vertices[loop_position]] world_points[loop_vertices[next_position]]
+                    )
+
+                    local first_faces = polyop.getFacesUsingEdge base_obj #{start_edge}
+                    local first_face = if first_faces.numberSet > 0 then (first_faces as array)[1] else 0
+                    local component_id = if first_face > 0 then face_component_ids[first_face] else 0
+
+                    append loops #(loop_vertices, loop_edges, component_id, perimeter)
+                )
+            )
+        )
+
+        loops
+        -- return
+    ),
+
+
+    /*
+    Returns true when two adjacent faces belong to the same Force-only wall surface.
+    Force allows non-planar bends while stopping at horizontal caps and near-perpendicular reveal faces.
+    */
+    function areSliceForceWallFacesContinuous normal_a normal_b max_bend_angle:70.0 =
+    (
+        if normal_a == undefined or normal_b == undefined then return false
+        if length normal_a <= epsilon or length normal_b <= epsilon then return false
+
+        local normalized_a = normalize normal_a
+        local normalized_b = normalize normal_b
+        local wall_z_limit = sin 45.0
+        local bend_limit = cos (amin 89.0 (amax 0.0 max_bend_angle))
+
+        if abs(normalized_a.z) > wall_z_limit or abs(normalized_b.z) > wall_z_limit then return false
+
+        abs(dot normalized_a normalized_b) >= bend_limit
+        -- return
+    ),
+
+
+    /*
+    Builds connected Force-only wall-surface regions across locally continuous non-planar faces.
+    Region borders include manifold opening edges because reveal/cap faces are not joined into the wall surface.
+    */
+    function getSliceForceWallSurfaceRegions node face_normals max_bend_angle:70.0 =
+    (
+        local regions = #()
+        if node == undefined or not(isValidNode node) then return regions
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then return regions
+
+        local vert_count = polyop.getNumVerts base_obj
+        local face_count = polyop.getNumFaces base_obj
+        if vert_count < 3 or face_count < 1 then return regions
+
+        local processed_faces = #{}
+        local region_id = 0
+
+        for seed_face = 1 to face_count do
+        (
+            if not processed_faces[seed_face] then
+            (
+                processed_faces[seed_face] = true
+
+                local seed_normal = face_normals[seed_face]
+                local seed_is_wall = seed_normal != undefined and length seed_normal > epsilon and abs((normalize seed_normal).z) <= sin 45.0
+
+                if seed_is_wall then
+                (
+                    region_id += 1
+                    local region_faces = #{seed_face}
+                    local face_queue = #(seed_face)
+                    local queue_index = 1
+
+                    while queue_index <= face_queue.count do
+                    (
+                        local current_face = face_queue[queue_index]
+                        queue_index += 1
+
+                        local current_normal = face_normals[current_face]
+                        local current_edges = polyop.getEdgesUsingFace base_obj #{current_face}
+
+                        for edge_index in current_edges do
+                        (
+                            local adjacent_faces = polyop.getFacesUsingEdge base_obj #{edge_index}
+
+                            for adjacent_face in adjacent_faces do
+                            (
+                                if not processed_faces[adjacent_face] then
+                                (
+                                    local adjacent_normal = face_normals[adjacent_face]
+
+                                    if areSliceForceWallFacesContinuous current_normal adjacent_normal max_bend_angle:max_bend_angle then
+                                    (
+                                        processed_faces[adjacent_face] = true
+                                        region_faces[adjacent_face] = true
+                                        append face_queue adjacent_face
+                                    )
+                                )
+                            )
+                        )
+                    )
+
+                    local region_edges = polyop.getEdgesUsingFace base_obj region_faces
+                    local boundary_edges = #{}
+                    local vertex_boundary_edges = for vertex_index = 1 to vert_count collect #{}
+
+                    for edge_index in region_edges do
+                    (
+                        local edge_faces = polyop.getFacesUsingEdge base_obj #{edge_index}
+                        local region_face_count = 0
+
+                        for face_index in edge_faces do
+                        (
+                            if region_faces[face_index] then region_face_count += 1
+                        )
+
+                        if region_face_count == 1 then
+                        (
+                            local edge_verts = polyop.getEdgeVerts base_obj edge_index
+
+                            if edge_verts != undefined and edge_verts.count == 2 then
+                            (
+                                boundary_edges[edge_index] = true
+                                vertex_boundary_edges[edge_verts[1]][edge_index] = true
+                                vertex_boundary_edges[edge_verts[2]][edge_index] = true
+                            )
+                        )
+                    )
+
+                    if boundary_edges.numberSet > 0 then
+                    (
+                        append regions #(region_faces, boundary_edges, vertex_boundary_edges, region_id)
+                    )
+                )
+            )
+        )
+
+        regions
+        -- return
+    ),
+
+
+    /*
+    Traces closed boundary loops for one Force-only wall-surface region.
+    Every loop stores vertices, edges, and 3D perimeter.
+    */
+    function getSliceForceSurfaceBoundaryLoops node region_data world_points =
+    (
+        local loops = #()
+        if node == undefined or not(isValidNode node) then return loops
+        if region_data == undefined or region_data.count < 4 then return loops
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then return loops
+
+        local boundary_edges = region_data[2]
+        local vertex_boundary_edges = region_data[3]
+        local edge_count = polyop.getNumEdges base_obj
+        local remaining_edges = copy boundary_edges
+
+        while remaining_edges.numberSet > 0 do
+        (
+            local start_edge = (remaining_edges as array)[1]
+            local start_edge_verts = polyop.getEdgeVerts base_obj start_edge
+
+            if start_edge_verts == undefined or start_edge_verts.count != 2 then
+            (
+                remaining_edges[start_edge] = false
+            )
+            else
+            (
+                local start_vertex = start_edge_verts[1]
+                local current_vertex = start_vertex
+                local current_edge = start_edge
+                local loop_vertices = #()
+                local loop_edges = #()
+                local closed = false
+                local safety = 0
+
+                while not closed and safety <= edge_count do
+                (
+                    safety += 1
+                    append loop_vertices current_vertex
+                    append loop_edges current_edge
+                    remaining_edges[current_edge] = false
+
+                    local current_edge_verts = polyop.getEdgeVerts base_obj current_edge
+                    local next_vertex = if current_edge_verts[1] == current_vertex then current_edge_verts[2] else current_edge_verts[1]
+
+                    if next_vertex == start_vertex then
+                    (
+                        closed = true
+                    )
+                    else
+                    (
+                        local next_edges = (vertex_boundary_edges[next_vertex] * boundary_edges) as array
+
+                        if next_edges.count != 2 then
+                        (
+                            safety = edge_count + 1
+                        )
+                        else
+                        (
+                            local next_edge = if next_edges[1] == current_edge then next_edges[2] else next_edges[1]
+                            current_vertex = next_vertex
+                            current_edge = next_edge
+                        )
+                    )
+                )
+
+                if closed and loop_vertices.count >= 3 then
+                (
+                    local perimeter = 0.0
+
+                    for loop_position = 1 to loop_vertices.count do
+                    (
+                        local next_position = if loop_position == loop_vertices.count then 1 else loop_position + 1
+                        perimeter += distance world_points[loop_vertices[loop_position]] world_points[loop_vertices[next_position]]
+                    )
+
+                    append loops #(loop_vertices, loop_edges, perimeter)
+                )
+            )
+        )
+
+        loops
+        -- return
+    ),
+
+
+    /*
+    Returns the local wall-surface face normal touching one region-boundary edge.
+    */
+    function getSliceForceRegionEdgeNormal base_obj edge_index region_faces face_normals =
+    (
+        local result = undefined
+        local edge_faces = polyop.getFacesUsingEdge base_obj #{edge_index}
+
+        for face_index in edge_faces while result == undefined do
+        (
+            if region_faces[face_index] and face_normals[face_index] != undefined then
+            (
+                result = face_normals[face_index]
+            )
+        )
+
+        result
+        -- return
+    ),
+
+
+    /*
+    Returns true when a candidate Force plane passes through the interior of the object.
+    Geometry must exist on both sides of the plane; true exterior boundary planes are rejected.
+    */
+    function doesSliceForcePlaneSplitPoints world_points world_anchor world_axis match_tolerance:0.001 =
+    (
+        if world_points == undefined or world_anchor == undefined or world_axis == undefined then return false
+        if length world_axis <= epsilon then return false
+
+        local normalized_axis = normalize world_axis
+        local plane_tolerance = amax epsilon match_tolerance
+        local has_negative_side = false
+        local has_positive_side = false
+
+        for world_point in world_points while not(has_negative_side and has_positive_side) do
+        (
+            local signed_distance = dot (world_point - world_anchor) normalized_axis
+
+            if signed_distance < -plane_tolerance then
+            (
+                has_negative_side = true
+            )
+            else if signed_distance > plane_tolerance then
+            (
+                has_positive_side = true
+            )
+        )
+
+        has_negative_side and has_positive_side
+        -- return
+    ),
+
+
+    /*
+    Adds Force-only candidate planes directly from disconnected wall-surface boundary edges.
+    This fallback does not require a hole loop; it keeps only planes that split live object geometry on both sides.
+    */
+    function appendSliceForceBoundaryEdgeFallbackTasks node cached_tasks wall_regions world_points face_normals cut_mode:#all angle_threshold:5.0 match_tolerance:0.001 =
+    (
+        local added_count = 0
+        if node == undefined or not(isValidNode node) then return added_count
+        if cached_tasks == undefined or wall_regions == undefined or world_points == undefined then return added_count
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then return added_count
+
+        local direction_cos = cos (amin 45.0 (amax 0.0 angle_threshold))
+        local horizontal_z_limit = sin (amin 45.0 (amax 0.0 angle_threshold))
+
+        for region_data in wall_regions do
+        (
+            local region_faces = region_data[1]
+            local boundary_edges = region_data[2]
+            local region_id = region_data[4]
+
+            for edge_index in boundary_edges do
+            (
+                local edge_verts = polyop.getEdgeVerts base_obj edge_index
+
+                if edge_verts != undefined and edge_verts.count == 2 then
+                (
+                    local point_a = world_points[edge_verts[1]]
+                    local point_b = world_points[edge_verts[2]]
+                    local edge_vector = point_b - point_a
+
+                    if length edge_vector > epsilon then
+                    (
+                        local edge_direction = normalize edge_vector
+                        local world_anchor = (point_a + point_b) * 0.5
+                        local local_wall_normal = getSliceForceRegionEdgeNormal base_obj edge_index region_faces face_normals
+                        local task_vertices = #{}
+                        task_vertices[edge_verts[1]] = true
+                        task_vertices[edge_verts[2]] = true
+
+                        if (cut_mode == #all or cut_mode == #horizontal) and abs(edge_direction.z) <= horizontal_z_limit then
+                        (
+                            local horizontal_axis = [0.0,0.0,1.0]
+
+                            if doesSliceForcePlaneSplitPoints world_points world_anchor horizontal_axis match_tolerance:match_tolerance then
+                            (
+                                local horizontal_task = #(
+                                    edge_verts[1],
+                                    #horizontal,
+                                    edge_index,
+                                    world_anchor,
+                                    horizontal_axis,
+                                    #{edge_index},
+                                    task_vertices,
+                                    world_anchor.z,
+                                    local_wall_normal,
+                                    world_anchor,
+                                    region_id
+                                )
+
+                                if findSliceForcePlaneCacheIndex cached_tasks horizontal_task match_tolerance:match_tolerance == 0 then
+                                (
+                                    append cached_tasks horizontal_task
+                                    added_count += 1
+                                )
+                            )
+                        )
+
+                        if (cut_mode == #all or cut_mode == #vertical) and abs(edge_direction.z) >= direction_cos and local_wall_normal != undefined then
+                        (
+                            local vertical_axis = cross edge_direction local_wall_normal
+                            vertical_axis = [vertical_axis.x, vertical_axis.y, 0.0]
+
+                            if length vertical_axis > epsilon then
+                            (
+                                vertical_axis = normalize vertical_axis
+
+                                if doesSliceForcePlaneSplitPoints world_points world_anchor vertical_axis match_tolerance:match_tolerance then
+                                (
+                                    local vertical_task = #(
+                                        edge_verts[1],
+                                        #vertical,
+                                        edge_index,
+                                        world_anchor,
+                                        vertical_axis,
+                                        #{edge_index},
+                                        task_vertices,
+                                        world_anchor.z,
+                                        local_wall_normal,
+                                        world_anchor,
+                                        region_id
+                                    )
+
+                                    if findSliceForcePlaneCacheIndex cached_tasks vertical_task match_tolerance:match_tolerance == 0 then
+                                    (
+                                        append cached_tasks vertical_task
+                                        added_count += 1
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        added_count
+        -- return
+    ),
+
+
+    /*
+    Builds the complete Force-only plane cache from manifold wall-surface boundaries plus the proven planar candidate detector.
+    Curved/bent wall faces may share one Force surface, while reveal/cap faces stay outside that surface so closed manifold openings remain detectable.
+    */
+    function buildSliceForceNonPlanarTaskCache node cut_mode:#all angle_threshold:5.0 planar_tolerance:1.0 match_tolerance:0.001 =
+    (
+        local cached_tasks = #()
+        if node == undefined or not(isValidNode node) then return cached_tasks
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then return cached_tasks
+
+        local surface_data = getSliceForceSurfaceData node
+        if surface_data == undefined then return cached_tasks
+
+        local world_points = surface_data[1]
+        local face_normals = surface_data[2]
+        local direction_cos = cos (amin 45.0 (amax 0.0 angle_threshold))
+        local horizontal_z_limit = sin (amin 45.0 (amax 0.0 angle_threshold))
+
+        /*
+        First merge the existing proven planar-region candidates.
+        This retains manifold windows, doors, and concave outer-loop anchors on ordinary wall sections.
+        */
+        local planar_candidates = getBaseInnerSliceCandidates \
+            node \
+            angle_threshold:angle_threshold \
+            planar_tolerance:(amax 0.0 planar_tolerance)
+
+        for candidate in planar_candidates do
+        (
+            local vertex_index = candidate[1]
+            local world_anchor = candidate[6]
+            local region_id = candidate[13]
+
+            if (cut_mode == #all or cut_mode == #vertical) and candidate[2] and candidate[4] > 0 and candidate[7] != undefined then
+            (
+                local vertical_task = #(
+                    vertex_index,
+                    #vertical,
+                    candidate[4],
+                    world_anchor,
+                    candidate[7],
+                    #{candidate[4]},
+                    #{vertex_index},
+                    world_anchor.z,
+                    candidate[11],
+                    candidate[12],
+                    region_id
+                )
+
+                if findSliceForcePlaneCacheIndex cached_tasks vertical_task match_tolerance:match_tolerance == 0 then
+                (
+                    append cached_tasks vertical_task
+                )
+            )
+
+            if (cut_mode == #all or cut_mode == #horizontal) and candidate[3] and candidate[5] > 0 and candidate[8] != undefined then
+            (
+                local horizontal_task = #(
+                    vertex_index,
+                    #horizontal,
+                    candidate[5],
+                    world_anchor,
+                    [0.0,0.0,1.0],
+                    #{candidate[5]},
+                    #{vertex_index},
+                    world_anchor.z,
+                    candidate[11],
+                    candidate[12],
+                    region_id
+                )
+
+                if findSliceForcePlaneCacheIndex cached_tasks horizontal_task match_tolerance:match_tolerance == 0 then
+                (
+                    append cached_tasks horizontal_task
+                )
+            )
+        )
+
+        /*
+        Then add Force-only non-planar surface regions.
+        Faces may bend up to 70 degrees locally; near-perpendicular reveal/cap transitions remain region borders.
+        */
+        local wall_regions = getSliceForceWallSurfaceRegions node face_normals max_bend_angle:70.0
+
+        for region_data in wall_regions do
+        (
+            local region_faces = region_data[1]
+            local region_id = region_data[4]
+            local loops = getSliceForceSurfaceBoundaryLoops node region_data world_points
+
+            if loops.count > 1 then
+            (
+                local outer_index = 1
+                local outer_perimeter = loops[1][3]
+
+                for loop_index = 2 to loops.count do
+                (
+                    if loops[loop_index][3] > outer_perimeter then
+                    (
+                        outer_perimeter = loops[loop_index][3]
+                        outer_index = loop_index
+                    )
+                )
+
+                for loop_index = 1 to loops.count do
+                (
+                    if loop_index != outer_index then
+                    (
+                        local loop_vertices = loops[loop_index][1]
+                        local loop_edges = loops[loop_index][2]
+
+                        for corner_index = 1 to loop_vertices.count do
+                        (
+                            local vertex_index = loop_vertices[corner_index]
+                            local previous_index = if corner_index == 1 then loop_vertices.count else corner_index - 1
+                            local next_index = if corner_index == loop_vertices.count then 1 else corner_index + 1
+                            local previous_vertex = loop_vertices[previous_index]
+                            local next_vertex = loop_vertices[next_index]
+                            local dir_a = world_points[previous_vertex] - world_points[vertex_index]
+                            local dir_b = world_points[next_vertex] - world_points[vertex_index]
+
+                            if length dir_a > epsilon and length dir_b > epsilon then
+                            (
+                                dir_a = normalize dir_a
+                                dir_b = normalize dir_b
+
+                                if abs(dot dir_a dir_b) < direction_cos then
+                                (
+                                    local corner_edges = #(loop_edges[previous_index], loop_edges[corner_index])
+                                    local vertical_edge = 0
+                                    local horizontal_edge = 0
+                                    local vertical_axis = undefined
+                                    local vertical_wall_normal = undefined
+                                    local horizontal_wall_normal = undefined
+
+                                    for edge_index in corner_edges do
+                                    (
+                                        local edge_verts = polyop.getEdgeVerts base_obj edge_index
+
+                                        if edge_verts != undefined and edge_verts.count == 2 then
+                                        (
+                                            local edge_vector = world_points[edge_verts[2]] - world_points[edge_verts[1]]
+
+                                            if length edge_vector > epsilon then
+                                            (
+                                                local edge_direction = normalize edge_vector
+                                                local local_wall_normal = getSliceForceRegionEdgeNormal base_obj edge_index region_faces face_normals
+
+                                                if abs(edge_direction.z) >= direction_cos then
+                                                (
+                                                    if vertical_edge == 0 and local_wall_normal != undefined then
+                                                    (
+                                                        local axis_candidate = cross edge_direction local_wall_normal
+                                                        axis_candidate = [axis_candidate.x, axis_candidate.y, 0.0]
+
+                                                        if length axis_candidate > epsilon then
+                                                        (
+                                                            vertical_edge = edge_index
+                                                            vertical_axis = normalize axis_candidate
+                                                            vertical_wall_normal = local_wall_normal
+                                                        )
+                                                    )
+                                                )
+                                                else if abs(edge_direction.z) <= horizontal_z_limit then
+                                                (
+                                                    if horizontal_edge == 0 and local_wall_normal != undefined then
+                                                    (
+                                                        horizontal_edge = edge_index
+                                                        horizontal_wall_normal = local_wall_normal
+                                                    )
+                                                )
+                                            )
+                                        )
+                                    )
+
+                                    local world_anchor = world_points[vertex_index]
+
+                                    if (cut_mode == #all or cut_mode == #vertical) and vertical_edge > 0 and vertical_axis != undefined then
+                                    (
+                                        local vertical_task = #(
+                                            vertex_index,
+                                            #vertical,
+                                            vertical_edge,
+                                            world_anchor,
+                                            vertical_axis,
+                                            #{vertical_edge},
+                                            #{vertex_index},
+                                            world_anchor.z,
+                                            vertical_wall_normal,
+                                            world_anchor,
+                                            region_id
+                                        )
+
+                                        if findSliceForcePlaneCacheIndex cached_tasks vertical_task match_tolerance:match_tolerance == 0 then
+                                        (
+                                            append cached_tasks vertical_task
+                                        )
+                                    )
+
+                                    if (cut_mode == #all or cut_mode == #horizontal) and horizontal_edge > 0 then
+                                    (
+                                        local horizontal_task = #(
+                                            vertex_index,
+                                            #horizontal,
+                                            horizontal_edge,
+                                            world_anchor,
+                                            [0.0,0.0,1.0],
+                                            #{horizontal_edge},
+                                            #{vertex_index},
+                                            world_anchor.z,
+                                            horizontal_wall_normal,
+                                            world_anchor,
+                                            region_id
+                                        )
+
+                                        if findSliceForcePlaneCacheIndex cached_tasks horizontal_task match_tolerance:match_tolerance == 0 then
+                                        (
+                                            append cached_tasks horizontal_task
+                                        )
+                                    )
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        /*
+        If one requested direction still has no planes, fall back to direct wall-surface boundary edges.
+        This covers disconnected wall patches where each surface component has only one loop and therefore no inner-loop classification.
+        */
+        local has_horizontal_task = false
+        local has_vertical_task = false
+
+        for cached_task in cached_tasks do
+        (
+            if cached_task[2] == #horizontal then has_horizontal_task = true
+            if cached_task[2] == #vertical then has_vertical_task = true
+        )
+
+        local fallback_mode = undefined
+
+        if cut_mode == #horizontal and not has_horizontal_task then
+        (
+            fallback_mode = #horizontal
+        )
+        else if cut_mode == #vertical and not has_vertical_task then
+        (
+            fallback_mode = #vertical
+        )
+        else if cut_mode == #all then
+        (
+            if not has_horizontal_task and not has_vertical_task then
+            (
+                fallback_mode = #all
+            )
+            else if not has_horizontal_task then
+            (
+                fallback_mode = #horizontal
+            )
+            else if not has_vertical_task then
+            (
+                fallback_mode = #vertical
+            )
+        )
+
+        local fallback_added = 0
+
+        if fallback_mode != undefined then
+        (
+            fallback_added = appendSliceForceBoundaryEdgeFallbackTasks \
+                node \
+                cached_tasks \
+                wall_regions \
+                world_points \
+                face_normals \
+                cut_mode:fallback_mode \
+                angle_threshold:angle_threshold \
+                match_tolerance:match_tolerance
+        )
+
+        if not batch_quiet then format "Wall-Fixer Slice Force Surface Analysis: node:% planarCandidates:% wallRegions:% fallback:% uniquePlanes:%\n" \
+            node.name planar_candidates.count wall_regions.count fallback_added cached_tasks.count
+
+        cached_tasks
+        -- return
+    ),
+
+
+    /*
+    Tests Force-only interior-plane filtering used by disconnected surface boundary fallback.
+    Interior horizontal/vertical planes pass; true exterior planes fail.
+    */
+    function testSliceForceBoundaryPlaneSplitRule =
+    (
+        local points = #(
+            [0.0,0.0,0.0],
+            [10.0,0.0,0.0],
+            [0.0,0.0,10.0],
+            [10.0,0.0,10.0]
+        )
+
+        doesSliceForcePlaneSplitPoints points [0.0,0.0,5.0] [0.0,0.0,1.0] match_tolerance:0.001 and
+        not(doesSliceForcePlaneSplitPoints points [0.0,0.0,0.0] [0.0,0.0,1.0] match_tolerance:0.001) and
+        doesSliceForcePlaneSplitPoints points [5.0,0.0,0.0] [1.0,0.0,0.0] match_tolerance:0.001 and
+        not(doesSliceForcePlaneSplitPoints points [0.0,0.0,0.0] [1.0,0.0,0.0] match_tolerance:0.001)
+        -- return
+    ),
+
+
+    /*
+    Tests Force-only non-planar wall-surface continuity.
+    Moderate wall bends stay connected; a 90-degree reveal and a horizontal cap do not.
+    */
+    function testSliceForceSurfaceContinuityRule =
+    (
+        local flat_normal = [0.0,1.0,0.0]
+        local bend_normal = normalize [0.5,0.8660254,0.0]
+        local reveal_normal = [1.0,0.0,0.0]
+        local cap_normal = [0.0,0.0,1.0]
+
+        areSliceForceWallFacesContinuous flat_normal bend_normal max_bend_angle:70.0 and
+        not(areSliceForceWallFacesContinuous flat_normal reveal_normal max_bend_angle:70.0) and
+        not(areSliceForceWallFacesContinuous flat_normal cap_normal max_bend_angle:70.0)
+        -- return
+    ),
+
+
+    /*
+    Tests Force-only local plane caching without invoking the normal planar wall analyzer.
+    */
+    function testSliceForceNonPlanarPlaneRule =
+    (
+        local cached_tasks = #()
+        local horizontal_a = #(1, #horizontal, 1, [0,0,10], [0,0,1], #{1}, #{1}, 10.0, [0,1,0], [0,0,10], 1)
+        local horizontal_b = #(2, #horizontal, 2, [20,30,10], [0,0,1], #{2}, #{2}, 10.0, [1,0,0], [20,30,10], 1)
+        local vertical_x = #(3, #vertical, 3, [5,0,0], [1,0,0], #{3}, #{3}, 0.0, [0,1,0], [5,0,0], 1)
+        local vertical_y = #(4, #vertical, 4, [0,7,0], [0,1,0], #{4}, #{4}, 0.0, [1,0,0], [0,7,0], 1)
+
+        append cached_tasks horizontal_a
+        local same_horizontal = findSliceForcePlaneCacheIndex cached_tasks horizontal_b match_tolerance:0.001
+
+        append cached_tasks vertical_x
+        local different_vertical_direction = findSliceForcePlaneCacheIndex cached_tasks vertical_y match_tolerance:0.001
+
+        same_horizontal == 1 and different_vertical_direction == 0
+        -- return
+    ),
+
+
+    /*
+    Returns the cached Slice Force plane index for one task.
+    Plane matching ignores planar-region IDs: Horizontal is effectively cached by Z, while Vertical uses its normalized XY plane normal plus signed position.
+    */
+    function findSliceForcePlaneCacheIndex cached_tasks slice_task match_tolerance:0.001 =
+    (
+        if slice_task == undefined or slice_task.count < 5 then return 0
+
+        local slice_kind = slice_task[2]
+        local world_anchor = slice_task[4]
+        local world_axis = slice_task[5]
+
+        if world_anchor == undefined or world_axis == undefined or length world_axis <= epsilon then return 0
+
+        local normalized_axis = normalize world_axis
+        local plane_tolerance = amax epsilon match_tolerance
+        local axis_cos = cos 0.1
+        local found_index = 0
+
+        for cache_index = 1 to cached_tasks.count while found_index == 0 do
+        (
+            local cached_task = cached_tasks[cache_index]
+
+            if cached_task != undefined and cached_task.count >= 5 and cached_task[2] == slice_kind then
+            (
+                local cached_anchor = cached_task[4]
+                local cached_axis = cached_task[5]
+
+                if cached_anchor != undefined and cached_axis != undefined and length cached_axis > epsilon then
+                (
+                    local normalized_cached_axis = normalize cached_axis
+                    local parallel = abs(dot normalized_cached_axis normalized_axis) >= axis_cos
+                    local same_plane = abs(dot(world_anchor - cached_anchor) normalized_axis) <= plane_tolerance
+
+                    if parallel and same_plane then
+                    (
+                        found_index = cache_index
+                    )
+                )
+            )
+        )
+
+        found_index
+        -- return
+    ),
+
+
+    /*
+    Flattens normal Slice Walls pass tasks into one object-wide Slice Force cache.
+    Duplicate physical planes are removed before any Force modifier is created.
+    */
+    function buildSliceForceTaskCache slice_passes match_tolerance:0.001 =
+    (
+        local cached_tasks = #()
+
+        for slice_pass in slice_passes do
+        (
+            if slice_pass != undefined and slice_pass.count >= 3 then
+            (
+                for slice_task in slice_pass[3] do
+                (
+                    if findSliceForcePlaneCacheIndex cached_tasks slice_task match_tolerance:match_tolerance == 0 then
+                    (
+                        append cached_tasks slice_task
+                    )
+                )
+            )
+        )
+
+        cached_tasks
+        -- return
+    ),
+
+
+    /*
+    Builds Slice Force tasks through the exact proven normal Slice Walls planar analyzer first.
+    The baked whole object is analyzed with viewport selection disabled; temporary Reset-Slicing state is cleared before returning.
+    */
+    function buildSliceForcePlanarTaskCache node cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 match_tolerance:0.001 =
+    (
+        local cached_tasks = #()
+        if node == undefined or not(isValidNode node) then return cached_tasks
+        if classOf node.baseObject != Editable_Poly then return cached_tasks
+
+        clearResetInnerVertSelection node
+
+        local initialized = initializeBaseSliceAnalysis \
+            node \
+            angle_threshold:angle_threshold \
+            planar_tolerance:planar_tolerance \
+            update_viewport_selection:false
+
+        if initialized then
+        (
+            local slice_passes = buildBaseSlicePassQueue \
+                node \
+                cut_mode:cut_mode \
+                slice_plane_mode:slice_plane_mode \
+                angle_threshold:angle_threshold \
+                planar_tolerance:planar_tolerance
+
+            cached_tasks = buildSliceForceTaskCache \
+                slice_passes \
+                match_tolerance:match_tolerance
+        )
+
+        clearResetInnerVertSelection node
+
+        if not batch_quiet then
+        (
+            format "Wall-Fixer Slice Force Planar First: node:% direction:% planes:%\n" node.name cut_mode cached_tasks.count
+        )
+
+        cached_tasks
+        -- return
+    ),
+
+
+    /*
+    Returns the fixed analyzer priority used by Slice Force.
+    Normal planar Slice Walls tasks are always attempted before Force-only non-planar fallbacks.
+    */
+    function getSliceForceAnalysisOrder =
+    (
+        #(#planar, #nonplanar)
+        -- return
+    ),
+
+
+    /*
+    Tests that Slice Force preserves the proven planar analyzer as its first source.
+    */
+    function testSliceForceAnalysisOrder =
+    (
+        local analysis_order = getSliceForceAnalysisOrder()
+        analysis_order.count == 2 and analysis_order[1] == #planar and analysis_order[2] == #nonplanar
+        -- return
+    ),
+
+
+    /*
+    Applies the current evaluated stack and prepares one clean Editable Poly base for Slice Force analysis.
+    Existing modifiers are intentionally baked before anchor detection.
+    */
+    function prepareSliceForceBaseObject node =
+    (
+        if node == undefined or not(isValidNode node) then return false
+
+        local prepared = false
+
+        try
+        (
+            select node
+            try(subObjectLevel = 0)catch()
+            convertToPoly node
+            update node
+
+            if classOf node.baseObject == Editable_Poly and node.modifiers.count == 0 then
+            (
+                polyop.setVertSelection node.baseObject #{}
+                polyop.setEdgeSelection node.baseObject #{}
+                polyop.setFaceSelection node.baseObject #{}
+                setEditablePolyCageOff node
+                prepared = true
+            )
+        )
+        catch
+        (
+            prepared = false
+        )
+
+        prepared
+        -- return
+    ),
+
+
+    /*
+    Selects the complete Editable Poly face and edge sets before the real Slice modifier stack is added.
+    Face selection gives every Slice modifier whole-object scope; Edge selection is preserved through the stack until final collapse.
+    */
+    function prepareSliceForceBaseSelections node =
+    (
+        if node == undefined or not(isValidNode node) then return false
+        if classOf node.baseObject != Editable_Poly then return false
+
+        local face_count = polyop.getNumFaces node.baseObject
+        local edge_count = polyop.getNumEdges node.baseObject
+        if face_count < 1 or edge_count < 1 then return false
+
+        polyop.setVertSelection node.baseObject #{}
+        polyop.setFaceSelection node.baseObject (makeSliceForceFullSelection face_count)
+        polyop.setEdgeSelection node.baseObject (makeSliceForceFullSelection edge_count)
+
+        select node
+        try(max modify mode)catch()
+        try(subObjectLevel = 4)catch()
+        update node
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Creates the complete Slice Force stack from real 3ds Max Slice modifiers before evaluation.
+    The first SliceModifier is the template and every remaining cached plane receives a copied SliceModifier.
+    */
+    function createSliceForceModifierStack node force_tasks =
+    (
+        local modifiers = #()
+        if node == undefined or not(isValidNode node) then return modifiers
+        if force_tasks == undefined or force_tasks.count == 0 then return modifiers
+
+        if not(prepareSliceForceBaseSelections node) then
+        (
+            last_slice_error = "Slice Force prebuild [base selections]: could not select all Editable Poly faces and edges."
+            return modifiers
+        )
+
+        local template_modifier = undefined
+
+        try
+        (
+            template_modifier = SliceModifier()
+            template_modifier.Slice_Type = 0
+            template_modifier.Faces___Polygons_Toggle = 1
+        )
+        catch
+        (
+            last_slice_error = "Slice Force prebuild [template Slice modifier]: " + ((getCurrentException()) as string)
+            return modifiers
+        )
+
+        for task_index = 1 to force_tasks.count do
+        (
+            local slice_task = force_tasks[task_index]
+            local slice_kind = slice_task[2]
+            local modifier = undefined
+            local direction_name = if slice_kind == #vertical then "VERTICAL" else if slice_kind == #horizontal then "HORIZONTAL" else "ALL"
+            local modifier_name = "SLICE FORCE " + direction_name + " " + (task_index as string)
+
+            try
+            (
+                modifier = if task_index == 1 then template_modifier else copy template_modifier
+            )
+            catch
+            (
+                last_slice_error = "Slice Force prebuild [modifier " + (task_index as string) + " create/copy]: " + ((getCurrentException()) as string)
+                return modifiers
+            )
+
+            if modifier == undefined or classOf modifier != SliceModifier then
+            (
+                last_slice_error = "Slice Force prebuild [modifier " + (task_index as string) + " create/copy]: real SliceModifier was not created."
+                return modifiers
+            )
+
+            try
+            (
+                modifier.name = modifier_name
+                modifier.Slice_Type = 0
+                modifier.Faces___Polygons_Toggle = 1
+            )
+            catch
+            (
+                last_slice_error = "Slice Force prebuild [modifier " + (task_index as string) + " properties]: " + ((getCurrentException()) as string)
+                return modifiers
+            )
+
+            try
+            (
+                addModifier node modifier
+            )
+            catch
+            (
+                last_slice_error = "Slice Force prebuild [modifier " + (task_index as string) + " addModifier]: " + ((getCurrentException()) as string)
+                return modifiers
+            )
+
+            append modifiers modifier
+        )
+
+        update node
+        modifiers
+        -- return
+    ),
+
+
+    /*
+    Tests that Slice Force prebuild names remain deterministic for the real SliceModifier stack.
+    */
+    function testSliceForcePrebuildNamePolicy =
+    (
+        local vertical_name = "SLICE FORCE " + (if #vertical == #vertical then "VERTICAL" else "ALL") + " " + (1 as string)
+        local horizontal_name = "SLICE FORCE " + (if #horizontal == #horizontal then "HORIZONTAL" else "ALL") + " " + (2 as string)
+
+        vertical_name == "SLICE FORCE VERTICAL 1" and horizontal_name == "SLICE FORCE HORIZONTAL 2"
+        -- return
+    ),
+
+
+    /*
+    Configures one already-created real Slice modifier from one cached Force plane.
+    No Edit Poly topology API, SetPrimaryNode, SetOperation, or Commit call is used in Force mode.
+    */
+    function configureSliceForceStackModifier node modifier slice_task =
+    (
+        if node == undefined or not(isValidNode node) then return false
+        if modifier == undefined or classOf modifier != SliceModifier then return false
+        if slice_task == undefined or slice_task.count < 5 then return false
+
+        local completed = false
+
+        try
+        (
+            modifier.Slice_Type = 0
+            modifier.Faces___Polygons_Toggle = 1
+
+            local world_anchor = slice_task[4]
+            local world_axis = slice_task[5]
+            local wall_normal = if slice_task.count >= 9 then slice_task[9] else undefined
+            local slice_plane_transform = getSliceForcePlaneTransform \
+                node \
+                modifier \
+                world_anchor \
+                world_axis \
+                wall_normal:wall_normal
+
+            if slice_plane_transform == undefined then
+            (
+                throw "Slice Force could not build the cached Slice modifier gizmo transform."
+            )
+
+            modifier.slice_plane.transform = slice_plane_transform
+            update node
+            completed = true
+        )
+        catch
+        (
+            last_slice_error = (getCurrentException()) as string
+            completed = false
+        )
+
+        completed
+        -- return
+    ),
+
+
+    /*
+    Clears final Editable Poly component selections without changing Slice Force success state.
+    Runtime-specific selection API failures are contained here because the completed Slice stack has already been baked.
+    */
+    function clearSliceForceFinalSelections node =
+    (
+        if node == undefined or not(isValidNode node) then return false
+
+        local cleanup_ok = true
+
+        try(subObjectLevel = 0)catch(cleanup_ok = false)
+
+        if classOf node.baseObject == Editable_Poly then
+        (
+            try(polyop.setVertSelection node.baseObject #{})catch(cleanup_ok = false)
+            try(polyop.setEdgeSelection node.baseObject #{})catch(cleanup_ok = false)
+            try(polyop.setFaceSelection node.baseObject #{})catch(cleanup_ok = false)
+            try(update node)catch()
+        )
+        else
+        (
+            cleanup_ok = false
+        )
+
+        cleanup_ok
+        -- return
+    ),
+
+
+    /*
+    Executes the complete real SliceModifier Force stack and collapses once at the end.
+    Every cached plane already has its own modifier before the first gizmo is configured.
+    */
+    function executeSliceForceCachedStack node force_tasks task_index_offset:0 total_task_count:0 progress_callback:undefined object_index:0 object_total:0 object_name:"" vertex_count:0 =
+    (
+        if node == undefined or not(isValidNode node) then return false
+        if force_tasks == undefined or force_tasks.count == 0 then return false
+
+        local force_modifiers = createSliceForceModifierStack node force_tasks
+        if force_modifiers.count != force_tasks.count then
+        (
+            if last_slice_error == undefined or last_slice_error == "" then
+            (
+                last_slice_error = "Slice Force could not create the complete real Slice modifier stack."
+            )
+            return false
+        )
+
+        for task_index = 1 to force_tasks.count do
+        (
+            local modifier = force_modifiers[task_index]
+            local slice_task = force_tasks[task_index]
+
+            if not(configureSliceForceStackModifier node modifier slice_task) then
+            (
+                last_slice_error = "Slice Force failed in " + modifier.name + ". " + (last_slice_error as string)
+                return false
+            )
+
+            if progress_callback != undefined then
+            (
+                local display_task_index = task_index_offset + task_index
+                try(progress_callback display_task_index total_task_count object_index:object_index object_total:object_total object_name:object_name vertex_count:vertex_count)catch()
+            )
+        )
+
+        update node
+
+        if not(collapseSliceForceObject node) then
+        (
+            last_slice_error = "Slice Force finished the real Slice modifier stack but could not collapse the object."
+            return false
+        )
+
+        /*
+        Slice Force is already complete once the real Slice stack has collapsed successfully.
+        Final component-selection cleanup is best effort and must never turn a successful geometry result into a failed object.
+        */
+        try(clearSliceForceFinalSelections node)catch()
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Tests that post-collapse component-selection cleanup is non-fatal to Slice Force.
+    A completed collapse remains success even when optional final selection cleanup reports failure.
+    */
+    function testSliceForcePostCollapseCleanupPolicy =
+    (
+        local collapse_completed = true
+        local cleanup_completed = false
+        collapse_completed and not cleanup_completed
+        -- return
+    ),
+
+
+    /*
+    Tests object-wide Force plane caching independently from scene geometry.
+    Same-Z Horizontal and same signed-position Vertical tasks collapse to one cached plane each.
+    */
+    function testSliceForcePlaneCacheRule =
+    (
+        local horizontal_a = #(1, #horizontal, 1, [0,0,10], [0,0,1], #{}, #{}, 10.0, [0,1,0], [0,0,0], 1)
+        local horizontal_b = #(2, #horizontal, 2, [50,20,10], [0,0,1], #{}, #{}, 10.0, [0,1,0], [0,0,0], 2)
+        local vertical_a = #(3, #vertical, 3, [5,0,0], [1,0,0], #{}, #{}, 0.0, [0,1,0], [0,0,0], 1)
+        local vertical_b = #(4, #vertical, 4, [5,40,20], [-1,0,0], #{}, #{}, 20.0, [0,1,0], [0,0,0], 2)
+        local passes = #(
+            #(#horizontal, "SLICE HORIZONTAL", #(horizontal_a, horizontal_b)),
+            #(#vertical, "SLICE VERTICAL", #(vertical_a, vertical_b))
+        )
+
+        local cached = buildSliceForceTaskCache passes match_tolerance:0.001
+        cached.count == 2
+        -- return
+    ),
+
+
+    /*
+    Tests that Slice Force prebuilds every required real SliceModifier and preserves full base Face/Edge selections.
+    */
+    function testSliceForcePrebuiltModifierStack =
+    (
+        local test_node = undefined
+        local passed = false
+
+        try
+        (
+            test_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly test_node
+
+            local task_a = #(1, #vertical, 1, [0,0,0], [1,0,0], #{}, #{}, 0.0, [0,1,0], [0,0,0], 1)
+            local task_b = #(2, #vertical, 2, [2,0,0], [1,0,0], #{}, #{}, 0.0, [0,1,0], [0,0,0], 1)
+            local task_c = #(3, #vertical, 3, [4,0,0], [1,0,0], #{}, #{}, 0.0, [0,1,0], [0,0,0], 1)
+            local modifiers = createSliceForceModifierStack test_node #(task_a, task_b, task_c)
+
+            local face_selection = polyop.getFaceSelection test_node.baseObject
+            local edge_selection = polyop.getEdgeSelection test_node.baseObject
+
+            passed = (
+                modifiers.count == 3 and
+                test_node.modifiers.count == 3 and
+                classOf modifiers[1] == SliceModifier and
+                classOf modifiers[2] == SliceModifier and
+                classOf modifiers[3] == SliceModifier and
+                modifiers[1].Slice_Type == 0 and
+                modifiers[2].Slice_Type == 0 and
+                modifiers[3].Slice_Type == 0 and
+                face_selection.numberSet == polyop.getNumFaces test_node.baseObject and
+                edge_selection.numberSet == polyop.getNumEdges test_node.baseObject and
+                modifiers[1].name == "SLICE FORCE VERTICAL 1" and
+                modifiers[2].name == "SLICE FORCE VERTICAL 2" and
+                modifiers[3].name == "SLICE FORCE VERTICAL 3"
+            )
+        )
+        catch
+        (
+            passed = false
+        )
+
+        if test_node != undefined and isValidNode test_node then
+        (
+            delete test_node
+        )
+
+        passed
+        -- return
+    ),
+
+
+    /*
+    Tests that Force uses the real SliceModifier class rather than renamed Edit Poly modifiers.
+    Refine Mesh is required so every plane adds topology without deleting either side.
+    */
+    function testSliceForceRealModifierClass =
+    (
+        local test_modifier = undefined
+        local passed = false
+
+        try
+        (
+            test_modifier = SliceModifier()
+            test_modifier.Slice_Type = 0
+            test_modifier.Faces___Polygons_Toggle = 1
+
+            passed = (
+                classOf test_modifier == SliceModifier and
+                test_modifier.Slice_Type == 0 and
+                test_modifier.Faces___Polygons_Toggle == 1
+            )
+        )
+        catch
+        (
+            passed = false
+        )
+
+        passed
+        -- return
+    ),
+
+
+    /*
+    Tests the optimized Slice Force execution policy.
+    Force analyzes once, prebuilds real Slice modifiers, positions gizmos directly, and never requires Edit Poly operation context.
+    */
+    function testSliceForceModifyContextPolicy =
+    (
+        local analyzes_once = true
+        local prebuilds_stack = true
+        local uses_real_slice_modifiers = true
+        local direct_gizmo = true
+        local requires_edit_poly_context = false
+        local uses_vertex_pick_for_gizmo = false
+
+        analyzes_once and
+        prebuilds_stack and
+        uses_real_slice_modifiers and
+        direct_gizmo and
+        not requires_edit_poly_context and
+        not uses_vertex_pick_for_gizmo
+        -- return
+    ),
+
+
+    /*
+    Tests the direct Slice Force plane-basis math without creating scene geometry.
+    */
+    function testSliceForcePlaneBasis =
+    (
+        local vertical_basis = getSliceForcePlaneBasis [1,0,0] wall_normal:[0,1,0]
+        local horizontal_basis = getSliceForcePlaneBasis [0,0,1] wall_normal:[0,1,0]
+        local tolerance_value = 0.0001
+
+        vertical_basis != undefined and
+        horizontal_basis != undefined and
+        abs(dot vertical_basis[1] vertical_basis[2]) <= tolerance_value and
+        abs(dot vertical_basis[1] vertical_basis[3]) <= tolerance_value and
+        abs(dot vertical_basis[2] vertical_basis[3]) <= tolerance_value and
+        abs(dot horizontal_basis[1] horizontal_basis[2]) <= tolerance_value and
+        abs(dot horizontal_basis[1] horizontal_basis[3]) <= tolerance_value and
+        abs(dot horizontal_basis[2] horizontal_basis[3]) <= tolerance_value and
+        abs(dot vertical_basis[3] [1,0,0]) >= (1.0 - tolerance_value) and
+        abs(dot horizontal_basis[3] [0,0,1]) >= (1.0 - tolerance_value)
+        -- return
+    ),
+
+
+    /*
+    Returns a temporary Slice Force modifier name for one unique directional plane.
+    */
+    function getSliceForceModifierName slice_kind plane_index =
+    (
+        local direction_name = if slice_kind == #vertical then "VERTICAL" else if slice_kind == #horizontal then "HORIZONTAL" else "ALL"
+        "SLICE FORCE " + direction_name + " " + (plane_index as string)
+        -- return
+    ),
+
+
+    /*
+    Collapses the completed Slice Force stack to one Editable Poly object.
+    Slice Force intentionally bakes the full stack after every unique plane has finished.
+    */
+    function collapseSliceForceObject node =
+    (
+        if node == undefined or not(isValidNode node) then return false
+
+        local completed = false
+
+        try
+        (
+            try(subObjectLevel = 0)catch()
+            select node
+            convertToPoly node
+            update node
+
+            completed = classOf node.baseObject == Editable_Poly and node.modifiers.count == 0
+
+            if completed then
+            (
+                setEditablePolyCageOff node
+            )
+        )
+        catch
+        (
+            completed = false
+        )
+
+        completed
+        -- return
+    ),
+
+
+    /*
+    Tests Slice Force temporary modifier naming and final collapse on a temporary object.
+    */
+    function testSliceForceCollapseObject =
+    (
+        local test_node = undefined
+        local passed = false
+
+        try
+        (
+            test_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly test_node
+
+            addModifier test_node (Edit_Poly name:(getSliceForceModifierName #vertical 1))
+            addModifier test_node (Edit_Poly name:(getSliceForceModifierName #horizontal 2))
+
+            passed = (
+                test_node.modifiers.count == 2 and
+                collapseSliceForceObject test_node and
+                classOf test_node.baseObject == Editable_Poly and
+                test_node.modifiers.count == 0
+            )
+        )
+        catch
+        (
+            passed = false
+        )
+
+        if test_node != undefined and isValidNode test_node then
+        (
+            delete test_node
+        )
+
+        passed
+        -- return
+    ),
+
+
+    /*
+    Runs a fixed base-object candidate queue on all selected walls.
+    This is the normal Slice Walls executor; optimized Slice Force uses its dedicated cached-stack path.
+    */
+    function debugSliceSelectedWallsInternal cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 cleanup_edges:true force_per_plane:false display_hidden_edges:undefined double_side:undefined progress_callback:undefined =
     (
         local all_selected_nodes = selection as array
         local selected_nodes = getBatchSliceProcessNodes all_selected_nodes
         local original_panel_mode = undefined
         local original_current_object = undefined
         local original_subobject_level = subObjectLevel
+        local active_continuation_modifier = if all_selected_nodes.count == 1 then getActiveTopSliceContinuationModifier all_selected_nodes[1] cut_mode else undefined
         local restrict_to_selected_vertices = shouldRestrictSliceToSelectedComponents all_selected_nodes.count original_subobject_level
         local selected_vertex_filters = #()
         local selected_live_task_filters = #()
         local automatic_live_task_filters = #()
         local failed_nodes = #()
         local final_sliced_node = undefined
+        local final_force_node = undefined
         local processed_count = 0
         local processed_vertex_count = 0
 
@@ -11011,9 +13162,25 @@ modifier.split = false
                             processed_vertex_count += current_vertex_count
                         )
 
-                        /* Rebuild only the requested slice direction.
-                           Preserve an existing opposite-direction slice modifier so a second mode stacks above it. */
-                        if node_ok and not(::WallFixer.removeWallFixerSliceModifiers node cut_mode:cut_mode) then
+                        /* Normal slicing preserves the opposite directional slice.
+                           Force slicing rebuilds all Wall-Fixer slice modifiers so every unique plane owns exactly one temporary modifier. */
+                        local preserved_continuation_modifier = if (not force_per_plane) and active_continuation_modifier != undefined and node == all_selected_nodes[1] then active_continuation_modifier else undefined
+                        local automatic_live_tasks_before_force = #()
+
+                        if force_per_plane and not restrict_to_selected_vertices then
+                        (
+                            local previous_opposite_modifier = getTopOppositeSliceModifier node cut_mode
+                            automatic_live_tasks_before_force = captureAutomaticLiveSliceTasks \
+                                node \
+                                previous_opposite_modifier \
+                                cut_mode:cut_mode \
+                                slice_plane_mode:slice_plane_mode \
+                                match_tolerance:0.01
+                        )
+
+                        local cleanup_mode = if force_per_plane then #all else cut_mode
+
+                        if node_ok and not(::WallFixer.removeWallFixerSliceModifiers node cut_mode:cleanup_mode preserve_modifier:preserved_continuation_modifier) then
                         (
                             node_error = node.name + ": could not clear conflicting Wall-Fixer slicing modifiers."
                             node_ok = false
@@ -11022,21 +13189,31 @@ modifier.split = false
                         (
                             if not restrict_to_selected_vertices then
                             (
-                                local preserved_opposite_modifier = getTopOppositeSliceModifier node cut_mode
-                                local automatic_live_tasks = captureAutomaticLiveSliceTasks \
-                                    node \
-                                    preserved_opposite_modifier \
-                                    cut_mode:cut_mode \
-                                    slice_plane_mode:slice_plane_mode \
-                                    match_tolerance:0.01
+                                local automatic_live_tasks = #()
+
+                                if force_per_plane then
+                                (
+                                    automatic_live_tasks = automatic_live_tasks_before_force
+                                )
+                                else
+                                (
+                                    local preserved_opposite_modifier = getTopOppositeSliceModifier node cut_mode
+                                    automatic_live_tasks = captureAutomaticLiveSliceTasks \
+                                        node \
+                                        preserved_opposite_modifier \
+                                        cut_mode:cut_mode \
+                                        slice_plane_mode:slice_plane_mode \
+                                        match_tolerance:0.01
+                                )
 
                                 append automatic_live_task_filters #(node, automatic_live_tasks)
 
                                 if not batch_quiet and automatic_live_tasks.count > 0 then
                                 (
-                                    format "Wall-Fixer Automatic Live Slice Anchors: node:% tasks:%\n" node.name automatic_live_tasks.count
+                                    format "Wall-Fixer Automatic Live Slice Anchors: node:% tasks:% force:%\n" node.name automatic_live_tasks.count force_per_plane
                                 )
                             )
+
 
                             ::WallFixer.clearResetInnerVertSelection node
                             ::WallFixer.clearLastDebugSliceContext node:node
@@ -11147,43 +13324,108 @@ modifier.split = false
                                 local modifier_name = slice_pass[2]
                                 local pass_tasks = slice_pass[3]
 
-                                local queue_result = ::WallFixer.executeBaseSliceTaskQueue \
-                                    node \
-                                    pass_tasks \
-                                    modifier_name:modifier_name \
-                                    angle_threshold:angle_threshold \
-                                    planar_tolerance:planar_tolerance \
-                                    precision_threshold:slice_precision \
-                                    cleanup_edges:cleanup_edges \
-                                    task_index_offset:task_index_offset \
-                                    total_task_count:total_task_count \
-                                    progress_callback:progress_callback \
-                                    object_index:(processed_count + 1) \
-                                    object_total:selected_nodes.count \
-                                    object_name:node.name \
-                                    vertex_count:current_vertex_count
-
-                                if not queue_result[1] then
+                                if force_per_plane then
                                 (
-                                    node_error = node.name + ": fixed base-object slice pass failed in " + modifier_name + ". " + last_slice_report
-                                    node_ok = false
+                                    local force_plane_index = 0
+
+                                    for force_task in pass_tasks while node_ok do
+                                    (
+                                        force_plane_index += 1
+                                        local force_modifier_name = getSliceForceModifierName pass_kind force_plane_index
+
+                                        local queue_result = ::WallFixer.executeBaseSliceTaskQueue \
+                                            node \
+                                            #(force_task) \
+                                            modifier_name:force_modifier_name \
+                                            existing_modifier:undefined \
+                                            angle_threshold:angle_threshold \
+                                            planar_tolerance:planar_tolerance \
+                                            precision_threshold:slice_precision \
+                                            cleanup_edges:cleanup_edges \
+                                            direct_slice_transform:true \
+                                            task_index_offset:task_index_offset \
+                                            total_task_count:total_task_count \
+                                            progress_callback:progress_callback \
+                                            object_index:(processed_count + 1) \
+                                            object_total:selected_nodes.count \
+                                            object_name:node.name \
+                                            vertex_count:current_vertex_count
+
+                                        if not queue_result[1] then
+                                        (
+                                            node_error = node.name + ": Slice Force failed in " + force_modifier_name + ". " + last_slice_report
+                                            node_ok = false
+                                        )
+                                        else
+                                        (
+                                            total_sliced_count += queue_result[2]
+                                            total_no_change_count += queue_result[3]
+
+                                            if not batch_quiet then format "Wall-Fixer Slice Force Plane Result: node:% modifier:% direction:% task:%/% sliced:% noChange:%\n" \
+                                                node.name force_modifier_name pass_kind (task_index_offset + 1) total_task_count queue_result[2] queue_result[3]
+                                        )
+
+                                        task_index_offset += 1
+                                    )
                                 )
                                 else
                                 (
-                                    total_sliced_count += queue_result[2]
-                                    total_no_change_count += queue_result[3]
+                                    local continuation_for_pass = undefined
+                                    if preserved_continuation_modifier != undefined and toUpper(preserved_continuation_modifier.name as string) == toUpper(modifier_name as string) then continuation_for_pass = preserved_continuation_modifier
 
-                                    if not batch_quiet then format "Wall-Fixer Slice Selected Walls Pass Result: node:% modifier:% direction:% tasks:% sliced:% noChange:%\n" \
-                                        node.name modifier_name pass_kind pass_tasks.count queue_result[2] queue_result[3]
+                                    local queue_result = ::WallFixer.executeBaseSliceTaskQueue \
+                                        node \
+                                        pass_tasks \
+                                        modifier_name:modifier_name \
+                                        existing_modifier:continuation_for_pass \
+                                        angle_threshold:angle_threshold \
+                                        planar_tolerance:planar_tolerance \
+                                        precision_threshold:slice_precision \
+                                        cleanup_edges:cleanup_edges \
+                                        task_index_offset:task_index_offset \
+                                        total_task_count:total_task_count \
+                                        progress_callback:progress_callback \
+                                        object_index:(processed_count + 1) \
+                                        object_total:selected_nodes.count \
+                                        object_name:node.name \
+                                        vertex_count:current_vertex_count
+
+                                    if not queue_result[1] then
+                                    (
+                                        node_error = node.name + ": fixed base-object slice pass failed in " + modifier_name + ". " + last_slice_report
+                                        node_ok = false
+                                    )
+                                    else
+                                    (
+                                        total_sliced_count += queue_result[2]
+                                        total_no_change_count += queue_result[3]
+
+                                        if not batch_quiet then format "Wall-Fixer Slice Selected Walls Pass Result: node:% modifier:% direction:% tasks:% sliced:% noChange:%\n" \
+                                            node.name modifier_name pass_kind pass_tasks.count queue_result[2] queue_result[3]
+                                    )
+
+                                    task_index_offset += pass_tasks.count
                                 )
-
-                                task_index_offset += pass_tasks.count
                             )
 
-                            if node_ok and total_sliced_count > 0 then
+                            if node_ok and force_per_plane and total_sliced_count > 0 then
+                            (
+                                if collapseSliceForceObject node then
+                                (
+                                    final_force_node = node
+                                    if not batch_quiet then format "Wall-Fixer Slice Force Collapse: node:% planes:% success:true\n" node.name total_sliced_count
+                                )
+                                else
+                                (
+                                    node_error = node.name + ": Slice Force finished its planes but could not collapse the object."
+                                    node_ok = false
+                                )
+                            )
+                            else if node_ok and (not force_per_plane) and total_sliced_count > 0 then
                             (
                                 final_sliced_node = node
                             )
+
 
                             if node_ok and not batch_quiet then
                             (
@@ -11205,8 +13447,15 @@ modifier.split = false
 
                 if node_ok then
                 (
-                    local modifier_report = if cut_mode == #all then "SLICE ALL" else if cut_mode == #horizontal then "SLICE HORIZONTAL" else "SLICE VERTICAL"
-                    automation_report += node.name + ": fixed base-object slice queue complete in " + modifier_report + ".\n"
+                    if force_per_plane then
+                    (
+                        automation_report += node.name + ": Slice Force unique-plane stack completed and collapsed.\n"
+                    )
+                    else
+                    (
+                        local modifier_report = if cut_mode == #all then "SLICE ALL" else if cut_mode == #horizontal then "SLICE HORIZONTAL" else "SLICE VERTICAL"
+                        automation_report += node.name + ": fixed base-object slice queue complete in " + modifier_report + ".\n"
+                    )
                 )
                 else
                 (
@@ -11282,7 +13531,21 @@ modifier.split = false
         (
             select all_selected_nodes
 
-            if final_sliced_node != undefined and isValidNode final_sliced_node and final_sliced_node.modifiers.count > 0 then
+            if force_per_plane and final_force_node != undefined and isValidNode final_force_node then
+            (
+                select final_force_node
+                max modify mode
+
+                try
+                (
+                    modPanel.setCurrentObject final_force_node.baseObject
+                    subObjectLevel = 0
+                )
+                catch
+                (
+                )
+            )
+            else if final_sliced_node != undefined and isValidNode final_sliced_node and final_sliced_node.modifiers.count > 0 then
             (
                 local top_modifier = final_sliced_node.modifiers[1]
 
@@ -11434,6 +13697,11 @@ modifier.split = false
         test_passed = test_passed and shouldRestrictSliceToSelectedComponents 1 2
         test_passed = test_passed and not (shouldRestrictSliceToSelectedComponents 2 1)
         test_passed = test_passed and not (shouldRestrictSliceToSelectedComponents 2 2)
+        test_passed = test_passed and shouldContinueOnActiveSliceModifier "SLICE VERTICAL" #vertical 1 true
+        test_passed = test_passed and shouldContinueOnActiveSliceModifier "SLICE HORIZONTAL" #horizontal 1 true
+        test_passed = test_passed and not (shouldContinueOnActiveSliceModifier "SLICE HORIZONTAL" #vertical 1 true)
+        test_passed = test_passed and not (shouldContinueOnActiveSliceModifier "SLICE VERTICAL" #vertical 2 true)
+        test_passed = test_passed and not (shouldContinueOnActiveSliceModifier "SLICE VERTICAL" #vertical 1 false)
 
         test_passed
         -- return
@@ -11713,10 +13981,230 @@ modifier.split = false
 
 
     /*
+    Runs optimized Slice Force as an analyze-once, prebuilt-modifier-stack workflow.
+    Incoming modifiers are baked first; proven planar Slice Walls analysis has priority, with Force-only non-planar analysis used only as fallback.
+    */
+    function debugSliceSelectedWallsForceInternal cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 progress_callback:undefined =
+    (
+        local all_selected_nodes = selection as array
+        local selected_nodes = getBatchSliceProcessNodes all_selected_nodes
+        local failed_nodes = #()
+        local force_records = #()
+        local total_task_count = 0
+        local processed_vertex_count = 0
+        local report = ""
+
+        last_slice_report = ""
+        last_slice_error = undefined
+        last_slice_failed_nodes = #()
+        last_slice_processed_objects = 0
+        last_slice_processed_vertices = 0
+
+        if all_selected_nodes.count == 0 then
+        (
+            last_slice_report = "Select at least one wall before running Slice Force."
+            return false
+        )
+
+        if selected_nodes.count == 0 then
+        (
+            last_slice_report = "Slice Force: all selected walls have only four vertices; nothing to cut."
+            select all_selected_nodes
+            return true
+        )
+
+        /*
+        Phase 1: bake each incoming stack, analyze its final Editable Poly once,
+        and cache every unique physical Force plane before creating any slice modifier.
+        */
+        for node_index = 1 to selected_nodes.count do
+        (
+            local node = selected_nodes[node_index]
+            local node_ok = true
+            local node_error = undefined
+            local vertex_count = 0
+            local force_tasks = #()
+
+            try
+            (
+                if not(activateBatchSliceNodeContext node) then
+                (
+                    node_error = node.name + ": could not activate Slice Force object context."
+                    node_ok = false
+                )
+
+                if node_ok and not(prepareSliceForceBaseObject node) then
+                (
+                    node_error = node.name + ": could not apply the incoming modifier stack to Editable Poly."
+                    node_ok = false
+                )
+
+                if node_ok then
+                (
+                    vertex_count = polyop.getNumVerts node.baseObject
+                    processed_vertex_count += vertex_count
+
+                    clearResetInnerVertSelection node
+                    clearLastDebugSliceContext node:node
+
+                    /*
+                    Preserve the known-good flat-wall behavior first: use the exact normal Slice Walls planar task builder.
+                    Only when that produces no planes does Force fall back to its non-planar/local-surface analyzer.
+                    Component selections are already cleared by prepareSliceForceBaseObject, so both paths analyze the whole baked object.
+                    */
+                    force_tasks = buildSliceForcePlanarTaskCache \
+                        node \
+                        cut_mode:cut_mode \
+                        slice_plane_mode:slice_plane_mode \
+                        angle_threshold:angle_threshold \
+                        planar_tolerance:planar_tolerance \
+                        match_tolerance:0.001
+
+                    if force_tasks.count == 0 then
+                    (
+                        force_tasks = buildSliceForceNonPlanarTaskCache \
+                            node \
+                            cut_mode:cut_mode \
+                            angle_threshold:angle_threshold \
+                            planar_tolerance:planar_tolerance \
+                            match_tolerance:0.001
+                    )
+
+                    if force_tasks.count == 0 then
+                    (
+                        node_error = node.name + ": Slice Force found no interior slice planes after stable planar analysis and non-planar fallbacks."
+                        node_ok = false
+                    )
+                )
+            )
+            catch
+            (
+                node_error = node.name + ": Slice Force analysis error. " + ((getCurrentException()) as string)
+                node_ok = false
+            )
+
+            if node_ok then
+            (
+                append force_records #(node, force_tasks, vertex_count, node_index)
+                total_task_count += force_tasks.count
+
+                if not batch_quiet then format "Wall-Fixer Slice Force Cache: node:% uniquePlanes:% verts:%\n" node.name force_tasks.count vertex_count
+            )
+            else
+            (
+                append failed_nodes node
+                if report != "" then report += "\n"
+                report += node_error
+            )
+        )
+
+        if force_records.count == 0 then
+        (
+            last_slice_failed_nodes = failed_nodes
+            last_slice_processed_objects = 0
+            last_slice_processed_vertices = processed_vertex_count
+            last_slice_report = report
+
+            if failed_nodes.count > 0 then select failed_nodes
+            return false
+        )
+
+        if progress_callback != undefined then
+        (
+            try(progress_callback 0 total_task_count object_index:0 object_total:selected_nodes.count object_name:"" vertex_count:0)catch()
+        )
+
+        /*
+        Phase 2: each object receives its complete N-modifier stack up front.
+        Modifiers are configured bottom-to-top from the cached plane list and the stack is collapsed once.
+        */
+        local completed_task_count = 0
+        local successful_nodes = #()
+
+        for force_record in force_records do
+        (
+            local node = force_record[1]
+            local force_tasks = force_record[2]
+            local vertex_count = force_record[3]
+            local object_index = force_record[4]
+            local node_ok = true
+            local node_error = undefined
+
+            try
+            (
+                if not(activateBatchSliceNodeContext node) then
+                (
+                    node_error = node.name + ": could not reactivate Slice Force object context."
+                    node_ok = false
+                )
+
+                if node_ok then
+                (
+                    node_ok = executeSliceForceCachedStack \
+                        node \
+                        force_tasks \
+                        task_index_offset:completed_task_count \
+                        total_task_count:total_task_count \
+                        progress_callback:progress_callback \
+                        object_index:object_index \
+                        object_total:selected_nodes.count \
+                        object_name:node.name \
+                        vertex_count:vertex_count
+
+                    if not node_ok then
+                    (
+                        node_error = node.name + ": " + (last_slice_error as string)
+                    )
+                )
+            )
+            catch
+            (
+                node_error = node.name + ": Slice Force stack execution error. " + ((getCurrentException()) as string)
+                node_ok = false
+            )
+
+            completed_task_count += force_tasks.count
+
+            if node_ok then
+            (
+                append successful_nodes node
+                if report != "" then report += "\n"
+                report += node.name + ": Slice Force cached " + (force_tasks.count as string) + " unique plane(s), prebuilt the full modifier stack, and collapsed to Editable Poly."
+            )
+            else
+            (
+                if (findItem failed_nodes node) == 0 then append failed_nodes node
+                if report != "" then report += "\n"
+                report += node_error
+            )
+        )
+
+        last_slice_processed_objects = successful_nodes.count
+        last_slice_processed_vertices = processed_vertex_count
+        last_slice_failed_nodes = failed_nodes
+        last_slice_report = report
+
+        try(subObjectLevel = 0)catch()
+
+        if failed_nodes.count > 0 then
+        (
+            select failed_nodes
+            false
+        )
+        else
+        (
+            if successful_nodes.count > 0 then select successful_nodes
+            true
+        )
+        -- return
+    ),
+
+
+    /*
     Runs batch slicing with optional quiet Listener output.
     Quiet state is restored after the batch even when the internal operation throws.
     */
-    function debugSliceSelectedWalls cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 cleanup_edges:true display_hidden_edges:undefined double_side:undefined progress_callback:undefined quiet:false =
+    function debugSliceSelectedWalls cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 cleanup_edges:true force_per_plane:false display_hidden_edges:undefined double_side:undefined progress_callback:undefined quiet:false =
     (
         local previous_batch_quiet = batch_quiet
         local completed = false
@@ -11734,6 +14222,7 @@ modifier.split = false
                 planar_tolerance:planar_tolerance \
                 slice_precision:slice_precision \
                 cleanup_edges:cleanup_edges \
+                force_per_plane:force_per_plane \
                 display_hidden_edges:display_hidden_edges \
                 double_side:double_side \
                 progress_callback:progress_callback
@@ -11762,6 +14251,47 @@ modifier.split = false
         completed
         -- return
     ),
+
+
+    /*
+    Runs optimized Slice Force.
+    Anchor analysis happens once on the baked Editable Poly; all unique-plane modifiers are created before any slice is committed.
+    */
+    function debugSliceSelectedWallsForce cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 cleanup_edges:true display_hidden_edges:undefined double_side:undefined progress_callback:undefined quiet:false =
+    (
+        local previous_batch_quiet = batch_quiet
+        local completed = false
+        local batch_failure = undefined
+        local batch_start_ms = timeStamp()
+
+        batch_quiet = quiet
+
+        try
+        (
+            completed = debugSliceSelectedWallsForceInternal                 cut_mode:cut_mode                 slice_plane_mode:slice_plane_mode                 angle_threshold:angle_threshold                 planar_tolerance:planar_tolerance                 progress_callback:progress_callback
+        )
+        catch
+        (
+            batch_failure = getCurrentException()
+        )
+
+        batch_quiet = previous_batch_quiet
+        last_slice_elapsed_ms = (timeStamp()) - batch_start_ms
+
+        if completed then
+        (
+            appendSliceStatsCsv cut_mode last_slice_processed_objects last_slice_processed_vertices last_slice_elapsed_ms
+        )
+
+        if batch_failure != undefined then
+        (
+            throw (batch_failure as string)
+        )
+
+        completed
+        -- return
+    ),
+
 
     /*
     Returns the current top Edit Poly used by the debug slicer.
@@ -13349,6 +15879,77 @@ modifier.split = false
 
 
     /*
+    Returns true when one visible live topology edge is an open-border edge.
+    Edge identity is resolved by its two endpoint vertex IDs, not by a saved TriMesh edge index.
+    */
+    function isDebugVisibleTopologyBorderEdgeByVertexPair node modifier mesh_value vertex_a vertex_b =
+    (
+        if node == undefined or modifier == undefined or mesh_value == undefined then return false
+        if vertex_a < 1 or vertex_b < 1 then return false
+
+        local edge_count = modifier.GetNumEdges node:node
+
+        for edge_index = 1 to edge_count do
+        (
+            local edge_a = modifier.GetEdgeVertex edge_index 1 node:node
+            local edge_b = modifier.GetEdgeVertex edge_index 2 node:node
+            local same_edge = (edge_a == vertex_a and edge_b == vertex_b) or (edge_a == vertex_b and edge_b == vertex_a)
+
+            if same_edge then
+            (
+                if ::WallFixer.isEvaluatedMeshEdgeVisibleByVertexPair mesh_value vertex_a vertex_b then
+                (
+                    local face_a = modifier.GetEdgeFace edge_index 1 node:node
+                    local face_b = modifier.GetEdgeFace edge_index 2 node:node
+                    local face_a_valid = face_a != undefined and face_a > 0
+                    local face_b_valid = face_b != undefined and face_b > 0
+
+                    if face_a_valid != face_b_valid then return true
+                )
+            )
+        )
+
+        false
+        -- return
+    ),
+
+
+    /*
+    Returns true only for a removable vertex with exactly two visible live topology edges.
+    Border corners are rejected; straight-through border vertices remain valid within the supplied tolerance.
+    */
+    function isDebugRemovableTwoVisibleTopologyVertex node modifier mesh_value vertex_index angle_threshold:2.0 =
+    (
+        if node == undefined or modifier == undefined or mesh_value == undefined then return false
+        if vertex_index < 1 or vertex_index > (modifier.GetNumVertices node:node) then return false
+        if vertex_index > (getNumVerts mesh_value) then return false
+
+        local neighbor_vertices = ::WallFixer.getDebugVisibleTopologyEdgeNeighborVertices node modifier mesh_value vertex_index
+        if neighbor_vertices.count != 2 then return false
+
+        local border_edge_a = ::WallFixer.isDebugVisibleTopologyBorderEdgeByVertexPair node modifier mesh_value vertex_index neighbor_vertices[1]
+        local border_edge_b = ::WallFixer.isDebugVisibleTopologyBorderEdgeByVertexPair node modifier mesh_value vertex_index neighbor_vertices[2]
+
+        if not border_edge_a and not border_edge_b then return true
+
+        -- A malformed/partial border incidence is kept conservative and never removed automatically.
+        if not border_edge_a or not border_edge_b then return false
+
+        local vertex_position = getVert mesh_value vertex_index
+        local neighbor_a = getVert mesh_value neighbor_vertices[1]
+        local neighbor_b = getVert mesh_value neighbor_vertices[2]
+        local direction_a = neighbor_a - vertex_position
+        local direction_b = neighbor_b - vertex_position
+
+        if length direction_a <= epsilon or length direction_b <= epsilon then return false
+
+        local straight_limit = -(cos angle_threshold)
+        (dot (normalize direction_a) (normalize direction_b)) <= straight_limit
+        -- return
+    ),
+
+
+    /*
     Returns true only when one live vertex has exactly two visible topology edges and they continue straight.
     A small straightness tolerance absorbs processed-wall numeric noise while excluding corners.
     */
@@ -13415,6 +16016,8 @@ modifier.split = false
             modPanel.setCurrentObject modifier
             if bind_primary then modifier.SetPrimaryNode node
             modifier.useStackSelection = false
+            modifier.selectMode = 0
+            if classOf node.baseObject == Editable_Poly then node.baseObject.selectMode = 0
             try (modifier.showCage = off) catch ()
             modifier.SetEPolySelLevel #Vertex
             subObjectLevel = 1
@@ -13475,8 +16078,8 @@ modifier.split = false
 
 
     /*
-    Selects every vertex with exactly two visible real topology edges.
-    No straightness or corner-angle filter is applied.
+    Selects every vertex with exactly two visible real topology edges except border corners.
+    Straight-through border vertices remain valid within the supplied tolerance.
     */
     function debugFindTwoEdgeVerts angle_threshold:2.0 =
     (
@@ -13523,9 +16126,7 @@ modifier.split = false
 
             for vertex_index = 1 to live_vertex_count do
             (
-                local visible_neighbors = ::WallFixer.getDebugVisibleTopologyEdgeNeighborVertices node modifier evaluated_mesh vertex_index
-
-                if visible_neighbors.count == 2 then
+                if ::WallFixer.isDebugRemovableTwoVisibleTopologyVertex node modifier evaluated_mesh vertex_index angle_threshold:angle_threshold then
                 (
                     candidates[vertex_index] = true
                 )
@@ -13539,6 +16140,8 @@ modifier.split = false
             modPanel.setCurrentObject modifier
             modifier.SetPrimaryNode node
             modifier.useStackSelection = false
+            modifier.selectMode = 0
+            if classOf node.baseObject == Editable_Poly then node.baseObject.selectMode = 0
             modifier.SetEPolySelLevel #Vertex
             subObjectLevel = 1
             modifier.SetSelection #Vertex candidates node:node
@@ -13623,8 +16226,10 @@ modifier.split = false
             current_candidates = #{}
             for vertex_index = 1 to live_vertex_count do
             (
-                visible_neighbors = ::WallFixer.getDebugVisibleTopologyEdgeNeighborVertices node modifier evaluated_mesh vertex_index
-                if visible_neighbors.count == 2 then current_candidates[vertex_index] = true
+                if ::WallFixer.isDebugRemovableTwoVisibleTopologyVertex node modifier evaluated_mesh vertex_index angle_threshold:angle_threshold then
+                (
+                    current_candidates[vertex_index] = true
+                )
             )
 
             free evaluated_mesh
@@ -13682,8 +16287,8 @@ modifier.split = false
 
 
     /*
-    Verifies the current Vertex selection equals every vertex with exactly two visible topology edges.
-    Run after Find Two-Edge Verts LMB on one selected object.
+    Verifies the current Vertex selection equals every removable two-visible-edge vertex.
+    Border corners are excluded while straight-through border vertices remain valid.
     */
     function testFindTwoEdgeVertsVisibleSelection angle_threshold:2.0 =
     (
@@ -13707,8 +16312,7 @@ modifier.split = false
 
         for vertex_index = 1 to vertex_count do
         (
-            local visible_neighbors = ::WallFixer.getDebugVisibleTopologyEdgeNeighborVertices node modifier evaluated_mesh vertex_index
-            if visible_neighbors.count == 2 then
+            if ::WallFixer.isDebugRemovableTwoVisibleTopologyVertex node modifier evaluated_mesh vertex_index angle_threshold:angle_threshold then
             (
                 expected_selection[vertex_index] = true
             )
@@ -13720,6 +16324,77 @@ modifier.split = false
         local test_passed = actual_selection == expected_selection
 
         if not batch_quiet then format "Find Two-Edge Verts visible selection test | expected:% actual:% | result:%\n" expected_selection actual_selection test_passed
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Verifies border-corner rejection on a five-vertex planar border with one straight middle vertex.
+    The straight border vertex must be selected and the four geometric corners must be rejected.
+    */
+    function testFindTwoEdgeVertsBorderCornerRule angle_threshold:2.0 =
+    (
+        local original_selection = selection as array
+        local test_node = undefined
+        local test_passed = false
+
+        try
+        (
+            test_node = editable_mesh name:(uniqueName "TWO_EDGE_BORDER_TEST_")
+            convertTo test_node Editable_Poly
+            local test_poly = test_node.baseObject
+            test_poly.selectMode = 0
+
+            local vertex_1 = polyop.createVert test_poly [0.0,0.0,0.0]
+            local vertex_2 = polyop.createVert test_poly [5.0,0.0,0.0]
+            local vertex_3 = polyop.createVert test_poly [10.0,0.0,0.0]
+            local vertex_4 = polyop.createVert test_poly [10.0,10.0,0.0]
+            local vertex_5 = polyop.createVert test_poly [0.0,10.0,0.0]
+
+            polyop.createPolygon test_poly #(vertex_1, vertex_2, vertex_3, vertex_4, vertex_5)
+            update test_node
+            select test_node
+
+            local completed = debugFindTwoEdgeVerts angle_threshold:angle_threshold
+            local modifier = getDebugTwoEdgeVertsModifier test_node create_if_missing:false
+            local actual_selection = if modifier != undefined then modifier.GetSelection #Vertex node:test_node else #{}
+            local expected_selection = #{2}
+            local select_passed = completed and actual_selection == expected_selection
+            local before_vertex_count = if modifier != undefined then modifier.GetNumVertices node:test_node else 0
+            local remove_passed = false
+
+            if select_passed then
+            (
+                remove_passed = removeSelectedTwoEdgeVerts angle_threshold:angle_threshold
+
+                local deleted_name = getSelectDeleteModifierName "TWO-EDGE VERTS" deleted:true
+                local deleted_modifier = findNamedEditPolyModifier test_node deleted_name
+                local after_vertex_count = if deleted_modifier != undefined then deleted_modifier.GetNumVertices node:test_node else before_vertex_count
+                remove_passed = remove_passed and after_vertex_count == (before_vertex_count - 1)
+            )
+
+            test_passed = select_passed and remove_passed
+
+            if not batch_quiet then format "Find Two-Edge Verts border-corner test | expected:% actual:% | select:% remove:% | result:%\n" expected_selection actual_selection select_passed remove_passed test_passed
+        )
+        catch
+        (
+            test_passed = false
+            if not batch_quiet then format "Find Two-Edge Verts border-corner test FAILED: %\n" (getCurrentException())
+        )
+
+        if test_node != undefined then try(delete test_node)catch()
+
+        if original_selection.count > 0 then
+        (
+            select original_selection
+        )
+        else
+        (
+            clearSelection()
+        )
 
         test_passed
         -- return
@@ -17128,7 +19803,7 @@ WallFixer = WallFixer_v()
 
 
 /*
-Straight Edge Fixer 0.44
+Straight Edge Fixer 0.48
 Detects repeated horizontal edge rows and aligns nearby horizontal edges to them.
 */
 
@@ -17136,8 +19811,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.44"
-global straight_edge_fixer_tool_version = 0.9994
+global straight_edge_fixer_file_version = "0.48"
+global straight_edge_fixer_tool_version = 1.0269
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -17249,9 +19924,12 @@ struct StraightEdgeFixer_v
     (
         bit_count = 0
 
-        for bit_id in bit_set do
+        if bit_set != undefined then
         (
-            bit_count += 1
+            for bit_id in bit_set do
+            (
+                bit_count += 1
+            )
         )
 
         bit_count
@@ -17605,14 +20283,87 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Returns the existing STRAIGHT EDGE FIXER modifier, creating one only when none exists.
-    Finding any existing named Edit Poly immediately prevents creation of another modifier.
+    Keeps the command panel in Create mode during EDGE FIXER processing.
+    Avoids repeated Modify-panel and sub-object activation while selections are stored directly in Edit Poly.
+    */
+    function ensureCreatePanelMode =
+    (
+        current_panel_mode = undefined
+
+        try
+        (
+            current_panel_mode = getCommandPanelTaskMode()
+        )
+        catch
+        (
+            current_panel_mode = undefined
+        )
+
+        if current_panel_mode != #create then
+        (
+            try
+            (
+                setCommandPanelTaskMode mode:#create
+            )
+            catch
+            (
+            )
+        )
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns the one STRAIGHT EDGE FIXER modifier for this object.
+    The topmost named modifier is kept and every lower duplicate is removed.
     */
     function ensureSingleStraightEdgeFixerModifier node =
     (
         fixer_name = "STRAIGHT EDGE FIXER"
-        fixer_modifier = findNamedEditPoly node fixer_name
+        fixer_modifier = undefined
+        duplicate_modifiers = #()
         created_new_modifier = false
+
+        for modifier_index = 1 to node.modifiers.count do
+        (
+            modifier_value = node.modifiers[modifier_index]
+
+            if ((classOf modifier_value == Edit_Poly) and
+                ((toUpper modifier_value.name) == fixer_name)) then
+            (
+                if fixer_modifier == undefined then
+                (
+                    fixer_modifier = modifier_value
+                )
+                else
+                (
+                    append duplicate_modifiers modifier_value
+                )
+            )
+        )
+
+        if duplicate_modifiers.count > 0 then
+        (
+            ensureCreatePanelMode()
+
+            for duplicate_modifier in duplicate_modifiers do
+            (
+                if modifierBelongsToNode node duplicate_modifier then
+                (
+                    try
+                    (
+                        deleteModifier node duplicate_modifier
+                    )
+                    catch
+                    (
+                    )
+                )
+            )
+
+            update node
+        )
 
         if fixer_modifier == undefined then
         (
@@ -17699,25 +20450,48 @@ struct StraightEdgeFixer_v
         modifier_ready = false
         live_edge_count = 0
         evaluated_mesh = undefined
+        original_selection = selection as array
 
         if ((node != undefined) and (isValidNode node) and (fixer_modifier != undefined)) then
         (
             try
             (
+                ensureCreatePanelMode()
                 ensureEditPolyPrimaryNode node fixer_modifier
                 fixer_modifier.useStackSelection = false
                 fixer_modifier.showCage = off
-                EditPolyMod.SetEPolySelLevel fixer_modifier #Edge
-                update node
 
+                if ((EditPolyMod.GetEPolySelLevel fixer_modifier) != #Edge) then
+                (
+                    EditPolyMod.SetEPolySelLevel fixer_modifier #Edge
+                )
+
+                update node
                 live_edge_count = EditPolyMod.GetNumEdges fixer_modifier node:node
 
                 if live_edge_count <= 0 then
                 (
+                    evaluated_mesh = snapshotAsMesh node
+
+                    if evaluated_mesh != undefined then
+                    (
+                        free evaluated_mesh
+                        evaluated_mesh = undefined
+                    )
+
+                    update node
+                    live_edge_count = EditPolyMod.GetNumEdges fixer_modifier node:node
+                )
+
+                /*
+                Rare stale modifiers may require one Modify-panel evaluation.
+                No component level is entered, and Create mode is restored immediately.
+                */
+                if live_edge_count <= 0 then
+                (
                     select node
-                    max modify mode
+                    setCommandPanelTaskMode mode:#modify
                     modPanel.setCurrentObject fixer_modifier
-                    subObjectLevel = 2
                     update node
 
                     evaluated_mesh = snapshotAsMesh node
@@ -17729,6 +20503,16 @@ struct StraightEdgeFixer_v
                     )
 
                     live_edge_count = EditPolyMod.GetNumEdges fixer_modifier node:node
+                    ensureCreatePanelMode()
+
+                    if original_selection.count > 0 then
+                    (
+                        select original_selection
+                    )
+                    else
+                    (
+                        clearSelection()
+                    )
                 )
 
                 modifier_ready = (live_edge_count > 0)
@@ -17740,6 +20524,17 @@ struct StraightEdgeFixer_v
                     free evaluated_mesh
                 )
 
+                ensureCreatePanelMode()
+
+                if original_selection.count > 0 then
+                (
+                    select original_selection
+                )
+                else
+                (
+                    clearSelection()
+                )
+
                 modifier_ready = false
             )
         )
@@ -17747,6 +20542,7 @@ struct StraightEdgeFixer_v
         modifier_ready
         -- return
     ),
+
 
     /*
     Resolves a live dedicated STRAIGHT EDGE FIXER Edit Poly for this object.
@@ -17805,25 +20601,43 @@ struct StraightEdgeFixer_v
         try
         (
             test_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly test_node
 
-            existing_modifier = Edit_Poly()
-            existing_modifier.name = "STRAIGHT EDGE FIXER"
-            existing_modifier.showCage = off
-            addModifier test_node existing_modifier
+            bottom_modifier = Edit_Poly()
+            bottom_modifier.name = "STRAIGHT EDGE FIXER"
+            addModifier test_node bottom_modifier
 
-            modifier_count_before = test_node.modifiers.count
+            middle_modifier = Edit_Poly()
+            middle_modifier.name = "straight edge fixer"
+            addModifier test_node middle_modifier
+
+            top_modifier = Edit_Poly()
+            top_modifier.name = "STRAIGHT EDGE FIXER"
+            addModifier test_node top_modifier
+
             first_adapter = getGeometryAdapter test_node
             second_adapter = getGeometryAdapter test_node
             third_adapter = getGeometryAdapter test_node
-            modifier_count_after = test_node.modifiers.count
+            named_modifier_count = 0
 
-            test_passed = test_passed and (first_adapter[2] == existing_modifier)
-            test_passed = test_passed and (second_adapter[2] == existing_modifier)
-            test_passed = test_passed and (third_adapter[2] == existing_modifier)
+            for modifier_index = 1 to test_node.modifiers.count do
+            (
+                modifier_value = test_node.modifiers[modifier_index]
+
+                if ((classOf modifier_value == Edit_Poly) and
+                    ((toUpper modifier_value.name) == "STRAIGHT EDGE FIXER")) then
+                (
+                    named_modifier_count += 1
+                )
+            )
+
+            test_passed = test_passed and (first_adapter[2] == top_modifier)
+            test_passed = test_passed and (second_adapter[2] == top_modifier)
+            test_passed = test_passed and (third_adapter[2] == top_modifier)
             test_passed = test_passed and (not first_adapter[3])
             test_passed = test_passed and (not second_adapter[3])
             test_passed = test_passed and (not third_adapter[3])
-            test_passed = test_passed and (modifier_count_after == modifier_count_before)
+            test_passed = test_passed and (named_modifier_count == 1)
         )
         catch
         (
@@ -17843,6 +20657,8 @@ struct StraightEdgeFixer_v
         (
             clearSelection()
         )
+
+        ensureCreatePanelMode()
 
         test_passed
         -- return
@@ -18510,7 +21326,7 @@ struct StraightEdgeFixer_v
 
     /*
     Checks visible open borders for unwelded local-Z seams and reflex corners.
-    The resulting invalid border edges are selected in Edge sub-object mode.
+    Results are stored in STRAIGHT EDGE FIXER while the command panel stays in Create mode.
     */
     function checkBorders tolerance =
     (
@@ -18526,6 +21342,8 @@ struct StraightEdgeFixer_v
         )
         else
         (
+            ensureCreatePanelMode()
+
             for node in selected_nodes do
             (
                 if (isValidNode node and (superClassOf node == GeometryClass)) then
@@ -18538,18 +21356,22 @@ struct StraightEdgeFixer_v
                     invalid_edges = copy unwelded_edges
                     invalid_edges += reflex_edges
 
-                    /*
-                    Select directly here instead of calling the later struct helper.
-                    This avoids MAXScript resolving the forward reference against a Modifier-based selection API.
-                    */
                     if (adapter[1] == #editable_poly) then
                     (
                         polyop.setEdgeSelection (adapter[2]) invalid_edges
                     )
                     else if (adapter[1] == #edit_poly) then
                     (
-                        EditPolyMod.SetEPolySelLevel (adapter[2]) #Edge
-                        EditPolyMod.SetSelection (adapter[2]) #Edge invalid_edges node:node
+                        geometry_source = adapter[2]
+                        ensureEditPolyPrimaryNode node geometry_source
+                        geometry_source.useStackSelection = false
+
+                        if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
+                        (
+                            EditPolyMod.SetEPolySelLevel geometry_source #Edge
+                        )
+
+                        EditPolyMod.SetSelection geometry_source #Edge invalid_edges node:node
                     )
 
                     total_unwelded_edges += countBits unwelded_edges
@@ -18560,17 +21382,64 @@ struct StraightEdgeFixer_v
 
             if (processed_count > 0) then
             (
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 2
                 completeRedraw()
-
-                format "Border Check: selected % invalid border edge(s). Unwelded/overlapping: %, reflex >180 deg: %.\n" total_invalid_edges total_unwelded_edges total_reflex_edges
+                format "Border Check: stored % invalid border edge(s). Unwelded/overlapping: %, reflex >180 deg: %. Create panel kept active.\n" total_invalid_edges total_unwelded_edges total_reflex_edges
             )
         )
 
         total_invalid_edges
         -- return
     ),
+
+    /*
+    Stores every visible open-border edge in the one STRAIGHT EDGE FIXER modifier.
+    The command panel remains in Create mode; topology is unchanged.
+    */
+    function selectAllBorders =
+    (
+        selected_nodes = selection as array
+        processed_count = 0
+        total_border_edges = 0
+
+        if selected_nodes.count == 0 then return undefined
+
+        ensureCreatePanelMode()
+
+        for node in selected_nodes do
+        (
+            if isValidNode node and superClassOf node == GeometryClass then
+            (
+                adapter = getGeometryAdapter node
+                border_edges = getVisibleBorderEdges node adapter
+
+                if adapter != undefined and adapter.count >= 2 and adapter[1] == #edit_poly and adapter[2] != undefined then
+                (
+                    geometry_source = adapter[2]
+                    ensureEditPolyPrimaryNode node geometry_source
+                    geometry_source.useStackSelection = false
+
+                    if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
+                    (
+                        EditPolyMod.SetEPolySelLevel geometry_source #Edge
+                    )
+
+                    EditPolyMod.SetSelection geometry_source #Edge border_edges node:node
+                    processed_count += 1
+                    total_border_edges += border_edges.numberSet
+                )
+            )
+        )
+
+        if processed_count == 0 then return undefined
+
+        ensureCreatePanelMode()
+        completeRedraw()
+        format "Border Select All: stored % open-border edge(s) on % object(s); Create panel kept active.\n" total_border_edges processed_count
+
+        total_border_edges
+        -- return
+    ),
+
 
     /*
     Returns true when an edge is horizontal within tolerance.
@@ -18964,24 +21833,49 @@ struct StraightEdgeFixer_v
     */
     function setEdgeSelection node adapter edge_selection =
     (
-        geometry_source = adapter[2]
+        geometry_source = if ((adapter != undefined) and (adapter.count >= 2)) then adapter[2] else undefined
+        requested_selection = if edge_selection != undefined then edge_selection else #{}
         selection_applied = false
         actual_selection = #{}
 
-        if (adapter[1] == #editable_poly) then
+        if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #editable_poly) and (geometry_source != undefined)) then
         (
-            polyop.setEdgeSelection geometry_source edge_selection
-            actual_selection = polyop.getEdgeSelection geometry_source
-            selection_applied = (actual_selection == edge_selection)
+            try
+            (
+                polyop.setEdgeSelection geometry_source requested_selection
+                actual_selection = polyop.getEdgeSelection geometry_source
+            )
+            catch
+            (
+                actual_selection = #{}
+            )
+
+            if actual_selection == undefined then actual_selection = #{}
+            selection_applied = (actual_selection == requested_selection)
         )
-        else if (adapter[1] == #edit_poly) then
+        else if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #edit_poly) and (geometry_source != undefined)) then
         (
+            ensureCreatePanelMode()
             ensureEditPolyPrimaryNode node geometry_source
             geometry_source.useStackSelection = false
-            EditPolyMod.SetEPolySelLevel geometry_source #Edge
-            EditPolyMod.SetSelection geometry_source #Edge edge_selection node:node
-            actual_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
-            selection_applied = (actual_selection == edge_selection)
+
+            if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
+            (
+                EditPolyMod.SetEPolySelLevel geometry_source #Edge
+            )
+
+            try
+            (
+                EditPolyMod.SetSelection geometry_source #Edge requested_selection node:node
+                actual_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            )
+            catch
+            (
+                actual_selection = #{}
+            )
+
+            if actual_selection == undefined then actual_selection = #{}
+            selection_applied = (actual_selection == requested_selection)
         )
 
         selection_applied
@@ -19041,56 +21935,102 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Writes one checker edge selection and verifies the final stored modifier selection.
-    The final read-back happens after display activation and screen refresh so stale success cannot be reported.
+    Writes one checker edge selection into STRAIGHT EDGE FIXER and leaves it visibly active.
+    Final read-back happens after Modify-panel activation at Edge sub-object level.
     */
     function setCheckerEdgeSelection node adapter edge_selection =
     (
-        geometry_source = adapter[2]
+        geometry_source = if ((adapter != undefined) and (adapter.count >= 2)) then adapter[2] else undefined
+        requested_selection = if edge_selection != undefined then edge_selection else #{}
         set_selection_readback = #{}
         actual_selection = #{}
-        display_activated = activateEdgeSelectionDisplay node adapter
+        display_activated = false
 
-        if (adapter[1] == #edit_poly) then
+        if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #edit_poly) and (geometry_source != undefined)) then
         (
-            EditPolyMod.SetSelection geometry_source #Edge edge_selection node:node
-            set_selection_readback = EditPolyMod.GetSelection geometry_source #Edge node:node
+            display_activated = activateEdgeSelectionDisplay node adapter
+            ensureEditPolyPrimaryNode node geometry_source
+            geometry_source.useStackSelection = false
+            geometry_source.showCage = off
 
-            if set_selection_readback != edge_selection then
+            if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
             (
-                empty_selection = #{}
-                EditPolyMod.SetSelection geometry_source #Edge empty_selection node:node
-                EditPolyMod.Select geometry_source #Edge edge_selection invert:false select:true node:node
-                set_selection_readback = EditPolyMod.GetSelection geometry_source #Edge node:node
+                EditPolyMod.SetEPolySelLevel geometry_source #Edge
             )
-
-            display_activated = (activateEdgeSelectionDisplay node adapter) and display_activated
 
             try
             (
-                EditPolyMod.RefreshScreen geometry_source
+                EditPolyMod.SetSelection geometry_source #Edge requested_selection node:node
+                set_selection_readback = EditPolyMod.GetSelection geometry_source #Edge node:node
             )
             catch
             (
+                set_selection_readback = #{}
+            )
+
+            if set_selection_readback == undefined then set_selection_readback = #{}
+
+            if set_selection_readback != requested_selection then
+            (
+                empty_selection = #{}
+
+                try
+                (
+                    EditPolyMod.SetSelection geometry_source #Edge empty_selection node:node
+                    EditPolyMod.Select geometry_source #Edge requested_selection invert:false select:true node:node
+                    set_selection_readback = EditPolyMod.GetSelection geometry_source #Edge node:node
+                )
+                catch
+                (
+                    set_selection_readback = #{}
+                )
+
+                if set_selection_readback == undefined then set_selection_readback = #{}
             )
 
             update node
-            actual_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            display_activated = activateEdgeSelectionDisplay node adapter
+            completeRedraw()
+
+            try
+            (
+                actual_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            )
+            catch
+            (
+                actual_selection = #{}
+            )
+
+            if actual_selection == undefined then actual_selection = #{}
         )
-        else if (adapter[1] == #editable_poly) then
+        else if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #editable_poly) and (geometry_source != undefined)) then
         (
-            polyop.setEdgeSelection geometry_source edge_selection
-            set_selection_readback = polyop.getEdgeSelection geometry_source
-            redrawViews()
-            actual_selection = polyop.getEdgeSelection geometry_source
+            display_activated = activateEdgeSelectionDisplay node adapter
+
+            try
+            (
+                polyop.setEdgeSelection geometry_source requested_selection
+                set_selection_readback = polyop.getEdgeSelection geometry_source
+                completeRedraw()
+                actual_selection = polyop.getEdgeSelection geometry_source
+            )
+            catch
+            (
+                set_selection_readback = #{}
+                actual_selection = #{}
+            )
+
+            if set_selection_readback == undefined then set_selection_readback = #{}
+            if actual_selection == undefined then actual_selection = #{}
         )
 
-        #((actual_selection == edge_selection), set_selection_readback, actual_selection, display_activated)
+        #((actual_selection == requested_selection), set_selection_readback, actual_selection, display_activated)
         -- return
     ),
 
+
     /*
-    Prints detailed checker state only when selection storage or display activation fails.
+    Prints detailed checker state only when selection storage or visible modifier activation fails.
     Normal successful checks keep concise per-object and summary output.
     */
     function printDirectionCheckerDebug node adapter edge_count candidate_edges requested_edges set_selection_readback actual_selection =
@@ -19131,16 +22071,32 @@ struct StraightEdgeFixer_v
     function getEdgeSelection node adapter =
     (
         edge_selection = #{}
-        geometry_source = adapter[2]
+        geometry_source = if ((adapter != undefined) and (adapter.count >= 2)) then adapter[2] else undefined
 
-        if (adapter[1] == #editable_poly) then
+        if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #editable_poly) and (geometry_source != undefined)) then
         (
-            edge_selection = polyop.getEdgeSelection geometry_source
+            try
+            (
+                edge_selection = polyop.getEdgeSelection geometry_source
+            )
+            catch
+            (
+                edge_selection = #{}
+            )
         )
-        else if (adapter[1] == #edit_poly) then
+        else if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #edit_poly) and (geometry_source != undefined)) then
         (
-            edge_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            try
+            (
+                edge_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            )
+            catch
+            (
+                edge_selection = #{}
+            )
         )
+
+        if edge_selection == undefined then edge_selection = #{}
 
         edge_selection
         -- return
@@ -19207,10 +22163,12 @@ struct StraightEdgeFixer_v
                     (
                         selected_edges = getEdgeSelection node adapter
                         source_name =
-                            if (adapter[1] == #edit_poly) then
+                            if ((adapter[1] == #edit_poly) and (adapter[2] != undefined)) then
                                 adapter[2].name
-                            else
+                            else if adapter[1] == #editable_poly then
                                 "Editable Poly"
+                            else
+                                "<unavailable>"
 
                         format "% | source:% | ids:%\n" node.name source_name selected_edges
 
@@ -19266,8 +22224,8 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Tests dedicated EDGE FIXER selection persistence and display activation.
-    Restores the previous object selection, command-panel mode, current object, and sub-object level.
+    Tests dedicated EDGE FIXER selection persistence and visible Modify-panel activation.
+    The legacy function name is retained for compatibility with existing regression calls.
     */
     function testDirectionSelectionDisplayActivation =
     (
@@ -19291,20 +22249,24 @@ struct StraightEdgeFixer_v
             test_node = box length:10.0 width:10.0 height:10.0
             convertToPoly test_node
             test_node.baseObject.showCage = off
+            select test_node
             adapter = getGeometryAdapter test_node
+
+            setCommandPanelTaskMode mode:#modify
+            modPanel.setCurrentObject (adapter[2])
+            subObjectLevel = 2
+
             requested_edges = #{1}
             selection_result = setCheckerEdgeSelection test_node adapter requested_edges
-            activateEdgeSelectionDisplay test_node adapter
-            completeRedraw()
             actual_edges = getEdgeSelection test_node adapter
-            display_ok = selection_result[4]
-            current_object = modPanel.getCurrentObject()
+            panel_mode_after = getCommandPanelTaskMode()
 
             test_passed = test_passed and selection_result[1]
             test_passed = test_passed and (selection_result[2] == requested_edges)
             test_passed = test_passed and (actual_edges == requested_edges)
-            test_passed = test_passed and display_ok
-            test_passed = test_passed and (current_object == adapter[2])
+            test_passed = test_passed and selection_result[4]
+            test_passed = test_passed and (panel_mode_after == #modify)
+            test_passed = test_passed and (modPanel.getCurrentObject() == (adapter[2]))
             test_passed = test_passed and (subObjectLevel == 2)
             test_passed = test_passed and ((adapter[2]).useStackSelection == false)
             test_passed = test_passed and ((adapter[2]).showCage == off)
@@ -19353,16 +22315,32 @@ struct StraightEdgeFixer_v
     function getVertexSelection node adapter =
     (
         vertex_selection = #{}
-        geometry_source = adapter[2]
+        geometry_source = if ((adapter != undefined) and (adapter.count >= 2)) then adapter[2] else undefined
 
-        if (adapter[1] == #editable_poly) then
+        if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #editable_poly) and (geometry_source != undefined)) then
         (
-            vertex_selection = polyop.getVertSelection geometry_source
+            try
+            (
+                vertex_selection = polyop.getVertSelection geometry_source
+            )
+            catch
+            (
+                vertex_selection = #{}
+            )
         )
-        else if (adapter[1] == #edit_poly) then
+        else if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #edit_poly) and (geometry_source != undefined)) then
         (
-            vertex_selection = EditPolyMod.GetSelection geometry_source #Vertex node:node
+            try
+            (
+                vertex_selection = EditPolyMod.GetSelection geometry_source #Vertex node:node
+            )
+            catch
+            (
+                vertex_selection = #{}
+            )
         )
+
+        if vertex_selection == undefined then vertex_selection = #{}
 
         vertex_selection
         -- return
@@ -20196,8 +23174,7 @@ struct StraightEdgeFixer_v
                     setVertexSelection object_result[1] object_result[2] object_result[4]
                 )
 
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 1
+                ensureCreatePanelMode()
                 completeRedraw()
 
                 messageBox ("Unable to fix selected edges with vertices:\n\n" + failure_report) title:"Straight Edge Fixer"
@@ -20209,11 +23186,10 @@ struct StraightEdgeFixer_v
                     setEdgeSelection object_result[1] object_result[2] object_result[3]
                 )
 
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 2
+                ensureCreatePanelMode()
                 completeRedraw()
 
-                format "Straight Edge Fixer: fixed % selected % edge(s).\n" total_fixed_edges check_type
+                format "Straight Edge Fixer: fixed % selected % edge(s). Create panel kept active.\n" total_fixed_edges check_type
             )
         )
 
@@ -20424,8 +23400,7 @@ struct StraightEdgeFixer_v
                     setVertexSelection object_result[1] object_result[2] object_result[4]
                 )
 
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 1
+                ensureCreatePanelMode()
                 completeRedraw()
 
                 messageBox ("Unable to straighten edges with vertices:\n\n" + failure_report) title:"Straight Edge Fixer"
@@ -20437,11 +23412,10 @@ struct StraightEdgeFixer_v
                     setEdgeSelection object_result[1] object_result[2] object_result[3]
                 )
 
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 2
+                ensureCreatePanelMode()
                 completeRedraw()
 
-                format "Straight Edge Fixer: fixed % selected edge(s).\n" total_fixed_edges
+                format "Straight Edge Fixer: fixed % selected edge(s). Create panel kept active.\n" total_fixed_edges
 
                 if (total_selected_candidates == 0) then
                 (
@@ -20463,8 +23437,6 @@ struct StraightEdgeFixer_v
         selected_nodes = selection as array
         total_selected_edges = 0
         processed_count = 0
-        display_node = undefined
-        display_adapter = undefined
 
         if (selected_nodes.count == 0) then
         (
@@ -20472,6 +23444,8 @@ struct StraightEdgeFixer_v
         )
         else
         (
+            ensureCreatePanelMode()
+
             for node in selected_nodes do
             (
                 if (isValidNode node and (superClassOf node == GeometryClass)) then
@@ -20529,8 +23503,6 @@ struct StraightEdgeFixer_v
                     actual_count = countBits actual_selection
                     total_selected_edges += actual_count
 
-                    display_node = node
-                    display_adapter = adapter
 
                     if (selection_mode == #exact) then
                     (
@@ -20560,26 +23532,15 @@ struct StraightEdgeFixer_v
 
             if (processed_count > 0) then
             (
-                if (display_node != undefined) then
-                (
-                    display_activated = activateEdgeSelectionDisplay display_node display_adapter
-
-                    if not display_activated then
-                    (
-                        actual_selection = getEdgeSelection display_node display_adapter
-                        printDirectionCheckerDebug display_node display_adapter (getEdgeCount display_node display_adapter) actual_selection actual_selection actual_selection actual_selection
-                    )
-                )
-
                 completeRedraw()
 
                 if (selection_mode == #exact) then
                 (
-                    format "Check %: selected % exact zero-deviation edge(s).\n" check_type total_selected_edges
+                    format "Check %: selected % exact zero-deviation edge(s); STRAIGHT EDGE FIXER active at Edge level.\n" check_type total_selected_edges
                 )
                 else
                 (
-                    format "Check %: selected % skewed edge(s), deviation >0 and <= % deg.\n" check_type total_selected_edges angle_threshold
+                    format "Check %: selected % skewed edge(s), deviation >0 and <= % deg; STRAIGHT EDGE FIXER active at Edge level.\n" check_type total_selected_edges angle_threshold
                 )
             )
         )
@@ -20614,7 +23575,6 @@ struct StraightEdgeFixer_v
                 adapter = getGeometryAdapter test_node
                 detected_selection = getDirectionalEdgeSelection test_node adapter mode angle_threshold:angle_threshold exact_epsilon:exact_epsilon
                 selection_result = setCheckerEdgeSelection test_node adapter detected_selection
-                activateEdgeSelectionDisplay test_node adapter
                 completeRedraw()
                 actual_selection = getEdgeSelection test_node adapter
 
@@ -20680,7 +23640,7 @@ struct StraightEdgeFixer_v
 
     /*
     Runs one real Edit Poly checker case and verifies the target edge is the only stored selection.
-    It also verifies STRAIGHT EDGE FIXER is active, visible at Edge level, and unique on the object.
+    It also verifies STRAIGHT EDGE FIXER displays the selection in Modify mode and remains unique on the object.
     */
     function runDirectionCheckerRegressionCase node_name check_type selection_mode point_a point_b point_c angle_threshold =
     (
@@ -20700,7 +23660,7 @@ struct StraightEdgeFixer_v
                 expected_selection[target_edge_id] = true
                 checkEdgeDirection check_type 0.0 angle_threshold selection_mode:selection_mode
                 actual_selection = getEdgeSelection test_node adapter
-                current_object = modPanel.getCurrentObject()
+                panel_mode_after = getCommandPanelTaskMode()
                 fixer_count = 0
 
                 for modifier_index = 1 to test_node.modifiers.count do
@@ -20714,7 +23674,8 @@ struct StraightEdgeFixer_v
                 )
 
                 test_passed = (actual_selection == expected_selection) and
-                    (current_object == adapter[2]) and
+                    (panel_mode_after == #modify) and
+                    (modPanel.getCurrentObject() == (adapter[2])) and
                     (subObjectLevel == 2) and
                     ((adapter[2]).useStackSelection == false) and
                     ((adapter[2]).showCage == off) and
@@ -20803,8 +23764,31 @@ struct StraightEdgeFixer_v
     ),
 
     /*
+    Verifies undefined component-selection reads are normalized to empty BitArrays.
+    Prevents mapped-iteration crashes when an Edit Poly component-selection read is unavailable.
+    */
+    function testUndefinedSelectionSafety =
+    (
+        test_passed = true
+        empty_count = countBits undefined
+        empty_adapter_selection = getEdgeSelection undefined undefined
+        empty_vertex_selection = getVertexSelection undefined undefined
+
+        test_passed = test_passed and (empty_count == 0)
+        test_passed = test_passed and (empty_adapter_selection == #{})
+        test_passed = test_passed and (empty_vertex_selection == #{})
+
+        format "EDGE FIXER undefined selection safety: count:% edges:% verts:% => %\n" \
+            empty_count empty_adapter_selection empty_vertex_selection test_passed
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
     Regression suite for EDGE FIXER Horizontal/Vertical LMB and RMB checkers.
-    Covers exact, skewed, tiny non-zero deviation, persistence, active modifier, and modifier uniqueness.
+    Covers exact, skewed, tiny non-zero deviation, visible selection persistence, Modify mode, and modifier uniqueness.
     */
     function testDirectionCheckerRegression =
     (
@@ -20850,6 +23834,7 @@ struct StraightEdgeFixer_v
         persistence_ok = testDirectionSelectionDisplayActivation()
         single_modifier_ok = testSingleStraightEdgeFixerModifier()
         live_topology_ok = testStraightEdgeFixerLiveTopology()
+        undefined_selection_ok = testUndefinedSelectionSafety()
         test_passed = stable_modes_ok and
             exact_vertical_ok and
             skewed_vertical_ok and
@@ -20859,10 +23844,11 @@ struct StraightEdgeFixer_v
             tiny_angle_ok and
             persistence_ok and
             single_modifier_ok and
-            live_topology_ok
+            live_topology_ok and
+            undefined_selection_ok
 
-        format "EDGE FIXER Checkers regression: stableModes:% exactV:% skewV:% tinyV:% exactH:% skewH:% tinyAngle:% persistence:% singleModifier:% liveTopology:% => %\n" \
-            stable_modes_ok exact_vertical_ok skewed_vertical_ok tiny_vertical_ok exact_horizontal_ok skewed_horizontal_ok tiny_angle_ok persistence_ok single_modifier_ok live_topology_ok test_passed
+        format "EDGE FIXER Checkers regression: stableModes:% exactV:% skewV:% tinyV:% exactH:% skewH:% tinyAngle:% persistence:% singleModifier:% liveTopology:% undefinedSelection:% => %\n" \
+            stable_modes_ok exact_vertical_ok skewed_vertical_ok tiny_vertical_ok exact_horizontal_ok skewed_horizontal_ok tiny_angle_ok persistence_ok single_modifier_ok live_topology_ok undefined_selection_ok test_passed
 
         if original_selection.count > 0 then
         (
@@ -21536,8 +24522,9 @@ dialog_position = StraightEdgeFixer.loadDialogPosition()
 createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #style_sysmenu, #style_toolwindow)
 
 
+
 /*
-Wall-Fixer UI 0.953
+Wall-Fixer UI 0.973
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -21547,8 +24534,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.954"
-global wall_fixer_ui_tool_version = 1.0049
+global wall_fixer_ui_file_version = "0.973"
+global wall_fixer_ui_tool_version = 1.0329
 
 
 /*
@@ -22914,7 +25901,6 @@ The controls are separated from the main EDGE FIXER workflow without changing ge
 */
 rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:82
 (
-    label level_settings_label "ROWS SETTINGS" pos:[8,8] width:104 height:18
     label level_tolerance_label "Rows distance:" pos:[8,32] width:80 height:18
     spinner level_tolerance_spinner "" pos:[90,29] width:40 height:20 \
         range:[0.000001,1000000.0,0.01] type:#worldUnits scale:0.001 \
@@ -22926,7 +25912,6 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:82
     spinner min_level_edges_spinner "" pos:[220,29] width:30 height:20 \
         range:[1,100000,3] type:#integer scale:1 \
         tooltip:"Minimum horizontal edge count needed to define a valid edge row."
-    label min_edges_units_label "edges" pos:[252,32] width:32 height:18
 
 
     checkbox straight_quiet_checkbox "Quiet" pos:[8,57] width:58 height:18 checked:false \
@@ -23002,7 +25987,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:140
 
 
     button border_check_button "BORDER CHECK" pos:[18,70] width:264 height:30 \
-        tooltip:"Select visible border edges with unwelded/overlapping local-Z seams, reflex corners above 180 degrees or 360-degree backtracking borders."
+        tooltip:"LMB: select invalid border edges.\n\nRMB: select all open borders and enter Border sub-object level."
 
 
     subRollout edge_fixer_options_subrollout "" pos:[0,112] width:310 height:wall_fixer_closed_rollout_height
@@ -23150,6 +26135,12 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:140
     )
 
 
+    on border_check_button rightclick do
+    (
+        ::WallFixerRollout.runStraightBorderSelectAll()
+    )
+
+
     on WallFixerEdgeFixerRollout close do
     (
         try
@@ -23167,10 +26158,11 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:140
 SLICE WALLS routes direction directly from the main action mouse event.
 Advanced slicer values continue to come from the existing Wall-Fixer INI settings.
 */
-rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
+rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
 (
     local numbered_button_tooltip
     local slice_action_running = false
+    local slice_force_action_running = false
 
 
     dotNetControl slice_event_label "System.Windows.Forms.Label" pos:[8,4] width:176 height:34
@@ -23197,6 +26189,9 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
 
     button delete_slice_modifier_button "Delete" pos:[252,42] width:54 height:38 \
         tooltip:"LMB: Delete all SLICE VERTICAL modifiers from selected objects.\n\nRMB: Delete all SLICE HORIZONTAL modifiers from selected objects."
+
+
+    dotNetControl slice_force_button "System.Windows.Forms.Button" pos:[4,84] width:302 height:38
 
 
     on WallFixerSliceWallsRollout open do
@@ -23227,7 +26222,16 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
             numbered_button_tooltip \
             "LMB: SLICE VERTICAL\n\nRMB: SLICE HORIZONTAL"
 
-        slice_selected_walls_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
+        slice_selected_walls_button.ForeColor = (dotNetClass "System.Drawing.Color").Pink
+
+
+        wallFixerSetupNumberedDarkButton \
+            slice_force_button \
+            "SLICE FORCE" \
+            numbered_button_tooltip \
+            "LMB: FORCE SLICE VERTICAL.\n\nRMB: FORCE SLICE HORIZONTAL.\n\nCreates one temporary slice modifier per unique plane, then collapses the object after all planes finish."
+
+        slice_force_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
     )
 
 
@@ -23263,6 +26267,30 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
             )
 
             slice_action_running = false
+        )
+    )
+
+
+    on slice_force_button MouseDown sender event_args do
+    (
+        local mouse_button = wallFixerGetDotNetMouseButton event_args
+        local slice_mode = wallFixerGetSliceActionMode mouse_button
+
+        if slice_mode != undefined and not slice_force_action_running then
+        (
+            slice_force_action_running = true
+
+            try
+            (
+                ::WallFixerRollout.runSliceForce slice_mode
+            )
+            catch
+            (
+                ::WallFixerRollout.setProgress 100
+                ::WallFixerRollout.setStatus #error ("Slice Force " + (slice_mode as string) + " failed.")
+            )
+
+            slice_force_action_running = false
         )
     )
 
@@ -23349,7 +26377,7 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:348
 
 
         wallFixerSetupNumberedDarkButton degenerated_faces_button "SELECT AND REMOVE DEGENERATED FACES" numbered_button_tooltip "LMB: Find degenerated faces and store them in SELECT DEGENERATED FACES at Face level.\n\nRMB: Delete the stored faces and rename that modifier DELETED DEGENERATED FACES."
-        wallFixerSetupNumberedDarkButton two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" numbered_button_tooltip "LMB: Find vertices with exactly two visible topology edges and store them in SELECT TWO-EDGE VERTS.\n\nRMB: Remove the stored vertices and rename that modifier DELETED TWO-EDGE VERTS."
+        wallFixerSetupNumberedDarkButton two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" numbered_button_tooltip "LMB: Find vertices with exactly two visible topology edges. Border corners are excluded.\n\nRMB: Remove the stored vertices and rename that modifier DELETED TWO-EDGE VERTS."
         wallFixerSetupNumberedDarkButton duplicated_vertices_button "10. DUPLICATED VERTICES" numbered_button_tooltip "LMB: Store duplicate-position vertices in SELECT DUPLICATED VERTICES.\n\nRMB: Weld the stored vertices and rename that modifier DELETED DUPLICATED VERTICES."
         wallFixerSetupNumberedDarkButton redundant_loops_button "11. REMOVE REDUNDANT LOOPS" numbered_button_tooltip "LMB: Detect redundant straight internal chains and select them.\n\nRMB: Remove the currently selected edges and their redundant vertices from SELECT REDUNDANT LOOPS."
         wallFixerSetupNumberedDarkButton repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" numbered_button_tooltip "Reserved for the new missing-loop completion tool." enabled_state:false
@@ -23455,7 +26483,7 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:348
 HELPERS contains utility actions that are useful outside the numbered wall-fixing workflow.
 These actions operate on the current scene selection.
 */
-rollout WallFixerHelpersRollout "HELPERS" width:310 height:156
+rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
 (
     button attach_button "Attach" pos:[8,8] width:143 height:30 \
         tooltip:"LMB: Attach all selected geometry into the first selected object.\n\nRMB: Attach selection, center the merged pivot, weld all vertices using Wall-Fixer > Options > Weld Threshold, then quadrify when the merged object has at most 12 triangular faces."
@@ -23473,15 +26501,22 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:156
         tooltip:"LMB: Select true 90° open-border corner vertices on the current Edit Poly modifier or Editable Poly base. Straight 180° border vertices are excluded."
 
 
-    button split_button "Split" pos:[8,80] width:143 height:30 \
+    button split_button "Split" pos:[8,80] width:294 height:30 \
         tooltip:"LMB: Apply Editable Poly, split all selected edges, then explode the resulting elements into separate objects."
 
 
-    button material_button "Material" pos:[159,80] width:143 height:30 \
+    groupBox material_group "MATERIAL" pos:[4,116] width:302 height:66
+
+
+    button material_button "Material" pos:[8,140] width:143 height:30 \
         tooltip:"LMB: Assign the same WALL FACE CLASSIFIER material used by INNER / OUTTER to selected geometry.\n\nRMB: Remove the material from selected geometry."
 
 
-    button select_degenerated_objects_button "Select Degenerated Objects" pos:[8,116] width:294 height:30 \
+    button material_by_sg_button "Material by SG" pos:[159,140] width:143 height:30 \
+        tooltip:"LMB: Assign a shared Multi/Sub-Object material and set face Material IDs from smoothing-group masks. Uses the topmost Edit Poly, otherwise the Editable Poly base."
+
+
+    button select_degenerated_objects_button "Select Degenerated Objects" pos:[8,188] width:294 height:30 \
         tooltip:"Select visible geometry collapsed to an edge when all evaluated vertex normals match."
 
 
@@ -23536,6 +26571,12 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:156
     on material_button rightclick do
     (
         ::WallFixerRollout.runRemoveMaterial()
+    )
+
+
+    on material_by_sg_button pressed do
+    (
+        ::WallFixerRollout.runAssignMaterialBySmoothingGroup()
     )
 
 
@@ -23786,6 +26827,40 @@ function getFaceGeometrySource object_node =
 )
 
 
+/* Returns the topmost editable polygon source used by Material by SG.
+   The highest Edit Poly in the stack wins; otherwise the Editable Poly base is used.
+*/
+function getTopMaterialGeometrySource object_node =
+(
+    wallFixerSetNodeCageOff object_node
+    local source_data = undefined
+
+
+    if object_node != undefined and isValidNode object_node then
+    (
+        for modifier_index = 1 to object_node.modifiers.count while source_data == undefined do
+        (
+            local current_modifier = object_node.modifiers[modifier_index]
+
+
+            if classof current_modifier == Edit_Poly then
+            (
+                source_data = #(#editPoly, current_modifier)
+            )
+        )
+
+
+        if source_data == undefined and classof object_node.baseObject == Editable_Poly then
+        (
+            source_data = #(#editablePoly, object_node.baseObject)
+        )
+    )
+
+
+    source_data -- return
+)
+
+
 /* Returns the vertex count from the current supported polygon source.
 */
 function getSourceNumVertices object_node source_data =
@@ -23829,6 +26904,276 @@ function getSourceNumFaces object_node source_data =
 
 
     face_count -- return
+)
+
+
+/* Returns the smoothing-group bit mask for one face on Edit Poly or Editable Poly.
+*/
+function getSourceFaceSmoothingGroup object_node source_data face_index =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local smoothing_group = 0
+
+
+    if source_type == #editPoly then
+    (
+        smoothing_group = source_value.GetFaceSmoothingGroups face_index node:object_node
+    )
+    else if source_type == #editablePoly then
+    (
+        smoothing_group = polyOp.getFaceSmoothGroup source_value face_index
+    )
+
+
+    smoothing_group -- return
+)
+
+
+/* Builds stable sequential Material IDs from smoothing-group bit masks.
+   Equal masks always receive the same Material ID; smoothing group 0 is a valid group.
+*/
+function buildMaterialBySmoothingGroupMap smoothing_groups =
+(
+    local unique_smoothing_groups = #()
+    local material_ids = #()
+
+
+    for smoothing_group in smoothing_groups do
+    (
+        local material_id = findItem unique_smoothing_groups smoothing_group
+
+
+        if material_id == 0 then
+        (
+            append unique_smoothing_groups smoothing_group
+            material_id = unique_smoothing_groups.count
+        )
+
+
+        append material_ids material_id
+    )
+
+
+    #(unique_smoothing_groups, material_ids) -- return
+)
+
+
+/* Creates a shared Multi/Sub-Object material for smoothing-group-driven Material IDs.
+   Each distinct smoothing-group mask receives one deterministic colored sub-material.
+*/
+function createMaterialBySmoothingGroupMultiMaterial smoothing_groups =
+(
+    local material_count = smoothing_groups.count
+    local material_by_sg = undefined
+
+
+    if material_count > 0 then
+    (
+        local color_palette = #(
+            (color 238 92 92),
+            (color 96 178 246),
+            (color 112 214 132),
+            (color 244 182 78),
+            (color 184 118 244),
+            (color 78 210 204),
+            (color 246 122 190),
+            (color 194 210 90),
+            (color 116 142 248),
+            (color 238 136 82),
+            (color 126 210 168),
+            (color 218 116 240)
+        )
+        local material_ids = #()
+        local material_names = #()
+
+
+        material_by_sg = multimaterial numsubs:material_count name:"MATERIAL BY SG"
+
+
+        for material_index = 1 to material_count do
+        (
+            local smoothing_group = smoothing_groups[material_index]
+            local material_name = "SG " + (smoothing_group as string)
+            local palette_index = mod (material_index - 1) color_palette.count + 1
+            local sub_material = standardMaterial name:material_name diffuse:color_palette[palette_index]
+
+
+            material_by_sg.materialList[material_index] = sub_material
+            append material_ids material_index
+            append material_names material_name
+        )
+
+
+        material_by_sg.materialIDList = material_ids
+        material_by_sg.names = material_names
+    )
+
+
+    material_by_sg -- return
+)
+
+
+/* Assigns one shared Material by SG material and rewrites face Material IDs from smoothing groups.
+   Uses the topmost Edit Poly when present, otherwise the Editable Poly base.
+*/
+function assignMaterialBySmoothingGroups object_nodes =
+(
+    local object_data = #()
+    local all_smoothing_groups = #()
+    local original_selection = selection as array
+    local original_sub_object_level = subObjectLevel
+    local original_panel_mode = undefined
+    local result_data = undefined
+
+
+    try
+    (
+        original_panel_mode = getCommandPanelTaskMode()
+    )
+    catch
+    (
+        original_panel_mode = undefined
+    )
+
+
+    for object_node in object_nodes do
+    (
+        local source_data = getTopMaterialGeometrySource object_node
+
+
+        if source_data != undefined then
+        (
+            local face_count = getSourceNumFaces object_node source_data
+
+
+            if face_count > 0 then
+            (
+                local face_smoothing_groups = #()
+
+
+                for face_index = 1 to face_count do
+                (
+                    local smoothing_group = getSourceFaceSmoothingGroup object_node source_data face_index
+
+
+                    append face_smoothing_groups smoothing_group
+
+
+                    if findItem all_smoothing_groups smoothing_group == 0 then
+                    (
+                        append all_smoothing_groups smoothing_group
+                    )
+                )
+
+
+                append object_data #(object_node, source_data, face_smoothing_groups)
+            )
+        )
+    )
+
+
+    if object_data.count > 0 and all_smoothing_groups.count > 0 then
+    (
+        local material_by_sg = createMaterialBySmoothingGroupMultiMaterial all_smoothing_groups
+
+
+        if material_by_sg != undefined then
+        (
+            for current_data in object_data do
+            (
+                local object_node = current_data[1]
+                local source_data = current_data[2]
+                local face_smoothing_groups = current_data[3]
+                local original_face_selection = getSourceFaceSelection object_node source_data
+                local face_bits_by_material = for material_index = 1 to all_smoothing_groups.count collect #{}
+
+
+                for face_index = 1 to face_smoothing_groups.count do
+                (
+                    local material_id = findItem all_smoothing_groups face_smoothing_groups[face_index]
+
+
+                    if material_id > 0 then
+                    (
+                        face_bits_by_material[material_id][face_index] = true
+                    )
+                )
+
+
+                object_node.material = material_by_sg
+
+
+                for material_id = 1 to face_bits_by_material.count do
+                (
+                    if face_bits_by_material[material_id].numberSet > 0 then
+                    (
+                        setSourceFaceMaterialId object_node source_data face_bits_by_material[material_id] material_id
+                    )
+                )
+
+
+                setSourceFaceSelection object_node source_data original_face_selection
+            )
+
+
+            result_data = #(material_by_sg, object_data.count, all_smoothing_groups.count)
+        )
+    )
+
+
+    try
+    (
+        select original_selection
+    )
+    catch
+    (
+    )
+
+
+    try
+    (
+        subObjectLevel = original_sub_object_level
+    )
+    catch
+    (
+    )
+
+
+    if original_panel_mode != undefined then
+    (
+        try
+        (
+            setCommandPanelTaskMode original_panel_mode
+        )
+        catch
+        (
+        )
+    )
+
+
+    redrawViews()
+
+
+    result_data -- return
+)
+
+
+/* Tests deterministic smoothing-group-mask to Material-ID mapping.
+   Equal masks must reuse one ID and smoothing group 0 must remain a separate group.
+*/
+function testMaterialBySmoothingGroupMap =
+(
+    local test_data = buildMaterialBySmoothingGroupMap #(1, 4, 1, 0, 5, 4)
+    local expected_groups = #(1, 4, 0, 5)
+    local expected_ids = #(1, 2, 1, 3, 4, 2)
+    local passed = test_data[1] == expected_groups and test_data[2] == expected_ids
+
+
+    format "Material by SG mapping: % | groups:% | ids:%\n" passed test_data[1] test_data[2]
+
+
+    passed -- return
 )
 
 
@@ -29453,6 +32798,18 @@ function testSliceSelectDirectionalRouting =
 
 
 /*
+Tests Slice Force mouse routing; it intentionally matches the main Slice Walls mapping.
+*/
+function testSliceForceMouseRouting =
+(
+    wallFixerGetSliceActionMode "Left" == #vertical and
+    wallFixerGetSliceActionMode "Right" == #horizontal and
+    wallFixerGetSliceActionMode "Middle" == undefined
+    -- return
+)
+
+
+/*
 Tests direct Slice Walls LMB/RMB direction routing.
 */
 function testSliceWallMouseRouting =
@@ -29538,7 +32895,7 @@ function testPostProcessDegeneratedFacesControl =
 
 /*
 Tests POST-PROCESS step 11 routing against the integrated stable detector without changing scene geometry.
-The pure topology rules must all pass and the detector version must remain 0.08.
+The pure topology rules must all pass and the detector version must remain 0.13.
 */
 function testPostProcessRedundantLoopRouting =
 (
@@ -29548,7 +32905,7 @@ function testPostProcessRedundantLoopRouting =
 
     try
     (
-        detector_ok = RedundantLoopDetector.file_version == 0.08
+        detector_ok = RedundantLoopDetector.file_version == 0.13
         topology_result = RedundantLoopDetector.testTopologyRules()
         topology_ok = true
 
@@ -29687,7 +33044,7 @@ function testParentControlWidths =
     width_ok = width_ok and (WallFixerPreProcessRollout.planar_button.pos.x == 4) and (WallFixerPreProcessRollout.planar_button.width == (WallFixerPreProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPreProcessRollout.explode_walls_button.pos.x == 4) and (WallFixerPreProcessRollout.explode_walls_button.width == (WallFixerPreProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerEdgeFixerRollout.edge_z_group.pos.x == 4) and (WallFixerEdgeFixerRollout.edge_z_group.width == (WallFixerEdgeFixerRollout.width - 8))
-    width_ok = width_ok and (WallFixerSliceWallsRollout.slice_selected_walls_button.pos.x == 4) and (WallFixerSliceWallsRollout.slice_selected_walls_button.width == (WallFixerSliceWallsRollout.width - 8))
+    width_ok = width_ok and (WallFixerSliceWallsRollout.slice_force_button.pos.x == 4) and (WallFixerSliceWallsRollout.slice_force_button.width == (WallFixerSliceWallsRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.degenerated_faces_button.pos.x == 4) and (WallFixerPostProcessRollout.degenerated_faces_button.width == (WallFixerPostProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.two_edge_verts_button.pos.x == 4) and (WallFixerPostProcessRollout.two_edge_verts_button.width == (WallFixerPostProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.duplicated_vertices_button.pos.x == 4) and (WallFixerPostProcessRollout.duplicated_vertices_button.width == (WallFixerPostProcessRollout.width - 8))
@@ -30320,21 +33677,20 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
 
 rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 (
-    progressbar workflow_progress "" pos:[8,8] width:328 height:14 value:0 color:(color 0 180 0) orient:#horizontal
-    dotNetControl progress_count_label "System.Windows.Forms.Label" pos:[8,24] width:328 height:18
+    progressbar workflow_progress "" pos:[0,0] width:344 height:4 value:0 color:(color 0 180 0) orient:#horizontal
+    dotNetControl progress_count_label "System.Windows.Forms.Label" pos:[8,6] width:328 height:40
     dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,6] width:76 height:40
-    dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:19
-    dotNetControl status_line_bottom "System.Windows.Forms.RichTextBox" pos:[88,28] width:248 height:19
+    dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:40
     subRollout workflow_subrollout "" pos:[0,54] width:344 height:686
 
 
-    local status_texts = #("Ready.", "")
+    local status_texts = #("Ready.")
     local last_progress_value = -1
 
 
     /*
     Converts multiline reports into a compact single status line.
-    The status header retains only the two newest messages.
+    The status header retains only the newest message.
     */
     function compactStatusText message_text =
 (
@@ -30362,8 +33718,8 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Shows the completed process state in the progress-bar position.
-    Final SUCCESS/WARNING/ERROR states hide the progress bar until another process starts.
+    Shows the completed process state in the shared status area.
+    The top progress bar remains visible at all times.
     */
     function showProcessResult result_type =
     (
@@ -30398,10 +33754,8 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
         process_status_label.Visible = false
-        workflow_progress.visible = false
         progress_count_label.Visible = false
         status_line_top.Visible = true
-        status_line_bottom.Visible = true
         process_status_label.Text = result_text
         process_status_label.ForeColor = result_color
         process_status_label.Visible = true
@@ -30410,17 +33764,15 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Pushes one plain message into the shared two-line status history.
+    Pushes one plain message into the shared status display.
     The message type controls only the result label shown above it.
     */
     function setStatus message_type message_text =
     (
-        status_texts[2] = status_texts[1]
         status_texts[1] = compactStatusText message_text
 
 
         renderStatusLine status_line_top status_texts[1]
-        renderStatusLine status_line_bottom status_texts[2]
 
 
         if (message_type == #success) or (message_type == #warning) or (message_type == #failed) or (message_type == #error) then
@@ -30453,12 +33805,9 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
         if clamped_value < 100 then
         (
-            workflow_progress.visible = false
             progress_count_label.Visible = false
             process_status_label.Visible = false
             status_line_top.Visible = false
-            status_line_bottom.Visible = false
-            workflow_progress.visible = true
             progress_count_label.Visible = true
             try(progress_count_label.BringToFront())catch()
         )
@@ -30885,6 +34234,52 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
             setStatus #success ("Material: assigned WALL FACE CLASSIFIER to " + (selected_nodes.count as string) + " object(s).")
             true
+        )
+        -- return
+    )
+
+
+    /*
+    Assigns one shared Multi/Sub-Object material and maps face Material IDs from smoothing-group masks.
+    The topmost Edit Poly is used when present; otherwise the Editable Poly base is edited.
+    */
+    function runAssignMaterialBySmoothingGroup =
+    (
+        selected_nodes = for object_node in (selection as array) where object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #warning "Material by SG: select one or more geometry objects."
+            false
+        )
+        else
+        (
+            assignment_result = undefined
+
+
+            undo "Wall-Fixer - Material by SG" on
+            (
+                assignment_result = assignMaterialBySmoothingGroups selected_nodes
+            )
+
+
+            if assignment_result == undefined then
+            (
+                setStatus #warning "Material by SG: no Edit Poly or Editable Poly faces found."
+                false
+            )
+            else
+            (
+                setStatus #success (
+                    "Material by SG: assigned " +
+                    (assignment_result[3] as string) +
+                    " Material ID(s) across " +
+                    (assignment_result[2] as string) +
+                    " object(s)."
+                )
+                true
+            )
         )
         -- return
     )
@@ -34411,6 +37806,32 @@ result_groups
 
 
     /*
+    Selects every open border on the current geometry and enters Border sub-object level.
+    No topology is modified; the dedicated EDGE FIXER modifier stores the border edge selection.
+    */
+    function runStraightBorderSelectAll =
+    (
+        saveStraightEdgeSettings()
+        setProgress 0
+        setStatus #message "Selecting all borders..."
+        selected_border_edges = StraightEdgeFixer.selectAllBorders()
+        setProgress 100
+
+        if selected_border_edges == undefined then
+        (
+            setStatus #warning "Border Select All: select at least one supported geometry object."
+            false
+        )
+        else
+        (
+            setStatus #success ("Border Select All: selected " + (selected_border_edges as string) + " open-border edge(s).")
+            true
+        )
+        -- return
+    )
+
+
+    /*
     Runs the imported repeated-level detection/alignment tool with the integrated controls.
     All geometry behavior remains in the separate Straight Edge support module.
     */
@@ -34774,6 +38195,81 @@ result_groups
 
 
     /*
+    Runs Slice Force with the same directional anchor detection as normal Slice Walls.
+    One temporary modifier is used per unique plane and the object is collapsed after every plane completes.
+    */
+    function runSliceForce cut_mode =
+    (
+        if cut_mode != #horizontal and cut_mode != #vertical then
+        (
+            setStatus #error "Slice Force requires exactly one direction: Horizontal or Vertical."
+            return false
+        )
+
+        saveUiSettings()
+        setProgress 0
+        setStatus #message ("Slice Force: " + (cut_mode as string) + "...")
+
+        local completed = WallFixer.debugSliceSelectedWallsForce \
+            cut_mode:cut_mode \
+            slice_plane_mode:(getSlicePlaneMode()) \
+            angle_threshold:saved_angle_threshold \
+            planar_tolerance:saved_planar_tolerance \
+            slice_precision:WallFixerOptionsRollout.slice_precision_spinner.value \
+            cleanup_edges:(not WallFixerSliceWallsRollout.no_edge_cleanup_checkbox.checked) \
+            display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
+            double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
+            progress_callback:updateSliceProgress \
+            quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
+
+        setProgress 100
+
+        if completed then
+        (
+            local elapsed_seconds = (WallFixer.last_slice_elapsed_ms as float) / 1000.0
+            local completion_message = "Slice Force completed and collapsed in " + (elapsed_seconds as string) + " s."
+            if WallFixer.last_slice_report != "" then completion_message += " " + WallFixer.last_slice_report
+            setStatus #success completion_message
+        )
+        else
+        (
+            local failed_nodes = if isProperty WallFixer #last_slice_failed_nodes then WallFixer.last_slice_failed_nodes else #()
+            local failure_summary = if failed_nodes.count > 0 then \
+                ("Slice Force completed with " + (failed_nodes.count as string) + " failed object(s). Failed objects are selected.") \
+                else \
+                (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Slice Force stopped.")
+
+            setStatus #failed failure_summary
+
+            local failure_message = failure_summary
+
+            if failed_nodes.count > 0 then
+            (
+                failure_message += "\n\nFAILED OBJECTS:"
+
+                for failed_node in failed_nodes do
+                (
+                    if failed_node != undefined and isValidNode failed_node then
+                    (
+                        failure_message += "\n" + failed_node.name
+                    )
+                )
+            )
+
+            if WallFixer.last_slice_report != "" then
+            (
+                failure_message += "\n\n" + WallFixer.last_slice_report
+            )
+
+            messageBox failure_message title:"Wall-Fixer - Slice Force"
+        )
+
+        completed
+        -- return
+    )
+
+
+    /*
     Selects degenerated faces and leaves the first matching object on SELECT DEGENERATED FACES at Face level.
     Modified or non-Editable-Poly geometry is preflighted from the evaluated snapshot without collapsing the stack.
     */
@@ -35006,7 +38502,7 @@ result_groups
         max_background_color = colorMan.getColor #background
         max_text_color = colorMan.getColor #text
         color_class = dotNetClass "System.Drawing.Color"
-        background_color = color_class.FromArgb ((max_background_color.x * 255.0) as integer) ((max_background_color.y * 255.0) as integer) ((max_background_color.z * 255.0) as integer)
+        background_color = color_class.FromArgb 68 68 68
         text_color = color_class.FromArgb ((max_text_color.x * 255.0) as integer) ((max_text_color.y * 255.0) as integer) ((max_text_color.z * 255.0) as integer)
         border_style = (dotNetClass "System.Windows.Forms.BorderStyle").None
         scroll_bars = (dotNetClass "System.Windows.Forms.RichTextBoxScrollBars").None
@@ -35018,7 +38514,7 @@ result_groups
         process_status_label.TextAlign = content_alignment_class.MiddleLeft
         progress_count_label.AutoSize = false
         progress_count_label.TextAlign = content_alignment_class.MiddleCenter
-        progress_count_label.BackColor = (dotNetClass "System.Drawing.Color").Transparent
+        progress_count_label.BackColor = background_color
         progress_count_label.ForeColor = text_color
         progress_count_label.Text = ""
         progress_count_label.Visible = false
@@ -35027,10 +38523,10 @@ result_groups
         process_status_label.Font = dotNetObject "System.Drawing.Font" process_status_label.Font font_style_class.Bold
         process_status_label.Text = "READY"
         process_status_label.Visible = true
-        workflow_progress.visible = false
+        workflow_progress.visible = true
 
 
-        for status_control in #(status_line_top, status_line_bottom) do
+        for status_control in #(status_line_top) do
         (
             status_control.ReadOnly = true
             status_control.Multiline = false
@@ -35044,7 +38540,6 @@ result_groups
 
 
         renderStatusLine status_line_top status_texts[1]
-        renderStatusLine status_line_bottom status_texts[2]
 
 
         current_dialog_size = getDialogSize WallFixerRollout

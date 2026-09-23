@@ -1,5 +1,5 @@
 /*
-Straight Edge Fixer 0.44
+Straight Edge Fixer 0.48
 Detects repeated horizontal edge rows and aligns nearby horizontal edges to them.
 */
 
@@ -7,8 +7,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.44"
-global straight_edge_fixer_tool_version = 0.9994
+global straight_edge_fixer_file_version = "0.48"
+global straight_edge_fixer_tool_version = 1.0269
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -120,9 +120,12 @@ struct StraightEdgeFixer_v
     (
         bit_count = 0
 
-        for bit_id in bit_set do
+        if bit_set != undefined then
         (
-            bit_count += 1
+            for bit_id in bit_set do
+            (
+                bit_count += 1
+            )
         )
 
         bit_count
@@ -476,14 +479,87 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Returns the existing STRAIGHT EDGE FIXER modifier, creating one only when none exists.
-    Finding any existing named Edit Poly immediately prevents creation of another modifier.
+    Keeps the command panel in Create mode during EDGE FIXER processing.
+    Avoids repeated Modify-panel and sub-object activation while selections are stored directly in Edit Poly.
+    */
+    function ensureCreatePanelMode =
+    (
+        current_panel_mode = undefined
+
+        try
+        (
+            current_panel_mode = getCommandPanelTaskMode()
+        )
+        catch
+        (
+            current_panel_mode = undefined
+        )
+
+        if current_panel_mode != #create then
+        (
+            try
+            (
+                setCommandPanelTaskMode mode:#create
+            )
+            catch
+            (
+            )
+        )
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns the one STRAIGHT EDGE FIXER modifier for this object.
+    The topmost named modifier is kept and every lower duplicate is removed.
     */
     function ensureSingleStraightEdgeFixerModifier node =
     (
         fixer_name = "STRAIGHT EDGE FIXER"
-        fixer_modifier = findNamedEditPoly node fixer_name
+        fixer_modifier = undefined
+        duplicate_modifiers = #()
         created_new_modifier = false
+
+        for modifier_index = 1 to node.modifiers.count do
+        (
+            modifier_value = node.modifiers[modifier_index]
+
+            if ((classOf modifier_value == Edit_Poly) and
+                ((toUpper modifier_value.name) == fixer_name)) then
+            (
+                if fixer_modifier == undefined then
+                (
+                    fixer_modifier = modifier_value
+                )
+                else
+                (
+                    append duplicate_modifiers modifier_value
+                )
+            )
+        )
+
+        if duplicate_modifiers.count > 0 then
+        (
+            ensureCreatePanelMode()
+
+            for duplicate_modifier in duplicate_modifiers do
+            (
+                if modifierBelongsToNode node duplicate_modifier then
+                (
+                    try
+                    (
+                        deleteModifier node duplicate_modifier
+                    )
+                    catch
+                    (
+                    )
+                )
+            )
+
+            update node
+        )
 
         if fixer_modifier == undefined then
         (
@@ -570,25 +646,48 @@ struct StraightEdgeFixer_v
         modifier_ready = false
         live_edge_count = 0
         evaluated_mesh = undefined
+        original_selection = selection as array
 
         if ((node != undefined) and (isValidNode node) and (fixer_modifier != undefined)) then
         (
             try
             (
+                ensureCreatePanelMode()
                 ensureEditPolyPrimaryNode node fixer_modifier
                 fixer_modifier.useStackSelection = false
                 fixer_modifier.showCage = off
-                EditPolyMod.SetEPolySelLevel fixer_modifier #Edge
-                update node
 
+                if ((EditPolyMod.GetEPolySelLevel fixer_modifier) != #Edge) then
+                (
+                    EditPolyMod.SetEPolySelLevel fixer_modifier #Edge
+                )
+
+                update node
                 live_edge_count = EditPolyMod.GetNumEdges fixer_modifier node:node
 
                 if live_edge_count <= 0 then
                 (
+                    evaluated_mesh = snapshotAsMesh node
+
+                    if evaluated_mesh != undefined then
+                    (
+                        free evaluated_mesh
+                        evaluated_mesh = undefined
+                    )
+
+                    update node
+                    live_edge_count = EditPolyMod.GetNumEdges fixer_modifier node:node
+                )
+
+                /*
+                Rare stale modifiers may require one Modify-panel evaluation.
+                No component level is entered, and Create mode is restored immediately.
+                */
+                if live_edge_count <= 0 then
+                (
                     select node
-                    max modify mode
+                    setCommandPanelTaskMode mode:#modify
                     modPanel.setCurrentObject fixer_modifier
-                    subObjectLevel = 2
                     update node
 
                     evaluated_mesh = snapshotAsMesh node
@@ -600,6 +699,16 @@ struct StraightEdgeFixer_v
                     )
 
                     live_edge_count = EditPolyMod.GetNumEdges fixer_modifier node:node
+                    ensureCreatePanelMode()
+
+                    if original_selection.count > 0 then
+                    (
+                        select original_selection
+                    )
+                    else
+                    (
+                        clearSelection()
+                    )
                 )
 
                 modifier_ready = (live_edge_count > 0)
@@ -611,6 +720,17 @@ struct StraightEdgeFixer_v
                     free evaluated_mesh
                 )
 
+                ensureCreatePanelMode()
+
+                if original_selection.count > 0 then
+                (
+                    select original_selection
+                )
+                else
+                (
+                    clearSelection()
+                )
+
                 modifier_ready = false
             )
         )
@@ -618,6 +738,7 @@ struct StraightEdgeFixer_v
         modifier_ready
         -- return
     ),
+
 
     /*
     Resolves a live dedicated STRAIGHT EDGE FIXER Edit Poly for this object.
@@ -676,25 +797,43 @@ struct StraightEdgeFixer_v
         try
         (
             test_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly test_node
 
-            existing_modifier = Edit_Poly()
-            existing_modifier.name = "STRAIGHT EDGE FIXER"
-            existing_modifier.showCage = off
-            addModifier test_node existing_modifier
+            bottom_modifier = Edit_Poly()
+            bottom_modifier.name = "STRAIGHT EDGE FIXER"
+            addModifier test_node bottom_modifier
 
-            modifier_count_before = test_node.modifiers.count
+            middle_modifier = Edit_Poly()
+            middle_modifier.name = "straight edge fixer"
+            addModifier test_node middle_modifier
+
+            top_modifier = Edit_Poly()
+            top_modifier.name = "STRAIGHT EDGE FIXER"
+            addModifier test_node top_modifier
+
             first_adapter = getGeometryAdapter test_node
             second_adapter = getGeometryAdapter test_node
             third_adapter = getGeometryAdapter test_node
-            modifier_count_after = test_node.modifiers.count
+            named_modifier_count = 0
 
-            test_passed = test_passed and (first_adapter[2] == existing_modifier)
-            test_passed = test_passed and (second_adapter[2] == existing_modifier)
-            test_passed = test_passed and (third_adapter[2] == existing_modifier)
+            for modifier_index = 1 to test_node.modifiers.count do
+            (
+                modifier_value = test_node.modifiers[modifier_index]
+
+                if ((classOf modifier_value == Edit_Poly) and
+                    ((toUpper modifier_value.name) == "STRAIGHT EDGE FIXER")) then
+                (
+                    named_modifier_count += 1
+                )
+            )
+
+            test_passed = test_passed and (first_adapter[2] == top_modifier)
+            test_passed = test_passed and (second_adapter[2] == top_modifier)
+            test_passed = test_passed and (third_adapter[2] == top_modifier)
             test_passed = test_passed and (not first_adapter[3])
             test_passed = test_passed and (not second_adapter[3])
             test_passed = test_passed and (not third_adapter[3])
-            test_passed = test_passed and (modifier_count_after == modifier_count_before)
+            test_passed = test_passed and (named_modifier_count == 1)
         )
         catch
         (
@@ -714,6 +853,8 @@ struct StraightEdgeFixer_v
         (
             clearSelection()
         )
+
+        ensureCreatePanelMode()
 
         test_passed
         -- return
@@ -1381,7 +1522,7 @@ struct StraightEdgeFixer_v
 
     /*
     Checks visible open borders for unwelded local-Z seams and reflex corners.
-    The resulting invalid border edges are selected in Edge sub-object mode.
+    Results are stored in STRAIGHT EDGE FIXER while the command panel stays in Create mode.
     */
     function checkBorders tolerance =
     (
@@ -1397,6 +1538,8 @@ struct StraightEdgeFixer_v
         )
         else
         (
+            ensureCreatePanelMode()
+
             for node in selected_nodes do
             (
                 if (isValidNode node and (superClassOf node == GeometryClass)) then
@@ -1409,18 +1552,22 @@ struct StraightEdgeFixer_v
                     invalid_edges = copy unwelded_edges
                     invalid_edges += reflex_edges
 
-                    /*
-                    Select directly here instead of calling the later struct helper.
-                    This avoids MAXScript resolving the forward reference against a Modifier-based selection API.
-                    */
                     if (adapter[1] == #editable_poly) then
                     (
                         polyop.setEdgeSelection (adapter[2]) invalid_edges
                     )
                     else if (adapter[1] == #edit_poly) then
                     (
-                        EditPolyMod.SetEPolySelLevel (adapter[2]) #Edge
-                        EditPolyMod.SetSelection (adapter[2]) #Edge invalid_edges node:node
+                        geometry_source = adapter[2]
+                        ensureEditPolyPrimaryNode node geometry_source
+                        geometry_source.useStackSelection = false
+
+                        if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
+                        (
+                            EditPolyMod.SetEPolySelLevel geometry_source #Edge
+                        )
+
+                        EditPolyMod.SetSelection geometry_source #Edge invalid_edges node:node
                     )
 
                     total_unwelded_edges += countBits unwelded_edges
@@ -1431,17 +1578,64 @@ struct StraightEdgeFixer_v
 
             if (processed_count > 0) then
             (
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 2
                 completeRedraw()
-
-                format "Border Check: selected % invalid border edge(s). Unwelded/overlapping: %, reflex >180 deg: %.\n" total_invalid_edges total_unwelded_edges total_reflex_edges
+                format "Border Check: stored % invalid border edge(s). Unwelded/overlapping: %, reflex >180 deg: %. Create panel kept active.\n" total_invalid_edges total_unwelded_edges total_reflex_edges
             )
         )
 
         total_invalid_edges
         -- return
     ),
+
+    /*
+    Stores every visible open-border edge in the one STRAIGHT EDGE FIXER modifier.
+    The command panel remains in Create mode; topology is unchanged.
+    */
+    function selectAllBorders =
+    (
+        selected_nodes = selection as array
+        processed_count = 0
+        total_border_edges = 0
+
+        if selected_nodes.count == 0 then return undefined
+
+        ensureCreatePanelMode()
+
+        for node in selected_nodes do
+        (
+            if isValidNode node and superClassOf node == GeometryClass then
+            (
+                adapter = getGeometryAdapter node
+                border_edges = getVisibleBorderEdges node adapter
+
+                if adapter != undefined and adapter.count >= 2 and adapter[1] == #edit_poly and adapter[2] != undefined then
+                (
+                    geometry_source = adapter[2]
+                    ensureEditPolyPrimaryNode node geometry_source
+                    geometry_source.useStackSelection = false
+
+                    if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
+                    (
+                        EditPolyMod.SetEPolySelLevel geometry_source #Edge
+                    )
+
+                    EditPolyMod.SetSelection geometry_source #Edge border_edges node:node
+                    processed_count += 1
+                    total_border_edges += border_edges.numberSet
+                )
+            )
+        )
+
+        if processed_count == 0 then return undefined
+
+        ensureCreatePanelMode()
+        completeRedraw()
+        format "Border Select All: stored % open-border edge(s) on % object(s); Create panel kept active.\n" total_border_edges processed_count
+
+        total_border_edges
+        -- return
+    ),
+
 
     /*
     Returns true when an edge is horizontal within tolerance.
@@ -1835,24 +2029,49 @@ struct StraightEdgeFixer_v
     */
     function setEdgeSelection node adapter edge_selection =
     (
-        geometry_source = adapter[2]
+        geometry_source = if ((adapter != undefined) and (adapter.count >= 2)) then adapter[2] else undefined
+        requested_selection = if edge_selection != undefined then edge_selection else #{}
         selection_applied = false
         actual_selection = #{}
 
-        if (adapter[1] == #editable_poly) then
+        if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #editable_poly) and (geometry_source != undefined)) then
         (
-            polyop.setEdgeSelection geometry_source edge_selection
-            actual_selection = polyop.getEdgeSelection geometry_source
-            selection_applied = (actual_selection == edge_selection)
+            try
+            (
+                polyop.setEdgeSelection geometry_source requested_selection
+                actual_selection = polyop.getEdgeSelection geometry_source
+            )
+            catch
+            (
+                actual_selection = #{}
+            )
+
+            if actual_selection == undefined then actual_selection = #{}
+            selection_applied = (actual_selection == requested_selection)
         )
-        else if (adapter[1] == #edit_poly) then
+        else if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #edit_poly) and (geometry_source != undefined)) then
         (
+            ensureCreatePanelMode()
             ensureEditPolyPrimaryNode node geometry_source
             geometry_source.useStackSelection = false
-            EditPolyMod.SetEPolySelLevel geometry_source #Edge
-            EditPolyMod.SetSelection geometry_source #Edge edge_selection node:node
-            actual_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
-            selection_applied = (actual_selection == edge_selection)
+
+            if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
+            (
+                EditPolyMod.SetEPolySelLevel geometry_source #Edge
+            )
+
+            try
+            (
+                EditPolyMod.SetSelection geometry_source #Edge requested_selection node:node
+                actual_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            )
+            catch
+            (
+                actual_selection = #{}
+            )
+
+            if actual_selection == undefined then actual_selection = #{}
+            selection_applied = (actual_selection == requested_selection)
         )
 
         selection_applied
@@ -1912,56 +2131,102 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Writes one checker edge selection and verifies the final stored modifier selection.
-    The final read-back happens after display activation and screen refresh so stale success cannot be reported.
+    Writes one checker edge selection into STRAIGHT EDGE FIXER and leaves it visibly active.
+    Final read-back happens after Modify-panel activation at Edge sub-object level.
     */
     function setCheckerEdgeSelection node adapter edge_selection =
     (
-        geometry_source = adapter[2]
+        geometry_source = if ((adapter != undefined) and (adapter.count >= 2)) then adapter[2] else undefined
+        requested_selection = if edge_selection != undefined then edge_selection else #{}
         set_selection_readback = #{}
         actual_selection = #{}
-        display_activated = activateEdgeSelectionDisplay node adapter
+        display_activated = false
 
-        if (adapter[1] == #edit_poly) then
+        if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #edit_poly) and (geometry_source != undefined)) then
         (
-            EditPolyMod.SetSelection geometry_source #Edge edge_selection node:node
-            set_selection_readback = EditPolyMod.GetSelection geometry_source #Edge node:node
+            display_activated = activateEdgeSelectionDisplay node adapter
+            ensureEditPolyPrimaryNode node geometry_source
+            geometry_source.useStackSelection = false
+            geometry_source.showCage = off
 
-            if set_selection_readback != edge_selection then
+            if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
             (
-                empty_selection = #{}
-                EditPolyMod.SetSelection geometry_source #Edge empty_selection node:node
-                EditPolyMod.Select geometry_source #Edge edge_selection invert:false select:true node:node
-                set_selection_readback = EditPolyMod.GetSelection geometry_source #Edge node:node
+                EditPolyMod.SetEPolySelLevel geometry_source #Edge
             )
-
-            display_activated = (activateEdgeSelectionDisplay node adapter) and display_activated
 
             try
             (
-                EditPolyMod.RefreshScreen geometry_source
+                EditPolyMod.SetSelection geometry_source #Edge requested_selection node:node
+                set_selection_readback = EditPolyMod.GetSelection geometry_source #Edge node:node
             )
             catch
             (
+                set_selection_readback = #{}
+            )
+
+            if set_selection_readback == undefined then set_selection_readback = #{}
+
+            if set_selection_readback != requested_selection then
+            (
+                empty_selection = #{}
+
+                try
+                (
+                    EditPolyMod.SetSelection geometry_source #Edge empty_selection node:node
+                    EditPolyMod.Select geometry_source #Edge requested_selection invert:false select:true node:node
+                    set_selection_readback = EditPolyMod.GetSelection geometry_source #Edge node:node
+                )
+                catch
+                (
+                    set_selection_readback = #{}
+                )
+
+                if set_selection_readback == undefined then set_selection_readback = #{}
             )
 
             update node
-            actual_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            display_activated = activateEdgeSelectionDisplay node adapter
+            completeRedraw()
+
+            try
+            (
+                actual_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            )
+            catch
+            (
+                actual_selection = #{}
+            )
+
+            if actual_selection == undefined then actual_selection = #{}
         )
-        else if (adapter[1] == #editable_poly) then
+        else if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #editable_poly) and (geometry_source != undefined)) then
         (
-            polyop.setEdgeSelection geometry_source edge_selection
-            set_selection_readback = polyop.getEdgeSelection geometry_source
-            redrawViews()
-            actual_selection = polyop.getEdgeSelection geometry_source
+            display_activated = activateEdgeSelectionDisplay node adapter
+
+            try
+            (
+                polyop.setEdgeSelection geometry_source requested_selection
+                set_selection_readback = polyop.getEdgeSelection geometry_source
+                completeRedraw()
+                actual_selection = polyop.getEdgeSelection geometry_source
+            )
+            catch
+            (
+                set_selection_readback = #{}
+                actual_selection = #{}
+            )
+
+            if set_selection_readback == undefined then set_selection_readback = #{}
+            if actual_selection == undefined then actual_selection = #{}
         )
 
-        #((actual_selection == edge_selection), set_selection_readback, actual_selection, display_activated)
+        #((actual_selection == requested_selection), set_selection_readback, actual_selection, display_activated)
         -- return
     ),
 
+
     /*
-    Prints detailed checker state only when selection storage or display activation fails.
+    Prints detailed checker state only when selection storage or visible modifier activation fails.
     Normal successful checks keep concise per-object and summary output.
     */
     function printDirectionCheckerDebug node adapter edge_count candidate_edges requested_edges set_selection_readback actual_selection =
@@ -2002,16 +2267,32 @@ struct StraightEdgeFixer_v
     function getEdgeSelection node adapter =
     (
         edge_selection = #{}
-        geometry_source = adapter[2]
+        geometry_source = if ((adapter != undefined) and (adapter.count >= 2)) then adapter[2] else undefined
 
-        if (adapter[1] == #editable_poly) then
+        if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #editable_poly) and (geometry_source != undefined)) then
         (
-            edge_selection = polyop.getEdgeSelection geometry_source
+            try
+            (
+                edge_selection = polyop.getEdgeSelection geometry_source
+            )
+            catch
+            (
+                edge_selection = #{}
+            )
         )
-        else if (adapter[1] == #edit_poly) then
+        else if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #edit_poly) and (geometry_source != undefined)) then
         (
-            edge_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            try
+            (
+                edge_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            )
+            catch
+            (
+                edge_selection = #{}
+            )
         )
+
+        if edge_selection == undefined then edge_selection = #{}
 
         edge_selection
         -- return
@@ -2078,10 +2359,12 @@ struct StraightEdgeFixer_v
                     (
                         selected_edges = getEdgeSelection node adapter
                         source_name =
-                            if (adapter[1] == #edit_poly) then
+                            if ((adapter[1] == #edit_poly) and (adapter[2] != undefined)) then
                                 adapter[2].name
-                            else
+                            else if adapter[1] == #editable_poly then
                                 "Editable Poly"
+                            else
+                                "<unavailable>"
 
                         format "% | source:% | ids:%\n" node.name source_name selected_edges
 
@@ -2137,8 +2420,8 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Tests dedicated EDGE FIXER selection persistence and display activation.
-    Restores the previous object selection, command-panel mode, current object, and sub-object level.
+    Tests dedicated EDGE FIXER selection persistence and visible Modify-panel activation.
+    The legacy function name is retained for compatibility with existing regression calls.
     */
     function testDirectionSelectionDisplayActivation =
     (
@@ -2162,20 +2445,24 @@ struct StraightEdgeFixer_v
             test_node = box length:10.0 width:10.0 height:10.0
             convertToPoly test_node
             test_node.baseObject.showCage = off
+            select test_node
             adapter = getGeometryAdapter test_node
+
+            setCommandPanelTaskMode mode:#modify
+            modPanel.setCurrentObject (adapter[2])
+            subObjectLevel = 2
+
             requested_edges = #{1}
             selection_result = setCheckerEdgeSelection test_node adapter requested_edges
-            activateEdgeSelectionDisplay test_node adapter
-            completeRedraw()
             actual_edges = getEdgeSelection test_node adapter
-            display_ok = selection_result[4]
-            current_object = modPanel.getCurrentObject()
+            panel_mode_after = getCommandPanelTaskMode()
 
             test_passed = test_passed and selection_result[1]
             test_passed = test_passed and (selection_result[2] == requested_edges)
             test_passed = test_passed and (actual_edges == requested_edges)
-            test_passed = test_passed and display_ok
-            test_passed = test_passed and (current_object == adapter[2])
+            test_passed = test_passed and selection_result[4]
+            test_passed = test_passed and (panel_mode_after == #modify)
+            test_passed = test_passed and (modPanel.getCurrentObject() == (adapter[2]))
             test_passed = test_passed and (subObjectLevel == 2)
             test_passed = test_passed and ((adapter[2]).useStackSelection == false)
             test_passed = test_passed and ((adapter[2]).showCage == off)
@@ -2224,16 +2511,32 @@ struct StraightEdgeFixer_v
     function getVertexSelection node adapter =
     (
         vertex_selection = #{}
-        geometry_source = adapter[2]
+        geometry_source = if ((adapter != undefined) and (adapter.count >= 2)) then adapter[2] else undefined
 
-        if (adapter[1] == #editable_poly) then
+        if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #editable_poly) and (geometry_source != undefined)) then
         (
-            vertex_selection = polyop.getVertSelection geometry_source
+            try
+            (
+                vertex_selection = polyop.getVertSelection geometry_source
+            )
+            catch
+            (
+                vertex_selection = #{}
+            )
         )
-        else if (adapter[1] == #edit_poly) then
+        else if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #edit_poly) and (geometry_source != undefined)) then
         (
-            vertex_selection = EditPolyMod.GetSelection geometry_source #Vertex node:node
+            try
+            (
+                vertex_selection = EditPolyMod.GetSelection geometry_source #Vertex node:node
+            )
+            catch
+            (
+                vertex_selection = #{}
+            )
         )
+
+        if vertex_selection == undefined then vertex_selection = #{}
 
         vertex_selection
         -- return
@@ -3067,8 +3370,7 @@ struct StraightEdgeFixer_v
                     setVertexSelection object_result[1] object_result[2] object_result[4]
                 )
 
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 1
+                ensureCreatePanelMode()
                 completeRedraw()
 
                 messageBox ("Unable to fix selected edges with vertices:\n\n" + failure_report) title:"Straight Edge Fixer"
@@ -3080,11 +3382,10 @@ struct StraightEdgeFixer_v
                     setEdgeSelection object_result[1] object_result[2] object_result[3]
                 )
 
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 2
+                ensureCreatePanelMode()
                 completeRedraw()
 
-                format "Straight Edge Fixer: fixed % selected % edge(s).\n" total_fixed_edges check_type
+                format "Straight Edge Fixer: fixed % selected % edge(s). Create panel kept active.\n" total_fixed_edges check_type
             )
         )
 
@@ -3295,8 +3596,7 @@ struct StraightEdgeFixer_v
                     setVertexSelection object_result[1] object_result[2] object_result[4]
                 )
 
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 1
+                ensureCreatePanelMode()
                 completeRedraw()
 
                 messageBox ("Unable to straighten edges with vertices:\n\n" + failure_report) title:"Straight Edge Fixer"
@@ -3308,11 +3608,10 @@ struct StraightEdgeFixer_v
                     setEdgeSelection object_result[1] object_result[2] object_result[3]
                 )
 
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 2
+                ensureCreatePanelMode()
                 completeRedraw()
 
-                format "Straight Edge Fixer: fixed % selected edge(s).\n" total_fixed_edges
+                format "Straight Edge Fixer: fixed % selected edge(s). Create panel kept active.\n" total_fixed_edges
 
                 if (total_selected_candidates == 0) then
                 (
@@ -3334,8 +3633,6 @@ struct StraightEdgeFixer_v
         selected_nodes = selection as array
         total_selected_edges = 0
         processed_count = 0
-        display_node = undefined
-        display_adapter = undefined
 
         if (selected_nodes.count == 0) then
         (
@@ -3343,6 +3640,8 @@ struct StraightEdgeFixer_v
         )
         else
         (
+            ensureCreatePanelMode()
+
             for node in selected_nodes do
             (
                 if (isValidNode node and (superClassOf node == GeometryClass)) then
@@ -3400,8 +3699,6 @@ struct StraightEdgeFixer_v
                     actual_count = countBits actual_selection
                     total_selected_edges += actual_count
 
-                    display_node = node
-                    display_adapter = adapter
 
                     if (selection_mode == #exact) then
                     (
@@ -3431,26 +3728,15 @@ struct StraightEdgeFixer_v
 
             if (processed_count > 0) then
             (
-                if (display_node != undefined) then
-                (
-                    display_activated = activateEdgeSelectionDisplay display_node display_adapter
-
-                    if not display_activated then
-                    (
-                        actual_selection = getEdgeSelection display_node display_adapter
-                        printDirectionCheckerDebug display_node display_adapter (getEdgeCount display_node display_adapter) actual_selection actual_selection actual_selection actual_selection
-                    )
-                )
-
                 completeRedraw()
 
                 if (selection_mode == #exact) then
                 (
-                    format "Check %: selected % exact zero-deviation edge(s).\n" check_type total_selected_edges
+                    format "Check %: selected % exact zero-deviation edge(s); STRAIGHT EDGE FIXER active at Edge level.\n" check_type total_selected_edges
                 )
                 else
                 (
-                    format "Check %: selected % skewed edge(s), deviation >0 and <= % deg.\n" check_type total_selected_edges angle_threshold
+                    format "Check %: selected % skewed edge(s), deviation >0 and <= % deg; STRAIGHT EDGE FIXER active at Edge level.\n" check_type total_selected_edges angle_threshold
                 )
             )
         )
@@ -3485,7 +3771,6 @@ struct StraightEdgeFixer_v
                 adapter = getGeometryAdapter test_node
                 detected_selection = getDirectionalEdgeSelection test_node adapter mode angle_threshold:angle_threshold exact_epsilon:exact_epsilon
                 selection_result = setCheckerEdgeSelection test_node adapter detected_selection
-                activateEdgeSelectionDisplay test_node adapter
                 completeRedraw()
                 actual_selection = getEdgeSelection test_node adapter
 
@@ -3551,7 +3836,7 @@ struct StraightEdgeFixer_v
 
     /*
     Runs one real Edit Poly checker case and verifies the target edge is the only stored selection.
-    It also verifies STRAIGHT EDGE FIXER is active, visible at Edge level, and unique on the object.
+    It also verifies STRAIGHT EDGE FIXER displays the selection in Modify mode and remains unique on the object.
     */
     function runDirectionCheckerRegressionCase node_name check_type selection_mode point_a point_b point_c angle_threshold =
     (
@@ -3571,7 +3856,7 @@ struct StraightEdgeFixer_v
                 expected_selection[target_edge_id] = true
                 checkEdgeDirection check_type 0.0 angle_threshold selection_mode:selection_mode
                 actual_selection = getEdgeSelection test_node adapter
-                current_object = modPanel.getCurrentObject()
+                panel_mode_after = getCommandPanelTaskMode()
                 fixer_count = 0
 
                 for modifier_index = 1 to test_node.modifiers.count do
@@ -3585,7 +3870,8 @@ struct StraightEdgeFixer_v
                 )
 
                 test_passed = (actual_selection == expected_selection) and
-                    (current_object == adapter[2]) and
+                    (panel_mode_after == #modify) and
+                    (modPanel.getCurrentObject() == (adapter[2])) and
                     (subObjectLevel == 2) and
                     ((adapter[2]).useStackSelection == false) and
                     ((adapter[2]).showCage == off) and
@@ -3674,8 +3960,31 @@ struct StraightEdgeFixer_v
     ),
 
     /*
+    Verifies undefined component-selection reads are normalized to empty BitArrays.
+    Prevents mapped-iteration crashes when an Edit Poly component-selection read is unavailable.
+    */
+    function testUndefinedSelectionSafety =
+    (
+        test_passed = true
+        empty_count = countBits undefined
+        empty_adapter_selection = getEdgeSelection undefined undefined
+        empty_vertex_selection = getVertexSelection undefined undefined
+
+        test_passed = test_passed and (empty_count == 0)
+        test_passed = test_passed and (empty_adapter_selection == #{})
+        test_passed = test_passed and (empty_vertex_selection == #{})
+
+        format "EDGE FIXER undefined selection safety: count:% edges:% verts:% => %\n" \
+            empty_count empty_adapter_selection empty_vertex_selection test_passed
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
     Regression suite for EDGE FIXER Horizontal/Vertical LMB and RMB checkers.
-    Covers exact, skewed, tiny non-zero deviation, persistence, active modifier, and modifier uniqueness.
+    Covers exact, skewed, tiny non-zero deviation, visible selection persistence, Modify mode, and modifier uniqueness.
     */
     function testDirectionCheckerRegression =
     (
@@ -3721,6 +4030,7 @@ struct StraightEdgeFixer_v
         persistence_ok = testDirectionSelectionDisplayActivation()
         single_modifier_ok = testSingleStraightEdgeFixerModifier()
         live_topology_ok = testStraightEdgeFixerLiveTopology()
+        undefined_selection_ok = testUndefinedSelectionSafety()
         test_passed = stable_modes_ok and
             exact_vertical_ok and
             skewed_vertical_ok and
@@ -3730,10 +4040,11 @@ struct StraightEdgeFixer_v
             tiny_angle_ok and
             persistence_ok and
             single_modifier_ok and
-            live_topology_ok
+            live_topology_ok and
+            undefined_selection_ok
 
-        format "EDGE FIXER Checkers regression: stableModes:% exactV:% skewV:% tinyV:% exactH:% skewH:% tinyAngle:% persistence:% singleModifier:% liveTopology:% => %\n" \
-            stable_modes_ok exact_vertical_ok skewed_vertical_ok tiny_vertical_ok exact_horizontal_ok skewed_horizontal_ok tiny_angle_ok persistence_ok single_modifier_ok live_topology_ok test_passed
+        format "EDGE FIXER Checkers regression: stableModes:% exactV:% skewV:% tinyV:% exactH:% skewH:% tinyAngle:% persistence:% singleModifier:% liveTopology:% undefinedSelection:% => %\n" \
+            stable_modes_ok exact_vertical_ok skewed_vertical_ok tiny_vertical_ok exact_horizontal_ok skewed_horizontal_ok tiny_angle_ok persistence_ok single_modifier_ok live_topology_ok undefined_selection_ok test_passed
 
         if original_selection.count > 0 then
         (

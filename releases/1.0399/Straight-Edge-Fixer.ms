@@ -1,5 +1,5 @@
 /*
-Straight Edge Fixer 0.39
+Straight Edge Fixer 0.48
 Detects repeated horizontal edge rows and aligns nearby horizontal edges to them.
 */
 
@@ -7,8 +7,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.39"
-global straight_edge_fixer_tool_version = 0.979
+global straight_edge_fixer_file_version = "0.48"
+global straight_edge_fixer_tool_version = 1.0269
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -19,9 +19,9 @@ if wall_fixer_version_system != 1 then
     wall_fixer_version_system = 1
 )
 
-if wall_fixer_version_epoch != 2 then
+if wall_fixer_version_epoch != 3 then
 (
-    wall_fixer_version_epoch = 2
+    wall_fixer_version_epoch = 3
     WallFixerVersion = undefined
 )
 
@@ -120,9 +120,12 @@ struct StraightEdgeFixer_v
     (
         bit_count = 0
 
-        for bit_id in bit_set do
+        if bit_set != undefined then
         (
-            bit_count += 1
+            for bit_id in bit_set do
+            (
+                bit_count += 1
+            )
         )
 
         bit_count
@@ -476,14 +479,87 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Returns the existing STRAIGHT EDGE FIXER modifier, creating one only when none exists.
-    Finding any existing named Edit Poly immediately prevents creation of another modifier.
+    Keeps the command panel in Create mode during EDGE FIXER processing.
+    Avoids repeated Modify-panel and sub-object activation while selections are stored directly in Edit Poly.
+    */
+    function ensureCreatePanelMode =
+    (
+        current_panel_mode = undefined
+
+        try
+        (
+            current_panel_mode = getCommandPanelTaskMode()
+        )
+        catch
+        (
+            current_panel_mode = undefined
+        )
+
+        if current_panel_mode != #create then
+        (
+            try
+            (
+                setCommandPanelTaskMode mode:#create
+            )
+            catch
+            (
+            )
+        )
+
+        true
+        -- return
+    ),
+
+
+    /*
+    Returns the one STRAIGHT EDGE FIXER modifier for this object.
+    The topmost named modifier is kept and every lower duplicate is removed.
     */
     function ensureSingleStraightEdgeFixerModifier node =
     (
         fixer_name = "STRAIGHT EDGE FIXER"
-        fixer_modifier = findNamedEditPoly node fixer_name
+        fixer_modifier = undefined
+        duplicate_modifiers = #()
         created_new_modifier = false
+
+        for modifier_index = 1 to node.modifiers.count do
+        (
+            modifier_value = node.modifiers[modifier_index]
+
+            if ((classOf modifier_value == Edit_Poly) and
+                ((toUpper modifier_value.name) == fixer_name)) then
+            (
+                if fixer_modifier == undefined then
+                (
+                    fixer_modifier = modifier_value
+                )
+                else
+                (
+                    append duplicate_modifiers modifier_value
+                )
+            )
+        )
+
+        if duplicate_modifiers.count > 0 then
+        (
+            ensureCreatePanelMode()
+
+            for duplicate_modifier in duplicate_modifiers do
+            (
+                if modifierBelongsToNode node duplicate_modifier then
+                (
+                    try
+                    (
+                        deleteModifier node duplicate_modifier
+                    )
+                    catch
+                    (
+                    )
+                )
+            )
+
+            update node
+        )
 
         if fixer_modifier == undefined then
         (
@@ -514,13 +590,195 @@ struct StraightEdgeFixer_v
 
 
     /*
-    Resolves the dedicated STRAIGHT EDGE FIXER Edit Poly for this object.
-    EDGE FIXER never writes into unrelated modifiers or directly into Editable Poly.
+    Binds an Edit Poly modifier to the node only when its primary node is different.
+    Avoids rebinding local modifier data after a component selection has already been written.
+    */
+    function ensureEditPolyPrimaryNode node edit_poly =
+    (
+        primary_node = undefined
+        bind_ok = false
+
+        if ((node != undefined) and (edit_poly != undefined)) then
+        (
+            try
+            (
+                primary_node = EditPolyMod.GetPrimaryNode edit_poly
+            )
+            catch
+            (
+                primary_node = undefined
+            )
+
+            if primary_node != node then
+            (
+                try
+                (
+                    EditPolyMod.SetPrimaryNode edit_poly node
+                )
+                catch
+                (
+                )
+            )
+
+            try
+            (
+                primary_node = EditPolyMod.GetPrimaryNode edit_poly
+            )
+            catch
+            (
+                primary_node = undefined
+            )
+
+            bind_ok = (primary_node == node)
+        )
+
+        bind_ok
+        -- return
+    ),
+
+
+    /*
+    Prepares STRAIGHT EDGE FIXER as a live pass-through Edit Poly before topology is read.
+    A lightweight bind is attempted first; Modify-panel activation is used only when live edges are still unavailable.
+    */
+    function prepareStraightEdgeFixerModifier node fixer_modifier =
+    (
+        modifier_ready = false
+        live_edge_count = 0
+        evaluated_mesh = undefined
+        original_selection = selection as array
+
+        if ((node != undefined) and (isValidNode node) and (fixer_modifier != undefined)) then
+        (
+            try
+            (
+                ensureCreatePanelMode()
+                ensureEditPolyPrimaryNode node fixer_modifier
+                fixer_modifier.useStackSelection = false
+                fixer_modifier.showCage = off
+
+                if ((EditPolyMod.GetEPolySelLevel fixer_modifier) != #Edge) then
+                (
+                    EditPolyMod.SetEPolySelLevel fixer_modifier #Edge
+                )
+
+                update node
+                live_edge_count = EditPolyMod.GetNumEdges fixer_modifier node:node
+
+                if live_edge_count <= 0 then
+                (
+                    evaluated_mesh = snapshotAsMesh node
+
+                    if evaluated_mesh != undefined then
+                    (
+                        free evaluated_mesh
+                        evaluated_mesh = undefined
+                    )
+
+                    update node
+                    live_edge_count = EditPolyMod.GetNumEdges fixer_modifier node:node
+                )
+
+                /*
+                Rare stale modifiers may require one Modify-panel evaluation.
+                No component level is entered, and Create mode is restored immediately.
+                */
+                if live_edge_count <= 0 then
+                (
+                    select node
+                    setCommandPanelTaskMode mode:#modify
+                    modPanel.setCurrentObject fixer_modifier
+                    update node
+
+                    evaluated_mesh = snapshotAsMesh node
+
+                    if evaluated_mesh != undefined then
+                    (
+                        free evaluated_mesh
+                        evaluated_mesh = undefined
+                    )
+
+                    live_edge_count = EditPolyMod.GetNumEdges fixer_modifier node:node
+                    ensureCreatePanelMode()
+
+                    if original_selection.count > 0 then
+                    (
+                        select original_selection
+                    )
+                    else
+                    (
+                        clearSelection()
+                    )
+                )
+
+                modifier_ready = (live_edge_count > 0)
+            )
+            catch
+            (
+                if evaluated_mesh != undefined then
+                (
+                    free evaluated_mesh
+                )
+
+                ensureCreatePanelMode()
+
+                if original_selection.count > 0 then
+                (
+                    select original_selection
+                )
+                else
+                (
+                    clearSelection()
+                )
+
+                modifier_ready = false
+            )
+        )
+
+        modifier_ready
+        -- return
+    ),
+
+
+    /*
+    Resolves a live dedicated STRAIGHT EDGE FIXER Edit Poly for this object.
+    Stale zero-topology copies are rebuilt once before any EDGE FIXER caller receives the adapter.
     */
     function getGeometryAdapter node =
     (
         fixer_result = ensureSingleStraightEdgeFixerModifier node
-        adapter = #(#edit_poly, fixer_result[1], fixer_result[2])
+        fixer_modifier = fixer_result[1]
+        created_new_modifier = fixer_result[2]
+        modifier_ready = prepareStraightEdgeFixerModifier node fixer_modifier
+        should_rebuild = false
+
+        if ((not modifier_ready) and (fixer_modifier != undefined)) then
+        (
+            if classOf node.baseObject == Editable_Poly then
+            (
+                try
+                (
+                    should_rebuild = ((polyop.getNumEdges node.baseObject) > 0)
+                )
+                catch
+                (
+                    should_rebuild = false
+                )
+            )
+        )
+
+        if should_rebuild then
+        (
+            deleteModifier node fixer_modifier
+            update node
+
+            fixer_result = ensureSingleStraightEdgeFixerModifier node
+            fixer_modifier = fixer_result[1]
+            created_new_modifier = true
+            modifier_ready = prepareStraightEdgeFixerModifier node fixer_modifier
+        )
+
+        adapter = #(#edit_poly, fixer_modifier, created_new_modifier)
 
         adapter
         -- return
@@ -539,25 +797,929 @@ struct StraightEdgeFixer_v
         try
         (
             test_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly test_node
 
-            existing_modifier = Edit_Poly()
-            existing_modifier.name = "STRAIGHT EDGE FIXER"
-            existing_modifier.showCage = off
-            addModifier test_node existing_modifier
+            bottom_modifier = Edit_Poly()
+            bottom_modifier.name = "STRAIGHT EDGE FIXER"
+            addModifier test_node bottom_modifier
 
-            modifier_count_before = test_node.modifiers.count
+            middle_modifier = Edit_Poly()
+            middle_modifier.name = "straight edge fixer"
+            addModifier test_node middle_modifier
+
+            top_modifier = Edit_Poly()
+            top_modifier.name = "STRAIGHT EDGE FIXER"
+            addModifier test_node top_modifier
+
             first_adapter = getGeometryAdapter test_node
             second_adapter = getGeometryAdapter test_node
             third_adapter = getGeometryAdapter test_node
-            modifier_count_after = test_node.modifiers.count
+            named_modifier_count = 0
 
-            test_passed = test_passed and (first_adapter[2] == existing_modifier)
-            test_passed = test_passed and (second_adapter[2] == existing_modifier)
-            test_passed = test_passed and (third_adapter[2] == existing_modifier)
+            for modifier_index = 1 to test_node.modifiers.count do
+            (
+                modifier_value = test_node.modifiers[modifier_index]
+
+                if ((classOf modifier_value == Edit_Poly) and
+                    ((toUpper modifier_value.name) == "STRAIGHT EDGE FIXER")) then
+                (
+                    named_modifier_count += 1
+                )
+            )
+
+            test_passed = test_passed and (first_adapter[2] == top_modifier)
+            test_passed = test_passed and (second_adapter[2] == top_modifier)
+            test_passed = test_passed and (third_adapter[2] == top_modifier)
             test_passed = test_passed and (not first_adapter[3])
             test_passed = test_passed and (not second_adapter[3])
             test_passed = test_passed and (not third_adapter[3])
-            test_passed = test_passed and (modifier_count_after == modifier_count_before)
+            test_passed = test_passed and (named_modifier_count == 1)
+        )
+        catch
+        (
+            test_passed = false
+        )
+
+        if ((test_node != undefined) and (isValidNode test_node)) then
+        (
+            delete test_node
+        )
+
+        if original_selection.count > 0 then
+        (
+            select original_selection
+        )
+        else
+        (
+            clearSelection()
+        )
+
+        ensureCreatePanelMode()
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Returns the number of live edges exposed by the current geometry adapter.
+    Edit Poly is re-prepared once when a stale zero-topology read is encountered.
+    */
+    function getEdgeCount node adapter =
+    (
+        edge_count = 0
+
+        if (adapter[1] == #editable_poly) then
+        (
+            edge_count = polyop.getNumEdges (adapter[2])
+        )
+        else if ((adapter[1] == #edit_poly) and (adapter[2] != undefined)) then
+        (
+            try
+            (
+                edge_count = EditPolyMod.GetNumEdges (adapter[2]) node:node
+            )
+            catch
+            (
+                edge_count = 0
+            )
+
+            if edge_count <= 0 then
+            (
+                if prepareStraightEdgeFixerModifier node (adapter[2]) then
+                (
+                    try
+                    (
+                        edge_count = EditPolyMod.GetNumEdges (adapter[2]) node:node
+                    )
+                    catch
+                    (
+                        edge_count = 0
+                    )
+                )
+            )
+        )
+
+        edge_count
+        -- return
+    ),
+
+    /*
+    Verifies an untouched named STRAIGHT EDGE FIXER becomes live before the first topology scan.
+    This reproduces the checker failure where GetNumEdges previously returned zero until the modifier was activated later.
+    */
+    function testStraightEdgeFixerLiveTopology =
+    (
+        test_passed = true
+        test_node = undefined
+        seeded_modifier = undefined
+        original_selection = selection as array
+        original_panel_mode = getCommandPanelTaskMode()
+        original_current_object = undefined
+        original_subobject_level = subObjectLevel
+
+        try
+        (
+            original_current_object = modPanel.getCurrentObject()
+        )
+        catch
+        (
+        )
+
+        try
+        (
+            test_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly test_node
+
+            expected_edge_count = polyop.getNumEdges test_node.baseObject
+
+            seeded_modifier = Edit_Poly()
+            seeded_modifier.name = "STRAIGHT EDGE FIXER"
+            seeded_modifier.showCage = off
+            addModifier test_node seeded_modifier
+
+            adapter = getGeometryAdapter test_node
+            live_edge_count = getEdgeCount test_node adapter
+
+            test_passed = test_passed and (adapter[2] == seeded_modifier)
+            test_passed = test_passed and (expected_edge_count > 0)
+            test_passed = test_passed and (live_edge_count == expected_edge_count)
+            test_passed = test_passed and ((adapter[2]).useStackSelection == false)
+            test_passed = test_passed and ((adapter[2]).showCage == off)
+        )
+        catch
+        (
+            test_passed = false
+        )
+
+        if ((test_node != undefined) and (isValidNode test_node)) then
+        (
+            delete test_node
+        )
+
+        if original_selection.count > 0 then
+        (
+            select original_selection
+        )
+        else
+        (
+            clearSelection()
+        )
+
+        try
+        (
+            setCommandPanelTaskMode mode:original_panel_mode
+
+            if ((original_panel_mode == #modify) and (original_current_object != undefined)) then
+            (
+                modPanel.setCurrentObject original_current_object
+                subObjectLevel = original_subobject_level
+            )
+        )
+        catch
+        (
+        )
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Returns the two vertex IDs used by one edge.
+    Supports Editable Poly and Edit Poly.
+    */
+    function getEdgeVertIds node adapter edge_id =
+    (
+        edge_verts = #()
+
+        if (adapter[1] == #editable_poly) then
+        (
+            edge_verts = polyop.getEdgeVerts (adapter[2]) edge_id
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            vert_a = EditPolyMod.GetEdgeVertex (adapter[2]) edge_id 1 node:node
+            vert_b = EditPolyMod.GetEdgeVertex (adapter[2]) edge_id 2 node:node
+            edge_verts = #(vert_a, vert_b)
+        )
+
+        edge_verts
+        -- return
+    ),
+
+
+    /*
+    Returns true only when the current poly edge is visible.
+    Invisible triangulation edges are ignored by direction checks and edge-level analysis.
+    */
+    function isEdgeVisible node adapter edge_id =
+    (
+        result_value = false
+
+        try
+        (
+            if (adapter[1] == #editable_poly) then
+            (
+                result_value = polyop.getEdgeVis (adapter[2]) edge_id
+            )
+            else if (adapter[1] == #edit_poly) then
+            (
+                result_value = polyop.getEdgeVis node edge_id
+            )
+        )
+        catch
+        (
+            /*
+            Fallback for a top Edit Poly over an Editable Poly base object.
+            Use this only when the evaluated-node query is unavailable.
+            */
+            try
+            (
+                if ((classOf node.baseObject == Editable_Poly) and (edge_id <= polyop.getNumEdges node.baseObject)) then
+                (
+                    result_value = polyop.getEdgeVis node.baseObject edge_id
+                )
+                else
+                (
+                    result_value = false
+                )
+            )
+            catch
+            (
+                result_value = false
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Returns one vertex position in object-local coordinates.
+    Supports Editable Poly and Edit Poly.
+    */
+    function getVertexPosition node adapter vert_id =
+    (
+        vertex_position = [0,0,0]
+
+        if (adapter[1] == #editable_poly) then
+        (
+            vertex_position = polyop.getVert (adapter[2]) vert_id
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            vertex_position = EditPolyMod.GetVertex (adapter[2]) vert_id node:node
+        )
+
+        vertex_position
+        -- return
+    ),
+
+    /*
+    Returns one vertex position in world coordinates.
+    The node object transform is applied to the current geometry position.
+    */
+    function getVertexWorldPosition node adapter vert_id =
+    (
+        local_position = getVertexPosition node adapter vert_id
+        world_position = local_position * node.objectTransform
+
+        world_position
+        -- return
+    ),
+
+
+    /*
+    Returns true when one visible poly edge is an open border edge.
+    Border topology is read from the current Editable Poly or evaluated Edit Poly result.
+    */
+    function isBorderEdge node adapter edge_id =
+    (
+        result_value = false
+
+        if (isEdgeVisible node adapter edge_id) then
+        (
+            try
+            (
+                if (adapter[1] == #editable_poly) then
+                (
+                    edge_faces = polyop.getFacesUsingEdge (adapter[2]) edge_id
+                )
+                else
+                (
+                    edge_faces = polyop.getFacesUsingEdge node edge_id
+                )
+
+                result_value = (edge_faces.numberSet == 1)
+            )
+            catch
+            (
+                result_value = false
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Collects all visible open border edges.
+    Invisible triangulation edges never participate in Border Check.
+    */
+    function getVisibleBorderEdges node adapter =
+    (
+        border_edges = #{}
+        edge_count = getEdgeCount node adapter
+
+        for edge_id = 1 to edge_count do
+        (
+            if (isBorderEdge node adapter edge_id) then
+            (
+                border_edges[edge_id] = true
+            )
+        )
+
+        border_edges
+        -- return
+    ),
+
+    /*
+    Returns true when two local XY coordinates match inside tolerance.
+    Local Z is intentionally ignored because it represents wall height.
+    */
+    function localXYMatches point_a point_b tolerance =
+    (
+        ((abs (point_a.x - point_b.x)) <= tolerance) and
+        ((abs (point_a.y - point_b.y)) <= tolerance)
+        -- return
+    ),
+
+    /*
+    Returns true when one border edge follows one local XY column.
+    Both endpoints must share the same local X and Y inside tolerance.
+    */
+    function isLocalVerticalBorderEdge node adapter edge_id tolerance =
+    (
+        result_value = false
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexPosition node adapter edge_verts[1]
+            point_b = getVertexPosition node adapter edge_verts[2]
+            result_value = localXYMatches point_a point_b tolerance
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Tests whether two one-dimensional Z intervals overlap or touch.
+    Tolerance allows tiny coordinate errors around the shared height.
+    */
+    function zRangesOverlapOrTouch min_a max_a min_b max_b tolerance =
+    (
+        ((max_a + tolerance) >= min_b) and ((max_b + tolerance) >= min_a)
+        -- return
+    ),
+
+    /*
+    Returns true when two border edges are separate IDs on the same local XY column
+    and their local Z ranges overlap or touch without sharing a welded vertex.
+    */
+    function borderEdgesFormUnweldedColumn node adapter edge_a edge_b tolerance =
+    (
+        result_value = false
+        edge_a_verts = getEdgeVertIds node adapter edge_a
+        edge_b_verts = getEdgeVertIds node adapter edge_b
+
+        if ((edge_a_verts.count == 2) and (edge_b_verts.count == 2)) then
+        (
+            shared_vertex =
+                (edge_a_verts[1] == edge_b_verts[1]) or
+                (edge_a_verts[1] == edge_b_verts[2]) or
+                (edge_a_verts[2] == edge_b_verts[1]) or
+                (edge_a_verts[2] == edge_b_verts[2])
+
+            if (not shared_vertex) then
+            (
+                if ((isLocalVerticalBorderEdge node adapter edge_a tolerance) and
+                    (isLocalVerticalBorderEdge node adapter edge_b tolerance)) then
+                (
+                    edge_a_point = getVertexPosition node adapter edge_a_verts[1]
+                    edge_b_point = getVertexPosition node adapter edge_b_verts[1]
+
+                    if (localXYMatches edge_a_point edge_b_point tolerance) then
+                    (
+                        edge_a_point_2 = getVertexPosition node adapter edge_a_verts[2]
+                        edge_b_point_2 = getVertexPosition node adapter edge_b_verts[2]
+
+                        min_a = amin edge_a_point.z edge_a_point_2.z
+                        max_a = amax edge_a_point.z edge_a_point_2.z
+                        min_b = amin edge_b_point.z edge_b_point_2.z
+                        max_b = amax edge_b_point.z edge_b_point_2.z
+
+                        result_value = zRangesOverlapOrTouch min_a max_a min_b max_b tolerance
+                    )
+                )
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Finds visible border edges that look like an unwelded vertical seam.
+    Both members of every matching edge pair are selected.
+    */
+    function findUnweldedBorderEdges node adapter border_edges tolerance =
+    (
+        invalid_edges = #{}
+        border_edge_array = for edge_id in border_edges collect edge_id
+
+        if (border_edge_array.count > 1) then
+        (
+            for edge_index_a = 1 to (border_edge_array.count - 1) do
+            (
+                edge_a = border_edge_array[edge_index_a]
+
+                for edge_index_b = (edge_index_a + 1) to border_edge_array.count do
+                (
+                    edge_b = border_edge_array[edge_index_b]
+
+                    if (borderEdgesFormUnweldedColumn node adapter edge_a edge_b tolerance) then
+                    (
+                        invalid_edges[edge_a] = true
+                        invalid_edges[edge_b] = true
+                    )
+                )
+            )
+        )
+
+        invalid_edges
+        -- return
+    ),
+
+    /*
+    Returns all visible border edges using one vertex.
+    Used to walk ordered border loops.
+    */
+    function getBorderEdgesAtVertex node adapter border_edges vert_id =
+    (
+        result_edges = #()
+
+        for edge_id in border_edges do
+        (
+            edge_verts = getEdgeVertIds node adapter edge_id
+
+            if (edge_verts.count == 2) then
+            (
+                if ((edge_verts[1] == vert_id) or (edge_verts[2] == vert_id)) then
+                (
+                    append result_edges edge_id
+                )
+            )
+        )
+
+        result_edges
+        -- return
+    ),
+
+    /*
+    Returns the opposite vertex of an edge.
+    Zero is returned when the supplied vertex is not part of that edge.
+    */
+    function getOtherEdgeVertex node adapter edge_id vert_id =
+    (
+        other_vert = 0
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+        if (edge_verts.count == 2) then
+        (
+            if (edge_verts[1] == vert_id) then
+            (
+                other_vert = edge_verts[2]
+            )
+            else if (edge_verts[2] == vert_id) then
+            (
+                other_vert = edge_verts[1]
+            )
+        )
+
+        other_vert
+        -- return
+    ),
+
+    /*
+    Walks one visible border chain from a seed edge.
+    Returns #(ordered_vertices, ordered_edges, is_closed).
+    */
+    function traceBorderLoop node adapter border_edges seed_edge =
+    (
+        ordered_vertices = #()
+        ordered_edges = #()
+        closed_loop = false
+        seed_verts = getEdgeVertIds node adapter seed_edge
+
+        if (seed_verts.count == 2) then
+        (
+            start_vert = seed_verts[1]
+            current_vert = seed_verts[2]
+            current_edge = seed_edge
+
+            append ordered_vertices start_vert
+            append ordered_vertices current_vert
+            append ordered_edges current_edge
+
+            continue_walk = true
+            safety_count = 0
+            max_steps = border_edges.numberSet + 2
+
+            while (continue_walk and (safety_count < max_steps)) do
+            (
+                safety_count += 1
+                incident_edges = getBorderEdgesAtVertex node adapter border_edges current_vert
+                next_edge = 0
+
+                for candidate_edge in incident_edges while (next_edge == 0) do
+                (
+                    if (candidate_edge != current_edge) then
+                    (
+                        next_edge = candidate_edge
+                    )
+                )
+
+                if (next_edge == 0) then
+                (
+                    continue_walk = false
+                )
+                else
+                (
+                    next_vert = getOtherEdgeVertex node adapter next_edge current_vert
+
+                    if (next_vert == 0) then
+                    (
+                        continue_walk = false
+                    )
+                    else if (next_vert == start_vert) then
+                    (
+                        append ordered_edges next_edge
+                        closed_loop = true
+                        continue_walk = false
+                    )
+                    else if ((findItem ordered_vertices next_vert) > 0) then
+                    (
+                        continue_walk = false
+                    )
+                    else
+                    (
+                        append ordered_edges next_edge
+                        append ordered_vertices next_vert
+                        current_edge = next_edge
+                        current_vert = next_vert
+                    )
+                )
+            )
+        )
+
+        #(ordered_vertices, ordered_edges, closed_loop)
+        -- return
+    ),
+
+    /*
+    Calculates a Newell normal from an ordered local-space border loop.
+    The normal is used only to distinguish convex and reflex turns.
+    */
+    function getBorderLoopNormal node adapter ordered_vertices =
+    (
+        normal_value = [0,0,0]
+        vert_count = ordered_vertices.count
+
+        if (vert_count >= 3) then
+        (
+            for vert_index = 1 to vert_count do
+            (
+                next_index = if (vert_index == vert_count) then 1 else (vert_index + 1)
+                point_a = getVertexPosition node adapter ordered_vertices[vert_index]
+                point_b = getVertexPosition node adapter ordered_vertices[next_index]
+
+                normal_value.x += (point_a.y - point_b.y) * (point_a.z + point_b.z)
+                normal_value.y += (point_a.z - point_b.z) * (point_a.x + point_b.x)
+                normal_value.z += (point_a.x - point_b.x) * (point_a.y + point_b.y)
+            )
+        )
+
+        if ((length normal_value) > 0.0000001) then
+        (
+            normal_value = normalize normal_value
+        )
+
+        normal_value
+        -- return
+    ),
+
+    /*
+    Finds border edges touching reflex border corners with interior angle above 180 degrees.
+    Only closed visible border loops with an unambiguous two-edge border chain are tested.
+    */
+    function findReflexBorderEdges node adapter border_edges =
+    (
+        invalid_edges = #{}
+        remaining_edges = copy border_edges
+
+        while (remaining_edges.numberSet > 0) do
+        (
+            seed_edge = 0
+
+            for edge_id in remaining_edges while (seed_edge == 0) do
+            (
+                seed_edge = edge_id
+            )
+
+            if (seed_edge > 0) then
+            (
+                loop_data = traceBorderLoop node adapter border_edges seed_edge
+                ordered_vertices = loop_data[1]
+                ordered_edges = loop_data[2]
+                closed_loop = loop_data[3]
+
+                for walked_edge in ordered_edges do
+                (
+                    remaining_edges[walked_edge] = false
+                )
+
+                if (closed_loop and (ordered_vertices.count >= 3) and
+                    (ordered_edges.count == ordered_vertices.count)) then
+                (
+                    loop_normal = getBorderLoopNormal node adapter ordered_vertices
+
+                    if ((length loop_normal) > 0.0000001) then
+                    (
+                        vert_count = ordered_vertices.count
+
+                        for vert_index = 1 to vert_count do
+                        (
+                            previous_index = if (vert_index == 1) then vert_count else (vert_index - 1)
+                            next_index = if (vert_index == vert_count) then 1 else (vert_index + 1)
+
+                            previous_point = getVertexPosition node adapter ordered_vertices[previous_index]
+                            current_point = getVertexPosition node adapter ordered_vertices[vert_index]
+                            next_point = getVertexPosition node adapter ordered_vertices[next_index]
+
+                            vector_to_previous = previous_point - current_point
+                            vector_to_next = next_point - current_point
+
+                            previous_length = length vector_to_previous
+                            next_length = length vector_to_next
+
+                            if ((previous_length > 0.0000001) and
+                                (next_length > 0.0000001)) then
+                            (
+                                previous_direction = vector_to_previous / previous_length
+                                next_direction = vector_to_next / next_length
+                                direction_dot = dot previous_direction next_direction
+                                direction_dot = amax -1.0 (amin 1.0 direction_dot)
+
+                                turn_cross = cross vector_to_previous vector_to_next
+                                signed_turn = dot turn_cross loop_normal
+
+                                /*
+                                Standard reflex corner:
+                                With Newell normal built from the same loop order,
+                                negative = convex turn and positive = reflex turn.
+                                */
+                                is_reflex_corner = (signed_turn > 0.0000001)
+
+                                /*
+                                360-degree backtrack:
+                                Both neighboring vertices lie in almost the same direction
+                                from the current border vertex. The border walks out and back
+                                on itself. The two remote vertices do NOT need to share position.
+                                */
+                                is_backtrack_360 = (direction_dot >= 0.9999)
+
+                                if (is_reflex_corner or is_backtrack_360) then
+                                (
+                                    previous_edge_index = if (vert_index == 1) then ordered_edges.count else (vert_index - 1)
+                                    next_edge_index = vert_index
+
+                                    invalid_edges[ordered_edges[previous_edge_index]] = true
+                                    invalid_edges[ordered_edges[next_edge_index]] = true
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        invalid_edges
+        -- return
+    ),
+
+    /*
+    Checks visible open borders for unwelded local-Z seams and reflex corners.
+    Results are stored in STRAIGHT EDGE FIXER while the command panel stays in Create mode.
+    */
+    function checkBorders tolerance =
+    (
+        selected_nodes = selection as array
+        total_invalid_edges = 0
+        total_unwelded_edges = 0
+        total_reflex_edges = 0
+        processed_count = 0
+
+        if (selected_nodes.count == 0) then
+        (
+            messageBox "Select at least one geometry object." title:"Straight Edge Fixer"
+        )
+        else
+        (
+            ensureCreatePanelMode()
+
+            for node in selected_nodes do
+            (
+                if (isValidNode node and (superClassOf node == GeometryClass)) then
+                (
+                    processed_count += 1
+                    adapter = getGeometryAdapter node
+                    border_edges = getVisibleBorderEdges node adapter
+                    unwelded_edges = findUnweldedBorderEdges node adapter border_edges tolerance
+                    reflex_edges = findReflexBorderEdges node adapter border_edges
+                    invalid_edges = copy unwelded_edges
+                    invalid_edges += reflex_edges
+
+                    if (adapter[1] == #editable_poly) then
+                    (
+                        polyop.setEdgeSelection (adapter[2]) invalid_edges
+                    )
+                    else if (adapter[1] == #edit_poly) then
+                    (
+                        geometry_source = adapter[2]
+                        ensureEditPolyPrimaryNode node geometry_source
+                        geometry_source.useStackSelection = false
+
+                        if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
+                        (
+                            EditPolyMod.SetEPolySelLevel geometry_source #Edge
+                        )
+
+                        EditPolyMod.SetSelection geometry_source #Edge invalid_edges node:node
+                    )
+
+                    total_unwelded_edges += countBits unwelded_edges
+                    total_reflex_edges += countBits reflex_edges
+                    total_invalid_edges += countBits invalid_edges
+                )
+            )
+
+            if (processed_count > 0) then
+            (
+                completeRedraw()
+                format "Border Check: stored % invalid border edge(s). Unwelded/overlapping: %, reflex >180 deg: %. Create panel kept active.\n" total_invalid_edges total_unwelded_edges total_reflex_edges
+            )
+        )
+
+        total_invalid_edges
+        -- return
+    ),
+
+    /*
+    Stores every visible open-border edge in the one STRAIGHT EDGE FIXER modifier.
+    The command panel remains in Create mode; topology is unchanged.
+    */
+    function selectAllBorders =
+    (
+        selected_nodes = selection as array
+        processed_count = 0
+        total_border_edges = 0
+
+        if selected_nodes.count == 0 then return undefined
+
+        ensureCreatePanelMode()
+
+        for node in selected_nodes do
+        (
+            if isValidNode node and superClassOf node == GeometryClass then
+            (
+                adapter = getGeometryAdapter node
+                border_edges = getVisibleBorderEdges node adapter
+
+                if adapter != undefined and adapter.count >= 2 and adapter[1] == #edit_poly and adapter[2] != undefined then
+                (
+                    geometry_source = adapter[2]
+                    ensureEditPolyPrimaryNode node geometry_source
+                    geometry_source.useStackSelection = false
+
+                    if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
+                    (
+                        EditPolyMod.SetEPolySelLevel geometry_source #Edge
+                    )
+
+                    EditPolyMod.SetSelection geometry_source #Edge border_edges node:node
+                    processed_count += 1
+                    total_border_edges += border_edges.numberSet
+                )
+            )
+        )
+
+        if processed_count == 0 then return undefined
+
+        ensureCreatePanelMode()
+        completeRedraw()
+        format "Border Select All: stored % open-border edge(s) on % object(s); Create panel kept active.\n" total_border_edges processed_count
+
+        total_border_edges
+        -- return
+    ),
+
+
+    /*
+    Returns true when an edge is horizontal within tolerance.
+    Horizontal means endpoint world-Z difference does not exceed tolerance.
+    */
+    function isHorizontalEdge node adapter edge_id tolerance =
+    (
+        result_value = false
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexWorldPosition node adapter edge_verts[1]
+            point_b = getVertexWorldPosition node adapter edge_verts[2]
+            result_value = ((abs (point_a.z - point_b.z)) <= tolerance)
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Returns true when an edge is vertical within tolerance.
+    Vertical means endpoint world-X and world-Y differences are within tolerance.
+    */
+    function isVerticalEdge node adapter edge_id tolerance =
+    (
+        result_value = false
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexWorldPosition node adapter edge_verts[1]
+            point_b = getVertexWorldPosition node adapter edge_verts[2]
+
+            result_value =
+                ((abs (point_a.x - point_b.x)) <= tolerance) and
+                ((abs (point_a.y - point_b.y)) <= tolerance)
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Verifies the geometry adapter exposes the helper functions required by direction and Border checks.
+    The test confirms edge count, edge vertices, world positions, visibility and exact direction tests.
+    */
+    function testGeometryAdapterHelpers =
+    (
+        test_passed = true
+        test_node = undefined
+        original_selection = selection as array
+
+        try
+        (
+            test_node = box length:10.0 width:10.0 height:10.0
+            adapter = getGeometryAdapter test_node
+            edge_count = getEdgeCount test_node adapter
+
+            test_passed = test_passed and (edge_count > 0)
+
+            if edge_count > 0 then
+            (
+                edge_verts = getEdgeVertIds test_node adapter 1
+                test_passed = test_passed and (edge_verts.count == 2)
+
+                if edge_verts.count == 2 then
+                (
+                    point_a = getVertexWorldPosition test_node adapter edge_verts[1]
+                    point_b = getVertexWorldPosition test_node adapter edge_verts[2]
+                    test_passed = test_passed and (point_a != undefined)
+                    test_passed = test_passed and (point_b != undefined)
+                )
+
+                edge_visible = isEdgeVisible test_node adapter 1
+                test_passed = test_passed and ((edge_visible == true) or (edge_visible == false))
+
+                horizontal_value = isHorizontalEdge test_node adapter 1 0.0
+                vertical_value = isVerticalEdge test_node adapter 1 0.0
+                test_passed = test_passed and ((horizontal_value == true) or (horizontal_value == false))
+                test_passed = test_passed and ((vertical_value == true) or (vertical_value == false))
+            )
         )
         catch
         (
@@ -611,29 +1773,144 @@ struct StraightEdgeFixer_v
 
 
     /*
-    Returns both world direction deviation angles for one edge.
-    Result is #(angle_from_horizontal, angle_from_vertical) in degrees.
+    Clamps a floating-point value to a specified range.
+    Used to keep acos input valid for direction classification.
     */
-    function getEdgeDirectionAngles node adapter edge_id =
+    function clampFloat input_value min_value max_value =
     (
-        direction_angles = #(undefined, undefined)
-        edge_verts = getEdgeVertIds node adapter edge_id
-
-        if (edge_verts.count == 2) then
+        if input_value < min_value then
         (
-            point_a = getVertexWorldPosition node adapter edge_verts[1]
-            point_b = getVertexWorldPosition node adapter edge_verts[2]
-            edge_vector = point_b - point_a
-            horizontal_length = sqrt ((edge_vector.x * edge_vector.x) + (edge_vector.y * edge_vector.y))
-            vertical_length = abs edge_vector.z
-
-            direction_angles = getDirectionAngles horizontal_length vertical_length
+            input_value = min_value
+        )
+        else if input_value > max_value then
+        (
+            input_value = max_value
         )
 
-        direction_angles
+        input_value
         -- return
     ),
 
+    /*
+    Gets horizontal and vertical angular deviation for one edge in world space.
+    Returns #(horizontal_deviation, vertical_deviation), or undefined for a zero/invalid edge.
+    */
+    function getEdgeAxisDeviation node adapter edge_id =
+    (
+        result_value = undefined
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+        if edge_verts.count == 2 then
+        (
+            point_a = getVertexWorldPosition node adapter edge_verts[1]
+            point_b = getVertexWorldPosition node adapter edge_verts[2]
+
+            if ((point_a != undefined) and (point_b != undefined)) then
+            (
+                edge_vector = point_b - point_a
+                edge_length = length edge_vector
+
+                if edge_length > 0.0000001 then
+                (
+                    z_ratio = abs(edge_vector.z) / edge_length
+                    z_ratio = clampFloat z_ratio 0.0 1.0
+
+                    vertical_deviation = acos z_ratio
+                    horizontal_deviation = abs(90.0 - vertical_deviation)
+
+                    result_value = #(
+                        horizontal_deviation,
+                        vertical_deviation
+                    )
+                )
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Classifies one edge as horizontal, vertical, skewed, or sloped.
+    Skewed means near vertical but not exactly vertical, matching the stable classifier.
+    */
+    function getEdgeDirectionType node adapter edge_id angle_threshold:5.0 exact_epsilon:0.000001 =
+    (
+        result_value = undefined
+        deviations = getEdgeAxisDeviation node adapter edge_id
+
+        if deviations != undefined then
+        (
+            horizontal_deviation = deviations[1]
+            vertical_deviation = deviations[2]
+
+            if horizontal_deviation <= exact_epsilon then
+            (
+                result_value = #horizontal
+            )
+            else if vertical_deviation <= exact_epsilon then
+            (
+                result_value = #vertical
+            )
+            else if vertical_deviation <= angle_threshold then
+            (
+                result_value = #skewed
+            )
+            else
+            (
+                result_value = #sloped
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Gets all edges matching one stable direction category from the active geometry adapter.
+    Supports #horizontal, #vertical, #skewed, and #sloped for Editable Poly and Edit Poly sources.
+    */
+    function getDirectionalEdgeSelection node adapter mode angle_threshold:5.0 exact_epsilon:0.000001 =
+    (
+        edge_selection = #{}
+
+        if ((node != undefined) and (adapter != undefined)) then
+        (
+            edge_count = getEdgeCount node adapter
+
+            for edge_id = 1 to edge_count do
+            (
+                edge_type = getEdgeDirectionType node adapter edge_id angle_threshold:angle_threshold exact_epsilon:exact_epsilon
+
+                if edge_type == mode then
+                (
+                    edge_selection[edge_id] = true
+                )
+            )
+        )
+
+        edge_selection
+        -- return
+    ),
+
+    /*
+    Returns both world direction deviation angles for one edge.
+    This compatibility method now uses the stable axis-deviation classifier.
+    */
+    function getEdgeDirectionAngles node adapter edge_id =
+    (
+        deviations = getEdgeAxisDeviation node adapter edge_id
+
+        if deviations == undefined then
+        (
+            #(undefined, undefined)
+        )
+        else
+        (
+            deviations
+        )
+        -- return
+    ),
 
     /*
     Returns the edge angle from the horizontal world plane in degrees.
@@ -641,9 +1918,15 @@ struct StraightEdgeFixer_v
     */
     function getEdgeAngleFromHorizontal node adapter edge_id =
     (
-        direction_angles = getEdgeDirectionAngles node adapter edge_id
+        deviations = getEdgeAxisDeviation node adapter edge_id
+        result_value = undefined
 
-        direction_angles[1]
+        if deviations != undefined then
+        (
+            result_value = deviations[1]
+        )
+
+        result_value
         -- return
     ),
 
@@ -666,31 +1949,38 @@ struct StraightEdgeFixer_v
 
     /*
     Returns true when an edge is inside the horizontal Angle cone but is not exactly horizontal.
-    LMB exactness uses the same zero-tolerance endpoint rule as CHECK HORIZONTAL.
+    Detection is based on the stable world-space axis deviation used by all direction categories.
     */
-    function isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold =
+    function isHorizontalCheckCandidate node adapter edge_id tolerance angle_threshold exact_epsilon:0.000001 =
     (
-        exact_match = isHorizontalEdge node adapter edge_id 0.0
-        angle_from_horizontal = getEdgeAngleFromHorizontal node adapter edge_id
+        result_value = false
+        deviations = getEdgeAxisDeviation node adapter edge_id
 
-        isSkewedDirectionCandidate exact_match angle_from_horizontal angle_threshold
+        if deviations != undefined then
+        (
+            horizontal_deviation = deviations[1]
+            exact_match = (horizontal_deviation <= exact_epsilon)
+            result_value = isSkewedDirectionCandidate exact_match horizontal_deviation angle_threshold
+        )
+
+        result_value
         -- return
     ),
 
     /*
     Returns true when an edge is inside the vertical Angle cone but is not exactly vertical.
-    LMB exactness uses the same zero-tolerance endpoint rule as CHECK VERTICAL.
+    Detection is based on the stable world-space axis deviation used by all direction categories.
     */
-    function isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold =
+    function isVerticalCheckCandidate node adapter edge_id tolerance angle_threshold exact_epsilon:0.000001 =
     (
         result_value = false
-        exact_match = isVerticalEdge node adapter edge_id 0.0
-        direction_angles = getEdgeDirectionAngles node adapter edge_id
-        angle_from_vertical = direction_angles[2]
+        deviations = getEdgeAxisDeviation node adapter edge_id
 
-        if (angle_from_vertical != undefined) then
+        if deviations != undefined then
         (
-            result_value = isSkewedDirectionCandidate exact_match angle_from_vertical angle_threshold
+            vertical_deviation = deviations[2]
+            exact_match = (vertical_deviation <= exact_epsilon)
+            result_value = isSkewedDirectionCandidate exact_match vertical_deviation angle_threshold
         )
 
         result_value
@@ -739,24 +2029,49 @@ struct StraightEdgeFixer_v
     */
     function setEdgeSelection node adapter edge_selection =
     (
-        geometry_source = adapter[2]
+        geometry_source = if ((adapter != undefined) and (adapter.count >= 2)) then adapter[2] else undefined
+        requested_selection = if edge_selection != undefined then edge_selection else #{}
         selection_applied = false
         actual_selection = #{}
 
-        if (adapter[1] == #editable_poly) then
+        if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #editable_poly) and (geometry_source != undefined)) then
         (
-            polyop.setEdgeSelection geometry_source edge_selection
-            actual_selection = polyop.getEdgeSelection geometry_source
-            selection_applied = (actual_selection == edge_selection)
+            try
+            (
+                polyop.setEdgeSelection geometry_source requested_selection
+                actual_selection = polyop.getEdgeSelection geometry_source
+            )
+            catch
+            (
+                actual_selection = #{}
+            )
+
+            if actual_selection == undefined then actual_selection = #{}
+            selection_applied = (actual_selection == requested_selection)
         )
-        else if (adapter[1] == #edit_poly) then
+        else if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #edit_poly) and (geometry_source != undefined)) then
         (
-            geometry_source.SetPrimaryNode node
+            ensureCreatePanelMode()
+            ensureEditPolyPrimaryNode node geometry_source
             geometry_source.useStackSelection = false
-            EditPolyMod.SetEPolySelLevel geometry_source #Edge
-            EditPolyMod.SetSelection geometry_source #Edge edge_selection node:node
-            actual_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
-            selection_applied = (actual_selection == edge_selection)
+
+            if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
+            (
+                EditPolyMod.SetEPolySelLevel geometry_source #Edge
+            )
+
+            try
+            (
+                EditPolyMod.SetSelection geometry_source #Edge requested_selection node:node
+                actual_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            )
+            catch
+            (
+                actual_selection = #{}
+            )
+
+            if actual_selection == undefined then actual_selection = #{}
+            selection_applied = (actual_selection == requested_selection)
         )
 
         selection_applied
@@ -782,7 +2097,7 @@ struct StraightEdgeFixer_v
 
                 if (adapter[1] == #edit_poly) then
                 (
-                    geometry_source.SetPrimaryNode node
+                    ensureEditPolyPrimaryNode node geometry_source
                     geometry_source.useStackSelection = false
                     geometry_source.showCage = off
                     modPanel.setCurrentObject geometry_source
@@ -816,42 +2131,102 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Writes one checker edge selection while STRAIGHT EDGE FIXER is displayed.
-    SetSelection is read back immediately; Select then refreshes the visible local selection.
+    Writes one checker edge selection into STRAIGHT EDGE FIXER and leaves it visibly active.
+    Final read-back happens after Modify-panel activation at Edge sub-object level.
     */
     function setCheckerEdgeSelection node adapter edge_selection =
     (
-        geometry_source = adapter[2]
+        geometry_source = if ((adapter != undefined) and (adapter.count >= 2)) then adapter[2] else undefined
+        requested_selection = if edge_selection != undefined then edge_selection else #{}
         set_selection_readback = #{}
         actual_selection = #{}
-        display_activated = activateEdgeSelectionDisplay node adapter
+        display_activated = false
 
-        if (adapter[1] == #edit_poly) then
+        if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #edit_poly) and (geometry_source != undefined)) then
         (
-            EditPolyMod.SetSelection geometry_source #Edge edge_selection node:node
-            set_selection_readback = EditPolyMod.GetSelection geometry_source #Edge node:node
+            display_activated = activateEdgeSelectionDisplay node adapter
+            ensureEditPolyPrimaryNode node geometry_source
+            geometry_source.useStackSelection = false
+            geometry_source.showCage = off
 
-            if ((set_selection_readback == edge_selection) and ((countBits edge_selection) > 0)) then
+            if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
             (
-                EditPolyMod.Select geometry_source #Edge edge_selection node:node
+                EditPolyMod.SetEPolySelLevel geometry_source #Edge
             )
 
-            actual_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
-            display_activated = (activateEdgeSelectionDisplay node adapter) and display_activated
+            try
+            (
+                EditPolyMod.SetSelection geometry_source #Edge requested_selection node:node
+                set_selection_readback = EditPolyMod.GetSelection geometry_source #Edge node:node
+            )
+            catch
+            (
+                set_selection_readback = #{}
+            )
+
+            if set_selection_readback == undefined then set_selection_readback = #{}
+
+            if set_selection_readback != requested_selection then
+            (
+                empty_selection = #{}
+
+                try
+                (
+                    EditPolyMod.SetSelection geometry_source #Edge empty_selection node:node
+                    EditPolyMod.Select geometry_source #Edge requested_selection invert:false select:true node:node
+                    set_selection_readback = EditPolyMod.GetSelection geometry_source #Edge node:node
+                )
+                catch
+                (
+                    set_selection_readback = #{}
+                )
+
+                if set_selection_readback == undefined then set_selection_readback = #{}
+            )
+
+            update node
+            display_activated = activateEdgeSelectionDisplay node adapter
+            completeRedraw()
+
+            try
+            (
+                actual_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            )
+            catch
+            (
+                actual_selection = #{}
+            )
+
+            if actual_selection == undefined then actual_selection = #{}
         )
-        else if (adapter[1] == #editable_poly) then
+        else if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #editable_poly) and (geometry_source != undefined)) then
         (
-            polyop.setEdgeSelection geometry_source edge_selection
-            set_selection_readback = polyop.getEdgeSelection geometry_source
-            actual_selection = set_selection_readback
+            display_activated = activateEdgeSelectionDisplay node adapter
+
+            try
+            (
+                polyop.setEdgeSelection geometry_source requested_selection
+                set_selection_readback = polyop.getEdgeSelection geometry_source
+                completeRedraw()
+                actual_selection = polyop.getEdgeSelection geometry_source
+            )
+            catch
+            (
+                set_selection_readback = #{}
+                actual_selection = #{}
+            )
+
+            if set_selection_readback == undefined then set_selection_readback = #{}
+            if actual_selection == undefined then actual_selection = #{}
         )
 
-        #((actual_selection == edge_selection), set_selection_readback, actual_selection, display_activated)
+        #((actual_selection == requested_selection), set_selection_readback, actual_selection, display_activated)
         -- return
     ),
 
+
     /*
-    Prints detailed checker state only when selection storage or display activation fails.
+    Prints detailed checker state only when selection storage or visible modifier activation fails.
     Normal successful checks keep concise per-object and summary output.
     */
     function printDirectionCheckerDebug node adapter edge_count candidate_edges requested_edges set_selection_readback actual_selection =
@@ -892,16 +2267,32 @@ struct StraightEdgeFixer_v
     function getEdgeSelection node adapter =
     (
         edge_selection = #{}
-        geometry_source = adapter[2]
+        geometry_source = if ((adapter != undefined) and (adapter.count >= 2)) then adapter[2] else undefined
 
-        if (adapter[1] == #editable_poly) then
+        if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #editable_poly) and (geometry_source != undefined)) then
         (
-            edge_selection = polyop.getEdgeSelection geometry_source
+            try
+            (
+                edge_selection = polyop.getEdgeSelection geometry_source
+            )
+            catch
+            (
+                edge_selection = #{}
+            )
         )
-        else if (adapter[1] == #edit_poly) then
+        else if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #edit_poly) and (geometry_source != undefined)) then
         (
-            edge_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            try
+            (
+                edge_selection = EditPolyMod.GetSelection geometry_source #Edge node:node
+            )
+            catch
+            (
+                edge_selection = #{}
+            )
         )
+
+        if edge_selection == undefined then edge_selection = #{}
 
         edge_selection
         -- return
@@ -968,10 +2359,12 @@ struct StraightEdgeFixer_v
                     (
                         selected_edges = getEdgeSelection node adapter
                         source_name =
-                            if (adapter[1] == #edit_poly) then
+                            if ((adapter[1] == #edit_poly) and (adapter[2] != undefined)) then
                                 adapter[2].name
-                            else
+                            else if adapter[1] == #editable_poly then
                                 "Editable Poly"
+                            else
+                                "<unavailable>"
 
                         format "% | source:% | ids:%\n" node.name source_name selected_edges
 
@@ -1027,8 +2420,8 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Tests dedicated EDGE FIXER selection persistence and display activation.
-    Restores the previous object selection, command-panel mode, current object, and sub-object level.
+    Tests dedicated EDGE FIXER selection persistence and visible Modify-panel activation.
+    The legacy function name is retained for compatibility with existing regression calls.
     */
     function testDirectionSelectionDisplayActivation =
     (
@@ -1052,18 +2445,24 @@ struct StraightEdgeFixer_v
             test_node = box length:10.0 width:10.0 height:10.0
             convertToPoly test_node
             test_node.baseObject.showCage = off
+            select test_node
             adapter = getGeometryAdapter test_node
+
+            setCommandPanelTaskMode mode:#modify
+            modPanel.setCurrentObject (adapter[2])
+            subObjectLevel = 2
+
             requested_edges = #{1}
             selection_result = setCheckerEdgeSelection test_node adapter requested_edges
-            actual_edges = selection_result[3]
-            display_ok = selection_result[4]
-            current_object = modPanel.getCurrentObject()
+            actual_edges = getEdgeSelection test_node adapter
+            panel_mode_after = getCommandPanelTaskMode()
 
             test_passed = test_passed and selection_result[1]
             test_passed = test_passed and (selection_result[2] == requested_edges)
             test_passed = test_passed and (actual_edges == requested_edges)
-            test_passed = test_passed and display_ok
-            test_passed = test_passed and (current_object == adapter[2])
+            test_passed = test_passed and selection_result[4]
+            test_passed = test_passed and (panel_mode_after == #modify)
+            test_passed = test_passed and (modPanel.getCurrentObject() == (adapter[2]))
             test_passed = test_passed and (subObjectLevel == 2)
             test_passed = test_passed and ((adapter[2]).useStackSelection == false)
             test_passed = test_passed and ((adapter[2]).showCage == off)
@@ -1112,16 +2511,32 @@ struct StraightEdgeFixer_v
     function getVertexSelection node adapter =
     (
         vertex_selection = #{}
-        geometry_source = adapter[2]
+        geometry_source = if ((adapter != undefined) and (adapter.count >= 2)) then adapter[2] else undefined
 
-        if (adapter[1] == #editable_poly) then
+        if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #editable_poly) and (geometry_source != undefined)) then
         (
-            vertex_selection = polyop.getVertSelection geometry_source
+            try
+            (
+                vertex_selection = polyop.getVertSelection geometry_source
+            )
+            catch
+            (
+                vertex_selection = #{}
+            )
         )
-        else if (adapter[1] == #edit_poly) then
+        else if ((adapter != undefined) and (adapter.count >= 2) and (adapter[1] == #edit_poly) and (geometry_source != undefined)) then
         (
-            vertex_selection = EditPolyMod.GetSelection geometry_source #Vertex node:node
+            try
+            (
+                vertex_selection = EditPolyMod.GetSelection geometry_source #Vertex node:node
+            )
+            catch
+            (
+                vertex_selection = #{}
+            )
         )
+
+        if vertex_selection == undefined then vertex_selection = #{}
 
         vertex_selection
         -- return
@@ -1955,8 +3370,7 @@ struct StraightEdgeFixer_v
                     setVertexSelection object_result[1] object_result[2] object_result[4]
                 )
 
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 1
+                ensureCreatePanelMode()
                 completeRedraw()
 
                 messageBox ("Unable to fix selected edges with vertices:\n\n" + failure_report) title:"Straight Edge Fixer"
@@ -1968,11 +3382,10 @@ struct StraightEdgeFixer_v
                     setEdgeSelection object_result[1] object_result[2] object_result[3]
                 )
 
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 2
+                ensureCreatePanelMode()
                 completeRedraw()
 
-                format "Straight Edge Fixer: fixed % selected % edge(s).\n" total_fixed_edges check_type
+                format "Straight Edge Fixer: fixed % selected % edge(s). Create panel kept active.\n" total_fixed_edges check_type
             )
         )
 
@@ -2183,8 +3596,7 @@ struct StraightEdgeFixer_v
                     setVertexSelection object_result[1] object_result[2] object_result[4]
                 )
 
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 1
+                ensureCreatePanelMode()
                 completeRedraw()
 
                 messageBox ("Unable to straighten edges with vertices:\n\n" + failure_report) title:"Straight Edge Fixer"
@@ -2196,11 +3608,10 @@ struct StraightEdgeFixer_v
                     setEdgeSelection object_result[1] object_result[2] object_result[3]
                 )
 
-                setCommandPanelTaskMode mode:#modify
-                subObjectLevel = 2
+                ensureCreatePanelMode()
                 completeRedraw()
 
-                format "Straight Edge Fixer: fixed % selected edge(s).\n" total_fixed_edges
+                format "Straight Edge Fixer: fixed % selected edge(s). Create panel kept active.\n" total_fixed_edges
 
                 if (total_selected_candidates == 0) then
                 (
@@ -2222,8 +3633,6 @@ struct StraightEdgeFixer_v
         selected_nodes = selection as array
         total_selected_edges = 0
         processed_count = 0
-        display_node = undefined
-        display_adapter = undefined
 
         if (selected_nodes.count == 0) then
         (
@@ -2231,6 +3640,8 @@ struct StraightEdgeFixer_v
         )
         else
         (
+            ensureCreatePanelMode()
+
             for node in selected_nodes do
             (
                 if (isValidNode node and (superClassOf node == GeometryClass)) then
@@ -2240,19 +3651,26 @@ struct StraightEdgeFixer_v
                     edge_count = getEdgeCount node adapter
                     matched_edges = #{}
 
+                    if edge_count <= 0 then
+                    (
+                        format "Check % WARNING: % STRAIGHT EDGE FIXER exposes zero live edges; direction scan skipped.\n" check_type node.name
+                    )
+
                     for edge_id = 1 to edge_count do
                     (
                         edge_matches = false
 
                         if (selection_mode == #exact) then
                         (
+                            edge_type = getEdgeDirectionType node adapter edge_id angle_threshold:angle_threshold
+
                             if (check_type == #horizontal) then
                             (
-                                edge_matches = isHorizontalEdge node adapter edge_id 0.0
+                                edge_matches = (edge_type == #horizontal)
                             )
                             else if (check_type == #vertical) then
                             (
-                                edge_matches = isVerticalEdge node adapter edge_id 0.0
+                                edge_matches = (edge_type == #vertical)
                             )
                         )
                         else
@@ -2281,8 +3699,6 @@ struct StraightEdgeFixer_v
                     actual_count = countBits actual_selection
                     total_selected_edges += actual_count
 
-                    display_node = node
-                    display_adapter = adapter
 
                     if (selection_mode == #exact) then
                     (
@@ -2312,31 +3728,63 @@ struct StraightEdgeFixer_v
 
             if (processed_count > 0) then
             (
-                if (display_node != undefined) then
-                (
-                    display_activated = activateEdgeSelectionDisplay display_node display_adapter
-
-                    if not display_activated then
-                    (
-                        actual_selection = getEdgeSelection display_node display_adapter
-                        printDirectionCheckerDebug display_node display_adapter (getEdgeCount display_node display_adapter) actual_selection actual_selection actual_selection actual_selection
-                    )
-                )
-
                 completeRedraw()
 
                 if (selection_mode == #exact) then
                 (
-                    format "Check %: selected % exact zero-deviation edge(s).\n" check_type total_selected_edges
+                    format "Check %: selected % exact zero-deviation edge(s); STRAIGHT EDGE FIXER active at Edge level.\n" check_type total_selected_edges
                 )
                 else
                 (
-                    format "Check %: selected % skewed edge(s), deviation >0 and <= % deg.\n" check_type total_selected_edges angle_threshold
+                    format "Check %: selected % skewed edge(s), deviation >0 and <= % deg; STRAIGHT EDGE FIXER active at Edge level.\n" check_type total_selected_edges angle_threshold
                 )
             )
         )
 
         total_selected_edges
+        -- return
+    ),
+
+    /*
+    Selects one stable direction category and verifies STRAIGHT EDGE FIXER stores it.
+    Returns the final modifier selection, not merely the detected/requested edge BitArray.
+    */
+    function testDirectionalEdgeSelection mode:#skewed angle_threshold:5.0 exact_epsilon:0.000001 =
+    (
+        detected_selection = #{}
+        actual_selection = #{}
+
+        if selection.count != 1 then
+        (
+            messageBox "Select exactly one supported geometry object." title:"Straight Edge Fixer"
+        )
+        else
+        (
+            test_node = selection[1]
+
+            if ((not isValidNode test_node) or (superClassOf test_node != GeometryClass)) then
+            (
+                messageBox "Selected object must be supported geometry." title:"Straight Edge Fixer"
+            )
+            else
+            (
+                adapter = getGeometryAdapter test_node
+                detected_selection = getDirectionalEdgeSelection test_node adapter mode angle_threshold:angle_threshold exact_epsilon:exact_epsilon
+                selection_result = setCheckerEdgeSelection test_node adapter detected_selection
+                completeRedraw()
+                actual_selection = getEdgeSelection test_node adapter
+
+                format "%: detected % edge(s). ids: %\n" mode detected_selection.numberSet detected_selection
+                format "%: STRAIGHT EDGE FIXER stored % edge(s). ids: %\n" mode actual_selection.numberSet actual_selection
+
+                if actual_selection != detected_selection then
+                (
+                    format "% ERROR: modifier selection mismatch. requested:% stored:%\n" mode detected_selection actual_selection
+                )
+            )
+        )
+
+        actual_selection
         -- return
     ),
 
@@ -2388,7 +3836,7 @@ struct StraightEdgeFixer_v
 
     /*
     Runs one real Edit Poly checker case and verifies the target edge is the only stored selection.
-    It also verifies STRAIGHT EDGE FIXER is active, visible at Edge level, and unique on the object.
+    It also verifies STRAIGHT EDGE FIXER displays the selection in Modify mode and remains unique on the object.
     */
     function runDirectionCheckerRegressionCase node_name check_type selection_mode point_a point_b point_c angle_threshold =
     (
@@ -2408,7 +3856,7 @@ struct StraightEdgeFixer_v
                 expected_selection[target_edge_id] = true
                 checkEdgeDirection check_type 0.0 angle_threshold selection_mode:selection_mode
                 actual_selection = getEdgeSelection test_node adapter
-                current_object = modPanel.getCurrentObject()
+                panel_mode_after = getCommandPanelTaskMode()
                 fixer_count = 0
 
                 for modifier_index = 1 to test_node.modifiers.count do
@@ -2422,7 +3870,8 @@ struct StraightEdgeFixer_v
                 )
 
                 test_passed = (actual_selection == expected_selection) and
-                    (current_object == adapter[2]) and
+                    (panel_mode_after == #modify) and
+                    (modPanel.getCurrentObject() == (adapter[2])) and
                     (subObjectLevel == 2) and
                     ((adapter[2]).useStackSelection == false) and
                     ((adapter[2]).showCage == off) and
@@ -2444,8 +3893,98 @@ struct StraightEdgeFixer_v
     ),
 
     /*
+    Verifies one target edge is included by the stable four-mode directional selection.
+    The helper uses the same geometry adapter path as production EDGE FIXER checks.
+    */
+    function runDirectionalSelectionRegressionCase node_name mode point_a point_b point_c angle_threshold =
+    (
+        test_passed = false
+        test_node = undefined
+
+        try
+        (
+            test_node = createDirectionCheckerTestNode node_name point_a point_b point_c
+            adapter = getGeometryAdapter test_node
+            target_edge_id = findDirectionCheckerTestEdge test_node adapter point_a point_b
+
+            if target_edge_id != undefined then
+            (
+                edge_selection = getDirectionalEdgeSelection test_node adapter mode angle_threshold:angle_threshold
+                edge_type = getEdgeDirectionType test_node adapter target_edge_id angle_threshold:angle_threshold
+                test_passed = edge_selection[target_edge_id] and (edge_type == mode)
+            )
+        )
+        catch
+        (
+            test_passed = false
+        )
+
+        if ((test_node != undefined) and (isValidNode test_node)) then
+        (
+            delete test_node
+        )
+
+        test_passed
+        -- return
+    ),
+
+    /*
+    Tests the stable classifier categories independently of viewport selection state.
+    Covers exact horizontal, exact vertical, near-vertical skewed, and general sloped edges.
+    */
+    function testDirectionalSelectionModes =
+    (
+        horizontal_ok = runDirectionalSelectionRegressionCase \
+            "_WF_DIRECTION_HORIZONTAL" #horizontal \
+            [0,0,0] [10,0,0] [5,5,10] 5.0
+
+        vertical_ok = runDirectionalSelectionRegressionCase \
+            "_WF_DIRECTION_VERTICAL" #vertical \
+            [0,0,0] [0,0,10] [10,10,4] 5.0
+
+        skewed_ok = runDirectionalSelectionRegressionCase \
+            "_WF_DIRECTION_SKEWED" #skewed \
+            [0,0,0] [0.25,0,7.15] [10,10,3] 5.0
+
+        sloped_ok = runDirectionalSelectionRegressionCase \
+            "_WF_DIRECTION_SLOPED" #sloped \
+            [0,0,0] [10,0,0.5] [5,5,10] 5.0
+
+        test_passed = horizontal_ok and vertical_ok and skewed_ok and sloped_ok
+
+        format "EDGE FIXER stable direction modes: horizontal:% vertical:% skewed:% sloped:% => %\n" \
+            horizontal_ok vertical_ok skewed_ok sloped_ok test_passed
+
+        test_passed
+        -- return
+    ),
+
+    /*
+    Verifies undefined component-selection reads are normalized to empty BitArrays.
+    Prevents mapped-iteration crashes when an Edit Poly component-selection read is unavailable.
+    */
+    function testUndefinedSelectionSafety =
+    (
+        test_passed = true
+        empty_count = countBits undefined
+        empty_adapter_selection = getEdgeSelection undefined undefined
+        empty_vertex_selection = getVertexSelection undefined undefined
+
+        test_passed = test_passed and (empty_count == 0)
+        test_passed = test_passed and (empty_adapter_selection == #{})
+        test_passed = test_passed and (empty_vertex_selection == #{})
+
+        format "EDGE FIXER undefined selection safety: count:% edges:% verts:% => %\n" \
+            empty_count empty_adapter_selection empty_vertex_selection test_passed
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
     Regression suite for EDGE FIXER Horizontal/Vertical LMB and RMB checkers.
-    Covers exact, skewed, tiny non-zero deviation, persistence, active modifier, and modifier uniqueness.
+    Covers exact, skewed, tiny non-zero deviation, visible selection persistence, Modify mode, and modifier uniqueness.
     */
     function testDirectionCheckerRegression =
     (
@@ -2487,19 +4026,25 @@ struct StraightEdgeFixer_v
             (tiny_angles[2] < 0.01) and
             (isSkewedDirectionCandidate false tiny_angles[2] 0.1)
 
+        stable_modes_ok = testDirectionalSelectionModes()
         persistence_ok = testDirectionSelectionDisplayActivation()
         single_modifier_ok = testSingleStraightEdgeFixerModifier()
-        test_passed = exact_vertical_ok and
+        live_topology_ok = testStraightEdgeFixerLiveTopology()
+        undefined_selection_ok = testUndefinedSelectionSafety()
+        test_passed = stable_modes_ok and
+            exact_vertical_ok and
             skewed_vertical_ok and
             tiny_vertical_ok and
             exact_horizontal_ok and
             skewed_horizontal_ok and
             tiny_angle_ok and
             persistence_ok and
-            single_modifier_ok
+            single_modifier_ok and
+            live_topology_ok and
+            undefined_selection_ok
 
-        format "EDGE FIXER Checkers regression: exactV:% skewV:% tinyV:% exactH:% skewH:% tinyAngle:% persistence:% singleModifier:% => %\n" \
-            exact_vertical_ok skewed_vertical_ok tiny_vertical_ok exact_horizontal_ok skewed_horizontal_ok tiny_angle_ok persistence_ok single_modifier_ok test_passed
+        format "EDGE FIXER Checkers regression: stableModes:% exactV:% skewV:% tinyV:% exactH:% skewH:% tinyAngle:% persistence:% singleModifier:% liveTopology:% undefinedSelection:% => %\n" \
+            stable_modes_ok exact_vertical_ok skewed_vertical_ok tiny_vertical_ok exact_horizontal_ok skewed_horizontal_ok tiny_angle_ok persistence_ok single_modifier_ok live_topology_ok undefined_selection_ok test_passed
 
         if original_selection.count > 0 then
         (

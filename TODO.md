@@ -6,19 +6,31 @@
 
 ## QUEUE
 
-UI: EDGE FIXER > Options: remove the "Edges" label after the spinner and remove the "ROWS SETTINGS" label.
+UI: progress bar: increase height from 4 px to 8 px (2x higher).
 
-UI: progress bar: make it 4 px high and place it at the very top of the UI (pos.y = 0); keep it always visible and do not toggle its visibility; reflow/sort the surrounding status labels and message layout after this change.
+PERFORMANCE BUG: EDGE FIXER > BORDER CHECK > RMB: selecting all borders is too slow; optimize it as a fast direct Border sub-object selection and avoid unnecessary heavy geometry analysis.
 
-UI: message/status background: keep the background dark, matching the rollout dark background color.
+UI: EDGE FIXER > Options: fix the controls layout so spacing, alignment, widths, and row placement are clean and consistent.
 
-UI: SLICE WALLS > .NET button: make the button font/text color pink.
+UI: DEBUG rollout: arrange buttons two per row with consistent widths and spacing.
 
-UI BUG: top dialog message/status: remove the duplicate so only one message/status display exists at the top of the dialog.
-
-EDGE FIXER > BORDER CHECK > RMB: enter Border sub-object level and select all borders of the object.
+HELPERS > Quadrify > LMB: run Ribbon Tools "Quadrify All".
 
 ## DONE TODAY
+
+1.0119 EDGE FIXER > BORDER CHECK > RMB: selects all open borders on supported geometry and enters Border sub-object level; LMB validation remains unchanged.
+
+1.0109 UI BUG: top dialog message/status: removed the duplicate message-history display; one shared message display remains beside the result label.
+
+1.0099 UI: SLICE WALLS main .NET action button text changed to pink; routing and tooltip unchanged.
+
+1.0089 UI: message/status background: set the shared status area to the same dark 68/68/68 background used by the dark .NET controls.
+
+1.0079 UI: progress bar: moved to y=0 at 4 px high, kept permanently visible, and reflowed the running task text into the shared status area below it.
+
+1.0069 UI: EDGE FIXER > Options: removed the Min Edges unit label and the ROWS SETTINGS label without changing spinner behavior.
+
+1.0059 SLICE WALLS: when Vertex mode has selected vertices on the active top directional Slice modifier, continue slicing on that modifier and restrict the new slices to the selected vertices.
 
 0.999 HELPERS > Select Degenerated Objects: LMB selects visible geometry whose evaluated vertices are collinear and whose vertex normals all match.
 

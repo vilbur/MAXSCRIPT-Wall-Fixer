@@ -6,23 +6,49 @@
 
 ## QUEUE
 
-UI: EDGE FIXER > Angle Threshold: reduce the spinner field width by 8 px and remove the "°" label from the spinner.
+UI: progress bar: increase height from 4 px to 8 px (2x higher).
 
-UI: dialog: lock the dialog width and disable resizing of the registered dialog.
+PERFORMANCE BUG: EDGE FIXER > BORDER CHECK > RMB: selecting all borders is too slow; optimize it as a fast direct Border sub-object selection and avoid unnecessary heavy geometry analysis.
 
-UI: EDGE FIXER > .NET buttons: increase button height by 4 px so two-line labels fit cleanly.
+UI: EDGE FIXER > Options: fix the controls layout so spacing, alignment, widths, and row placement are clean and consistent.
 
-UI: DEBUG > Dialog Info: add a button that prints a formatted dialog-state snapshot, including current size, position, and registered/unregistered state.
+UI: DEBUG rollout: arrange buttons two per row with consistent widths and spacing.
 
-BUG: SLICE WALLS > progress bar: fix the progress bar so it visibly updates/shows progress while SLICE WALLS is running.
-
-SLICE WALLS: after slicing completes, clear all face selection at subObjectLevel 4 so no faces remain selected.
-
-UI: .NET buttons with two-line titles: increase button height by about 4 px so both lines fit cleanly.
-
-LAYERS: fix get/create and assignment so the target layer uses the full current layer name plus the wall suffix; example: "WALLS-01" + "-OUTTER" -> "WALLS-01-OUTTER" (not "0-OUTTER").
+HELPERS > Quadrify > LMB: run Ribbon Tools "Quadrify All".
 
 ## DONE TODAY
+
+1.0119 EDGE FIXER > BORDER CHECK > RMB: selects all open borders on supported geometry and enters Border sub-object level; LMB validation remains unchanged.
+
+1.0109 UI BUG: top dialog message/status: removed the duplicate message-history display; one shared message display remains beside the result label.
+
+1.0099 UI: SLICE WALLS main .NET action button text changed to pink; routing and tooltip unchanged.
+
+1.0089 UI: message/status background: set the shared status area to the same dark 68/68/68 background used by the dark .NET controls.
+
+1.0079 UI: progress bar: moved to y=0 at 4 px high, kept permanently visible, and reflowed the running task text into the shared status area below it.
+
+1.0069 UI: EDGE FIXER > Options: removed the Min Edges unit label and the ROWS SETTINGS label without changing spinner behavior.
+
+1.0059 SLICE WALLS: when Vertex mode has selected vertices on the active top directional Slice modifier, continue slicing on that modifier and restrict the new slices to the selected vertices.
+
+0.999 HELPERS > Select Degenerated Objects: LMB selects visible geometry whose evaluated vertices are collinear and whose vertex normals all match.
+
+0.998 LAYERS: class-layer creation and assignment now use the full current layer name plus the wall suffix.
+
+0.997 UI: numbered .NET workflow buttons that were shorter than 38 px were increased by about 4 px so wrapped/two-line titles fit cleanly.
+
+0.996 SLICE WALLS: clear all Face selections on processed wall objects after the slice batch without changing final Edge-level focus.
+
+0.995 BUG: SLICE WALLS > progress bar: separated the running progress text from the native bar so the bar remains visibly updating while Slice runs.
+
+0.994 UI: DEBUG > Dialog Info: added Listener-only dialog state snapshot for size, position, registration, and dock state.
+
+0.993 UI: EDGE FIXER > .NET direction buttons: increased height by 4 px for clean two-line labels.
+
+0.992 UI: dialog: locked dialog width and disabled resize-window styling while preserving docking and saved position/height behavior.
+
+0.991 UI: EDGE FIXER > Angle Threshold: reduced the spinner field width by 8 px and removed the degree label.
 
 0.965 UI: remove button "STRAIGHT EDGE FIXER".
 

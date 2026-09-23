@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer Pipeline 0.26
+Wall-Fixer Pipeline 0.27
 Native Edit Poly topology snapshot and wall slicing pipeline.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_pipeline_file_version = "0.26"
-global wall_fixer_pipeline_tool_version = 0.968
+global wall_fixer_pipeline_file_version = "0.27"
+global wall_fixer_pipeline_tool_version = 1.0279
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -663,14 +663,24 @@ struct WMCWallSlicePipeline
         )
         true
     ),
-    fn applyOperation level ids operation =
+    function applyOperation level ids operation slice_plane_transform:undefined =
     (
         ep.SetEPolySelLevel level
         refreshTopology()
         ep.SetSelection level #{} node:node
-        local selectedOK = ep.Select level ids node:node
-        if not selectedOK or (ep.GetSelection level node:node) != ids do throw ("Edit Poly selection failed for " + (level as string) + " result=" + (selectedOK as string) + " requested=" + (ids as string) + " actual=" + ((ep.GetSelection level node:node) as string))
+        local selected_ok = ep.Select level ids node:node
+        if not selected_ok or (ep.GetSelection level node:node) != ids then
+        (
+            throw ("Edit Poly selection failed for " + (level as string) + " result=" + (selected_ok as string) + " requested=" + (ids as string) + " actual=" + ((ep.GetSelection level node:node) as string))
+        )
+
         ep.SetOperation operation
+
+        if slice_plane_transform != undefined then
+        (
+            ep.slice_plane.transform = slice_plane_transform
+        )
+
         ep.Commit()
         refreshTopology()
     ),
@@ -1625,7 +1635,7 @@ struct WMCWallSlicePipeline
     Performs one debug slice using a plane defined entirely by the unchanged base object.
     The current Edit Poly only executes the plane and no longer rediscovers a border edge.
     */
-    function makeOneSliceFromBasePlane sourceVertex worldAnchor worldAxis sliceKind wall_normal:undefined wall_origin:undefined plane_tolerance:1.0 =
+    function makeOneSliceFromBasePlane sourceVertex worldAnchor worldAxis sliceKind wall_normal:undefined wall_origin:undefined plane_tolerance:1.0 slice_plane_transform:undefined =
     (
         if worldAnchor == undefined or worldAxis == undefined then return undefined
         if length worldAxis <= tolerance then return undefined
@@ -1693,14 +1703,17 @@ struct WMCWallSlicePipeline
             completeRedraw()
         )
 
-        local tm = node.objectTransform
-        local local_normal = normalize [dot tm.row1 axis,dot tm.row2 axis,dot tm.row3 axis]
-        local local_point = worldAnchor * inverse tm
-        ep.SetSlicePlane local_normal local_point
+        if slice_plane_transform == undefined then
+        (
+            local tm = node.objectTransform
+            local local_normal = normalize [dot tm.row1 axis,dot tm.row2 axis,dot tm.row3 axis]
+            local local_point = worldAnchor * inverse tm
+            ep.SetSlicePlane local_normal local_point
+        )
 
         local slice_operation = if slice_faces.numberSet == t.validFaces.numberSet then #Slice else #SliceSelectedFaces
-        format "Wall-Fixer Base Plane Slice: source:% direction:% alignedCurrentVerts:% axis:% regionFaces:%/% operation:% split:%\n"             sourceVertex sliceKind aligned_vertices axis slice_faces.numberSet t.validFaces.numberSet slice_operation ep.split
-        t = applyOperation #Face slice_faces slice_operation
+        format "Wall-Fixer Base Plane Slice: source:% direction:% alignedCurrentVerts:% axis:% regionFaces:%/% operation:% split:% directGizmo:%\n"             sourceVertex sliceKind aligned_vertices axis slice_faces.numberSet t.validFaces.numberSet slice_operation ep.split (slice_plane_transform != undefined)
+        t = applyOperation #Face slice_faces slice_operation slice_plane_transform:slice_plane_transform
 
         local topology_changed = (t.validVertices.numberSet != original_vertex_count or t.validEdges.numberSet != original_edge_count or t.validFaces.numberSet != original_face_count)
 

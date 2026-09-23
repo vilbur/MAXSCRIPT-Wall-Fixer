@@ -1,5 +1,5 @@
-/*
-Wall-Fixer UI 0.953
+﻿/*
+Wall-Fixer UI 0.973
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.954"
-global wall_fixer_ui_tool_version = 1.0049
+global wall_fixer_ui_file_version = "0.973"
+global wall_fixer_ui_tool_version = 1.0329
 
 
 /*
@@ -1376,7 +1376,6 @@ The controls are separated from the main EDGE FIXER workflow without changing ge
 */
 rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:82
 (
-    label level_settings_label "ROWS SETTINGS" pos:[8,8] width:104 height:18
     label level_tolerance_label "Rows distance:" pos:[8,32] width:80 height:18
     spinner level_tolerance_spinner "" pos:[90,29] width:40 height:20 \
         range:[0.000001,1000000.0,0.01] type:#worldUnits scale:0.001 \
@@ -1388,7 +1387,6 @@ rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:82
     spinner min_level_edges_spinner "" pos:[220,29] width:30 height:20 \
         range:[1,100000,3] type:#integer scale:1 \
         tooltip:"Minimum horizontal edge count needed to define a valid edge row."
-    label min_edges_units_label "edges" pos:[252,32] width:32 height:18
 
 
     checkbox straight_quiet_checkbox "Quiet" pos:[8,57] width:58 height:18 checked:false \
@@ -1464,7 +1462,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:140
 
 
     button border_check_button "BORDER CHECK" pos:[18,70] width:264 height:30 \
-        tooltip:"Select visible border edges with unwelded/overlapping local-Z seams, reflex corners above 180 degrees or 360-degree backtracking borders."
+        tooltip:"LMB: select invalid border edges.\n\nRMB: select all open borders and enter Border sub-object level."
 
 
     subRollout edge_fixer_options_subrollout "" pos:[0,112] width:310 height:wall_fixer_closed_rollout_height
@@ -1612,6 +1610,12 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:140
     )
 
 
+    on border_check_button rightclick do
+    (
+        ::WallFixerRollout.runStraightBorderSelectAll()
+    )
+
+
     on WallFixerEdgeFixerRollout close do
     (
         try
@@ -1629,10 +1633,11 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:140
 SLICE WALLS routes direction directly from the main action mouse event.
 Advanced slicer values continue to come from the existing Wall-Fixer INI settings.
 */
-rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
+rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
 (
     local numbered_button_tooltip
     local slice_action_running = false
+    local slice_force_action_running = false
 
 
     dotNetControl slice_event_label "System.Windows.Forms.Label" pos:[8,4] width:176 height:34
@@ -1659,6 +1664,9 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
 
     button delete_slice_modifier_button "Delete" pos:[252,42] width:54 height:38 \
         tooltip:"LMB: Delete all SLICE VERTICAL modifiers from selected objects.\n\nRMB: Delete all SLICE HORIZONTAL modifiers from selected objects."
+
+
+    dotNetControl slice_force_button "System.Windows.Forms.Button" pos:[4,84] width:302 height:38
 
 
     on WallFixerSliceWallsRollout open do
@@ -1689,7 +1697,16 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
             numbered_button_tooltip \
             "LMB: SLICE VERTICAL\n\nRMB: SLICE HORIZONTAL"
 
-        slice_selected_walls_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
+        slice_selected_walls_button.ForeColor = (dotNetClass "System.Drawing.Color").Pink
+
+
+        wallFixerSetupNumberedDarkButton \
+            slice_force_button \
+            "SLICE FORCE" \
+            numbered_button_tooltip \
+            "LMB: FORCE SLICE VERTICAL.\n\nRMB: FORCE SLICE HORIZONTAL.\n\nCreates one temporary slice modifier per unique plane, then collapses the object after all planes finish."
+
+        slice_force_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
     )
 
 
@@ -1725,6 +1742,30 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
             )
 
             slice_action_running = false
+        )
+    )
+
+
+    on slice_force_button MouseDown sender event_args do
+    (
+        local mouse_button = wallFixerGetDotNetMouseButton event_args
+        local slice_mode = wallFixerGetSliceActionMode mouse_button
+
+        if slice_mode != undefined and not slice_force_action_running then
+        (
+            slice_force_action_running = true
+
+            try
+            (
+                ::WallFixerRollout.runSliceForce slice_mode
+            )
+            catch
+            (
+                ::WallFixerRollout.setProgress 100
+                ::WallFixerRollout.setStatus #error ("Slice Force " + (slice_mode as string) + " failed.")
+            )
+
+            slice_force_action_running = false
         )
     )
 
@@ -1811,7 +1852,7 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:348
 
 
         wallFixerSetupNumberedDarkButton degenerated_faces_button "SELECT AND REMOVE DEGENERATED FACES" numbered_button_tooltip "LMB: Find degenerated faces and store them in SELECT DEGENERATED FACES at Face level.\n\nRMB: Delete the stored faces and rename that modifier DELETED DEGENERATED FACES."
-        wallFixerSetupNumberedDarkButton two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" numbered_button_tooltip "LMB: Find vertices with exactly two visible topology edges and store them in SELECT TWO-EDGE VERTS.\n\nRMB: Remove the stored vertices and rename that modifier DELETED TWO-EDGE VERTS."
+        wallFixerSetupNumberedDarkButton two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" numbered_button_tooltip "LMB: Find vertices with exactly two visible topology edges. Border corners are excluded.\n\nRMB: Remove the stored vertices and rename that modifier DELETED TWO-EDGE VERTS."
         wallFixerSetupNumberedDarkButton duplicated_vertices_button "10. DUPLICATED VERTICES" numbered_button_tooltip "LMB: Store duplicate-position vertices in SELECT DUPLICATED VERTICES.\n\nRMB: Weld the stored vertices and rename that modifier DELETED DUPLICATED VERTICES."
         wallFixerSetupNumberedDarkButton redundant_loops_button "11. REMOVE REDUNDANT LOOPS" numbered_button_tooltip "LMB: Detect redundant straight internal chains and select them.\n\nRMB: Remove the currently selected edges and their redundant vertices from SELECT REDUNDANT LOOPS."
         wallFixerSetupNumberedDarkButton repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" numbered_button_tooltip "Reserved for the new missing-loop completion tool." enabled_state:false
@@ -1917,7 +1958,7 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:348
 HELPERS contains utility actions that are useful outside the numbered wall-fixing workflow.
 These actions operate on the current scene selection.
 */
-rollout WallFixerHelpersRollout "HELPERS" width:310 height:156
+rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
 (
     button attach_button "Attach" pos:[8,8] width:143 height:30 \
         tooltip:"LMB: Attach all selected geometry into the first selected object.\n\nRMB: Attach selection, center the merged pivot, weld all vertices using Wall-Fixer > Options > Weld Threshold, then quadrify when the merged object has at most 12 triangular faces."
@@ -1935,15 +1976,22 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:156
         tooltip:"LMB: Select true 90° open-border corner vertices on the current Edit Poly modifier or Editable Poly base. Straight 180° border vertices are excluded."
 
 
-    button split_button "Split" pos:[8,80] width:143 height:30 \
+    button split_button "Split" pos:[8,80] width:294 height:30 \
         tooltip:"LMB: Apply Editable Poly, split all selected edges, then explode the resulting elements into separate objects."
 
 
-    button material_button "Material" pos:[159,80] width:143 height:30 \
+    groupBox material_group "MATERIAL" pos:[4,116] width:302 height:66
+
+
+    button material_button "Material" pos:[8,140] width:143 height:30 \
         tooltip:"LMB: Assign the same WALL FACE CLASSIFIER material used by INNER / OUTTER to selected geometry.\n\nRMB: Remove the material from selected geometry."
 
 
-    button select_degenerated_objects_button "Select Degenerated Objects" pos:[8,116] width:294 height:30 \
+    button material_by_sg_button "Material by SG" pos:[159,140] width:143 height:30 \
+        tooltip:"LMB: Assign a shared Multi/Sub-Object material and set face Material IDs from smoothing-group masks. Uses the topmost Edit Poly, otherwise the Editable Poly base."
+
+
+    button select_degenerated_objects_button "Select Degenerated Objects" pos:[8,188] width:294 height:30 \
         tooltip:"Select visible geometry collapsed to an edge when all evaluated vertex normals match."
 
 
@@ -1998,6 +2046,12 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:156
     on material_button rightclick do
     (
         ::WallFixerRollout.runRemoveMaterial()
+    )
+
+
+    on material_by_sg_button pressed do
+    (
+        ::WallFixerRollout.runAssignMaterialBySmoothingGroup()
     )
 
 
@@ -2248,6 +2302,40 @@ function getFaceGeometrySource object_node =
 )
 
 
+/* Returns the topmost editable polygon source used by Material by SG.
+   The highest Edit Poly in the stack wins; otherwise the Editable Poly base is used.
+*/
+function getTopMaterialGeometrySource object_node =
+(
+    wallFixerSetNodeCageOff object_node
+    local source_data = undefined
+
+
+    if object_node != undefined and isValidNode object_node then
+    (
+        for modifier_index = 1 to object_node.modifiers.count while source_data == undefined do
+        (
+            local current_modifier = object_node.modifiers[modifier_index]
+
+
+            if classof current_modifier == Edit_Poly then
+            (
+                source_data = #(#editPoly, current_modifier)
+            )
+        )
+
+
+        if source_data == undefined and classof object_node.baseObject == Editable_Poly then
+        (
+            source_data = #(#editablePoly, object_node.baseObject)
+        )
+    )
+
+
+    source_data -- return
+)
+
+
 /* Returns the vertex count from the current supported polygon source.
 */
 function getSourceNumVertices object_node source_data =
@@ -2291,6 +2379,276 @@ function getSourceNumFaces object_node source_data =
 
 
     face_count -- return
+)
+
+
+/* Returns the smoothing-group bit mask for one face on Edit Poly or Editable Poly.
+*/
+function getSourceFaceSmoothingGroup object_node source_data face_index =
+(
+    local source_type = source_data[1]
+    local source_value = source_data[2]
+    local smoothing_group = 0
+
+
+    if source_type == #editPoly then
+    (
+        smoothing_group = source_value.GetFaceSmoothingGroups face_index node:object_node
+    )
+    else if source_type == #editablePoly then
+    (
+        smoothing_group = polyOp.getFaceSmoothGroup source_value face_index
+    )
+
+
+    smoothing_group -- return
+)
+
+
+/* Builds stable sequential Material IDs from smoothing-group bit masks.
+   Equal masks always receive the same Material ID; smoothing group 0 is a valid group.
+*/
+function buildMaterialBySmoothingGroupMap smoothing_groups =
+(
+    local unique_smoothing_groups = #()
+    local material_ids = #()
+
+
+    for smoothing_group in smoothing_groups do
+    (
+        local material_id = findItem unique_smoothing_groups smoothing_group
+
+
+        if material_id == 0 then
+        (
+            append unique_smoothing_groups smoothing_group
+            material_id = unique_smoothing_groups.count
+        )
+
+
+        append material_ids material_id
+    )
+
+
+    #(unique_smoothing_groups, material_ids) -- return
+)
+
+
+/* Creates a shared Multi/Sub-Object material for smoothing-group-driven Material IDs.
+   Each distinct smoothing-group mask receives one deterministic colored sub-material.
+*/
+function createMaterialBySmoothingGroupMultiMaterial smoothing_groups =
+(
+    local material_count = smoothing_groups.count
+    local material_by_sg = undefined
+
+
+    if material_count > 0 then
+    (
+        local color_palette = #(
+            (color 238 92 92),
+            (color 96 178 246),
+            (color 112 214 132),
+            (color 244 182 78),
+            (color 184 118 244),
+            (color 78 210 204),
+            (color 246 122 190),
+            (color 194 210 90),
+            (color 116 142 248),
+            (color 238 136 82),
+            (color 126 210 168),
+            (color 218 116 240)
+        )
+        local material_ids = #()
+        local material_names = #()
+
+
+        material_by_sg = multimaterial numsubs:material_count name:"MATERIAL BY SG"
+
+
+        for material_index = 1 to material_count do
+        (
+            local smoothing_group = smoothing_groups[material_index]
+            local material_name = "SG " + (smoothing_group as string)
+            local palette_index = mod (material_index - 1) color_palette.count + 1
+            local sub_material = standardMaterial name:material_name diffuse:color_palette[palette_index]
+
+
+            material_by_sg.materialList[material_index] = sub_material
+            append material_ids material_index
+            append material_names material_name
+        )
+
+
+        material_by_sg.materialIDList = material_ids
+        material_by_sg.names = material_names
+    )
+
+
+    material_by_sg -- return
+)
+
+
+/* Assigns one shared Material by SG material and rewrites face Material IDs from smoothing groups.
+   Uses the topmost Edit Poly when present, otherwise the Editable Poly base.
+*/
+function assignMaterialBySmoothingGroups object_nodes =
+(
+    local object_data = #()
+    local all_smoothing_groups = #()
+    local original_selection = selection as array
+    local original_sub_object_level = subObjectLevel
+    local original_panel_mode = undefined
+    local result_data = undefined
+
+
+    try
+    (
+        original_panel_mode = getCommandPanelTaskMode()
+    )
+    catch
+    (
+        original_panel_mode = undefined
+    )
+
+
+    for object_node in object_nodes do
+    (
+        local source_data = getTopMaterialGeometrySource object_node
+
+
+        if source_data != undefined then
+        (
+            local face_count = getSourceNumFaces object_node source_data
+
+
+            if face_count > 0 then
+            (
+                local face_smoothing_groups = #()
+
+
+                for face_index = 1 to face_count do
+                (
+                    local smoothing_group = getSourceFaceSmoothingGroup object_node source_data face_index
+
+
+                    append face_smoothing_groups smoothing_group
+
+
+                    if findItem all_smoothing_groups smoothing_group == 0 then
+                    (
+                        append all_smoothing_groups smoothing_group
+                    )
+                )
+
+
+                append object_data #(object_node, source_data, face_smoothing_groups)
+            )
+        )
+    )
+
+
+    if object_data.count > 0 and all_smoothing_groups.count > 0 then
+    (
+        local material_by_sg = createMaterialBySmoothingGroupMultiMaterial all_smoothing_groups
+
+
+        if material_by_sg != undefined then
+        (
+            for current_data in object_data do
+            (
+                local object_node = current_data[1]
+                local source_data = current_data[2]
+                local face_smoothing_groups = current_data[3]
+                local original_face_selection = getSourceFaceSelection object_node source_data
+                local face_bits_by_material = for material_index = 1 to all_smoothing_groups.count collect #{}
+
+
+                for face_index = 1 to face_smoothing_groups.count do
+                (
+                    local material_id = findItem all_smoothing_groups face_smoothing_groups[face_index]
+
+
+                    if material_id > 0 then
+                    (
+                        face_bits_by_material[material_id][face_index] = true
+                    )
+                )
+
+
+                object_node.material = material_by_sg
+
+
+                for material_id = 1 to face_bits_by_material.count do
+                (
+                    if face_bits_by_material[material_id].numberSet > 0 then
+                    (
+                        setSourceFaceMaterialId object_node source_data face_bits_by_material[material_id] material_id
+                    )
+                )
+
+
+                setSourceFaceSelection object_node source_data original_face_selection
+            )
+
+
+            result_data = #(material_by_sg, object_data.count, all_smoothing_groups.count)
+        )
+    )
+
+
+    try
+    (
+        select original_selection
+    )
+    catch
+    (
+    )
+
+
+    try
+    (
+        subObjectLevel = original_sub_object_level
+    )
+    catch
+    (
+    )
+
+
+    if original_panel_mode != undefined then
+    (
+        try
+        (
+            setCommandPanelTaskMode original_panel_mode
+        )
+        catch
+        (
+        )
+    )
+
+
+    redrawViews()
+
+
+    result_data -- return
+)
+
+
+/* Tests deterministic smoothing-group-mask to Material-ID mapping.
+   Equal masks must reuse one ID and smoothing group 0 must remain a separate group.
+*/
+function testMaterialBySmoothingGroupMap =
+(
+    local test_data = buildMaterialBySmoothingGroupMap #(1, 4, 1, 0, 5, 4)
+    local expected_groups = #(1, 4, 0, 5)
+    local expected_ids = #(1, 2, 1, 3, 4, 2)
+    local passed = test_data[1] == expected_groups and test_data[2] == expected_ids
+
+
+    format "Material by SG mapping: % | groups:% | ids:%\n" passed test_data[1] test_data[2]
+
+
+    passed -- return
 )
 
 
@@ -7915,6 +8273,18 @@ function testSliceSelectDirectionalRouting =
 
 
 /*
+Tests Slice Force mouse routing; it intentionally matches the main Slice Walls mapping.
+*/
+function testSliceForceMouseRouting =
+(
+    wallFixerGetSliceActionMode "Left" == #vertical and
+    wallFixerGetSliceActionMode "Right" == #horizontal and
+    wallFixerGetSliceActionMode "Middle" == undefined
+    -- return
+)
+
+
+/*
 Tests direct Slice Walls LMB/RMB direction routing.
 */
 function testSliceWallMouseRouting =
@@ -8000,7 +8370,7 @@ function testPostProcessDegeneratedFacesControl =
 
 /*
 Tests POST-PROCESS step 11 routing against the integrated stable detector without changing scene geometry.
-The pure topology rules must all pass and the detector version must remain 0.08.
+The pure topology rules must all pass and the detector version must remain 0.13.
 */
 function testPostProcessRedundantLoopRouting =
 (
@@ -8010,7 +8380,7 @@ function testPostProcessRedundantLoopRouting =
 
     try
     (
-        detector_ok = RedundantLoopDetector.file_version == 0.08
+        detector_ok = RedundantLoopDetector.file_version == 0.13
         topology_result = RedundantLoopDetector.testTopologyRules()
         topology_ok = true
 
@@ -8149,7 +8519,7 @@ function testParentControlWidths =
     width_ok = width_ok and (WallFixerPreProcessRollout.planar_button.pos.x == 4) and (WallFixerPreProcessRollout.planar_button.width == (WallFixerPreProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPreProcessRollout.explode_walls_button.pos.x == 4) and (WallFixerPreProcessRollout.explode_walls_button.width == (WallFixerPreProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerEdgeFixerRollout.edge_z_group.pos.x == 4) and (WallFixerEdgeFixerRollout.edge_z_group.width == (WallFixerEdgeFixerRollout.width - 8))
-    width_ok = width_ok and (WallFixerSliceWallsRollout.slice_selected_walls_button.pos.x == 4) and (WallFixerSliceWallsRollout.slice_selected_walls_button.width == (WallFixerSliceWallsRollout.width - 8))
+    width_ok = width_ok and (WallFixerSliceWallsRollout.slice_force_button.pos.x == 4) and (WallFixerSliceWallsRollout.slice_force_button.width == (WallFixerSliceWallsRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.degenerated_faces_button.pos.x == 4) and (WallFixerPostProcessRollout.degenerated_faces_button.width == (WallFixerPostProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.two_edge_verts_button.pos.x == 4) and (WallFixerPostProcessRollout.two_edge_verts_button.width == (WallFixerPostProcessRollout.width - 8))
     width_ok = width_ok and (WallFixerPostProcessRollout.duplicated_vertices_button.pos.x == 4) and (WallFixerPostProcessRollout.duplicated_vertices_button.width == (WallFixerPostProcessRollout.width - 8))
@@ -8782,21 +9152,20 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
 
 rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 (
-    progressbar workflow_progress "" pos:[8,8] width:328 height:14 value:0 color:(color 0 180 0) orient:#horizontal
-    dotNetControl progress_count_label "System.Windows.Forms.Label" pos:[8,24] width:328 height:18
+    progressbar workflow_progress "" pos:[0,0] width:344 height:4 value:0 color:(color 0 180 0) orient:#horizontal
+    dotNetControl progress_count_label "System.Windows.Forms.Label" pos:[8,6] width:328 height:40
     dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,6] width:76 height:40
-    dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:19
-    dotNetControl status_line_bottom "System.Windows.Forms.RichTextBox" pos:[88,28] width:248 height:19
+    dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:40
     subRollout workflow_subrollout "" pos:[0,54] width:344 height:686
 
 
-    local status_texts = #("Ready.", "")
+    local status_texts = #("Ready.")
     local last_progress_value = -1
 
 
     /*
     Converts multiline reports into a compact single status line.
-    The status header retains only the two newest messages.
+    The status header retains only the newest message.
     */
     function compactStatusText message_text =
 (
@@ -8824,8 +9193,8 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Shows the completed process state in the progress-bar position.
-    Final SUCCESS/WARNING/ERROR states hide the progress bar until another process starts.
+    Shows the completed process state in the shared status area.
+    The top progress bar remains visible at all times.
     */
     function showProcessResult result_type =
     (
@@ -8860,10 +9229,8 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
         process_status_label.Visible = false
-        workflow_progress.visible = false
         progress_count_label.Visible = false
         status_line_top.Visible = true
-        status_line_bottom.Visible = true
         process_status_label.Text = result_text
         process_status_label.ForeColor = result_color
         process_status_label.Visible = true
@@ -8872,17 +9239,15 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
-    Pushes one plain message into the shared two-line status history.
+    Pushes one plain message into the shared status display.
     The message type controls only the result label shown above it.
     */
     function setStatus message_type message_text =
     (
-        status_texts[2] = status_texts[1]
         status_texts[1] = compactStatusText message_text
 
 
         renderStatusLine status_line_top status_texts[1]
-        renderStatusLine status_line_bottom status_texts[2]
 
 
         if (message_type == #success) or (message_type == #warning) or (message_type == #failed) or (message_type == #error) then
@@ -8915,12 +9280,9 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
         if clamped_value < 100 then
         (
-            workflow_progress.visible = false
             progress_count_label.Visible = false
             process_status_label.Visible = false
             status_line_top.Visible = false
-            status_line_bottom.Visible = false
-            workflow_progress.visible = true
             progress_count_label.Visible = true
             try(progress_count_label.BringToFront())catch()
         )
@@ -9347,6 +9709,52 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
             setStatus #success ("Material: assigned WALL FACE CLASSIFIER to " + (selected_nodes.count as string) + " object(s).")
             true
+        )
+        -- return
+    )
+
+
+    /*
+    Assigns one shared Multi/Sub-Object material and maps face Material IDs from smoothing-group masks.
+    The topmost Edit Poly is used when present; otherwise the Editable Poly base is edited.
+    */
+    function runAssignMaterialBySmoothingGroup =
+    (
+        selected_nodes = for object_node in (selection as array) where object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #warning "Material by SG: select one or more geometry objects."
+            false
+        )
+        else
+        (
+            assignment_result = undefined
+
+
+            undo "Wall-Fixer - Material by SG" on
+            (
+                assignment_result = assignMaterialBySmoothingGroups selected_nodes
+            )
+
+
+            if assignment_result == undefined then
+            (
+                setStatus #warning "Material by SG: no Edit Poly or Editable Poly faces found."
+                false
+            )
+            else
+            (
+                setStatus #success (
+                    "Material by SG: assigned " +
+                    (assignment_result[3] as string) +
+                    " Material ID(s) across " +
+                    (assignment_result[2] as string) +
+                    " object(s)."
+                )
+                true
+            )
         )
         -- return
     )
@@ -12873,6 +13281,32 @@ result_groups
 
 
     /*
+    Selects every open border on the current geometry and enters Border sub-object level.
+    No topology is modified; the dedicated EDGE FIXER modifier stores the border edge selection.
+    */
+    function runStraightBorderSelectAll =
+    (
+        saveStraightEdgeSettings()
+        setProgress 0
+        setStatus #message "Selecting all borders..."
+        selected_border_edges = StraightEdgeFixer.selectAllBorders()
+        setProgress 100
+
+        if selected_border_edges == undefined then
+        (
+            setStatus #warning "Border Select All: select at least one supported geometry object."
+            false
+        )
+        else
+        (
+            setStatus #success ("Border Select All: selected " + (selected_border_edges as string) + " open-border edge(s).")
+            true
+        )
+        -- return
+    )
+
+
+    /*
     Runs the imported repeated-level detection/alignment tool with the integrated controls.
     All geometry behavior remains in the separate Straight Edge support module.
     */
@@ -13236,6 +13670,81 @@ result_groups
 
 
     /*
+    Runs Slice Force with the same directional anchor detection as normal Slice Walls.
+    One temporary modifier is used per unique plane and the object is collapsed after every plane completes.
+    */
+    function runSliceForce cut_mode =
+    (
+        if cut_mode != #horizontal and cut_mode != #vertical then
+        (
+            setStatus #error "Slice Force requires exactly one direction: Horizontal or Vertical."
+            return false
+        )
+
+        saveUiSettings()
+        setProgress 0
+        setStatus #message ("Slice Force: " + (cut_mode as string) + "...")
+
+        local completed = WallFixer.debugSliceSelectedWallsForce \
+            cut_mode:cut_mode \
+            slice_plane_mode:(getSlicePlaneMode()) \
+            angle_threshold:saved_angle_threshold \
+            planar_tolerance:saved_planar_tolerance \
+            slice_precision:WallFixerOptionsRollout.slice_precision_spinner.value \
+            cleanup_edges:(not WallFixerSliceWallsRollout.no_edge_cleanup_checkbox.checked) \
+            display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
+            double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
+            progress_callback:updateSliceProgress \
+            quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
+
+        setProgress 100
+
+        if completed then
+        (
+            local elapsed_seconds = (WallFixer.last_slice_elapsed_ms as float) / 1000.0
+            local completion_message = "Slice Force completed and collapsed in " + (elapsed_seconds as string) + " s."
+            if WallFixer.last_slice_report != "" then completion_message += " " + WallFixer.last_slice_report
+            setStatus #success completion_message
+        )
+        else
+        (
+            local failed_nodes = if isProperty WallFixer #last_slice_failed_nodes then WallFixer.last_slice_failed_nodes else #()
+            local failure_summary = if failed_nodes.count > 0 then \
+                ("Slice Force completed with " + (failed_nodes.count as string) + " failed object(s). Failed objects are selected.") \
+                else \
+                (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Slice Force stopped.")
+
+            setStatus #failed failure_summary
+
+            local failure_message = failure_summary
+
+            if failed_nodes.count > 0 then
+            (
+                failure_message += "\n\nFAILED OBJECTS:"
+
+                for failed_node in failed_nodes do
+                (
+                    if failed_node != undefined and isValidNode failed_node then
+                    (
+                        failure_message += "\n" + failed_node.name
+                    )
+                )
+            )
+
+            if WallFixer.last_slice_report != "" then
+            (
+                failure_message += "\n\n" + WallFixer.last_slice_report
+            )
+
+            messageBox failure_message title:"Wall-Fixer - Slice Force"
+        )
+
+        completed
+        -- return
+    )
+
+
+    /*
     Selects degenerated faces and leaves the first matching object on SELECT DEGENERATED FACES at Face level.
     Modified or non-Editable-Poly geometry is preflighted from the evaluated snapshot without collapsing the stack.
     */
@@ -13468,7 +13977,7 @@ result_groups
         max_background_color = colorMan.getColor #background
         max_text_color = colorMan.getColor #text
         color_class = dotNetClass "System.Drawing.Color"
-        background_color = color_class.FromArgb ((max_background_color.x * 255.0) as integer) ((max_background_color.y * 255.0) as integer) ((max_background_color.z * 255.0) as integer)
+        background_color = color_class.FromArgb 68 68 68
         text_color = color_class.FromArgb ((max_text_color.x * 255.0) as integer) ((max_text_color.y * 255.0) as integer) ((max_text_color.z * 255.0) as integer)
         border_style = (dotNetClass "System.Windows.Forms.BorderStyle").None
         scroll_bars = (dotNetClass "System.Windows.Forms.RichTextBoxScrollBars").None
@@ -13480,7 +13989,7 @@ result_groups
         process_status_label.TextAlign = content_alignment_class.MiddleLeft
         progress_count_label.AutoSize = false
         progress_count_label.TextAlign = content_alignment_class.MiddleCenter
-        progress_count_label.BackColor = (dotNetClass "System.Drawing.Color").Transparent
+        progress_count_label.BackColor = background_color
         progress_count_label.ForeColor = text_color
         progress_count_label.Text = ""
         progress_count_label.Visible = false
@@ -13489,10 +13998,10 @@ result_groups
         process_status_label.Font = dotNetObject "System.Drawing.Font" process_status_label.Font font_style_class.Bold
         process_status_label.Text = "READY"
         process_status_label.Visible = true
-        workflow_progress.visible = false
+        workflow_progress.visible = true
 
 
-        for status_control in #(status_line_top, status_line_bottom) do
+        for status_control in #(status_line_top) do
         (
             status_control.ReadOnly = true
             status_control.Multiline = false
@@ -13506,7 +14015,6 @@ result_groups
 
 
         renderStatusLine status_line_top status_texts[1]
-        renderStatusLine status_line_bottom status_texts[2]
 
 
         current_dialog_size = getDialogSize WallFixerRollout
