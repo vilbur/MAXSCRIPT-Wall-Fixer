@@ -1,4 +1,24 @@
-﻿2026-09-23 — `Straight-Edge-Fixer.ms`, `Wall-Fixer.ms`: fixed EDGE FIXER Horizontal/Vertical angle selection reading zero topology from a newly created or stale `STRAIGHT EDGE FIXER` Edit Poly. The geometry adapter now binds and prepares the modifier before any edge scan, forces evaluation only when needed, rebuilds a stale zero-topology named modifier once for Editable Poly sources, and `getEdgeCount` retries preparation before accepting a zero result. Added `testStraightEdgeFixerLiveTopology` and included it in `testDirectionCheckerRegression`; exact-LMB and Angle-based RMB semantics are unchanged. Project version 0.990.
+﻿2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: widened GET OUTER WALLS `INNER \\ OUTTER` to 126 px so the title stays on one line, rebalanced adjacent `EXPLODE` and `LAYER` buttons to 84 px each, and corrected `testWallFaceOptionsLayout` to the current three-button row; project version 1.000.
+
+2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added HELPERS > Select Degenerated Objects; LMB scans visible geometry non-destructively and selects objects whose evaluated vertices collapse to one non-zero line and whose evaluated vertex normals all share one direction. Added pure rule regression coverage; project version 0.999.
+
+2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: GET OUTER WALLS layer creation and assignment now build class targets from the complete current layer name plus the class suffix, e.g. `WALLS-01-OUTTER`; added a pure naming regression test; project version 0.998.
+
+2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: increased the remaining numbered WinForms workflow button heights by about 4 px where they were shorter than the established 38 px controls, improving wrapped/two-line title fit without changing positions, widths, text, or event routing; project version 0.997.
+
+2026-09-23 — `Wall-Fixer-Core.ms`, `Wall-Fixer.ms`: Slice Walls now clears Face selections on every processed Editable Poly/top Edit Poly object after the batch, before restoring/focusing the final result; final Edge-level completion behavior is preserved; project version 0.996.
+
+2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: fixed Slice Walls progress visibility by moving the .NET running-progress label below the native progress bar so it no longer visually covers the green bar; object/task progress text remains visible; project version 0.995.
+
+2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added DEBUG > Dialog Info, a read-only Listener diagnostic reporting current dialog size, position, CUI registration state, and dock state; added layout test; project version 0.994.
+
+2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: increased EDGE FIXER Vertical/Skewed and Horizontal/Sloped WinForms button heights from 34 px to 38 px without changing positions, widths, styling, or mouse routing; project version 0.993.
+
+2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: locked the Wall-Fixer dialog width and removed resize-window styling while preserving CUI docking/floating, saved position, and saved height behavior; project version 0.992.
+
+2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: EDGE FIXER Angle spinner field width reduced from 48 px to 40 px and the visible degree label was removed; direction behavior and angle range are unchanged; project version 0.991.
+
+2026-09-23 — `Straight-Edge-Fixer.ms`, `Wall-Fixer.ms`: fixed EDGE FIXER Horizontal/Vertical angle selection reading zero topology from a newly created or stale `STRAIGHT EDGE FIXER` Edit Poly. The geometry adapter now binds and prepares the modifier before any edge scan, forces evaluation only when needed, rebuilds a stale zero-topology named modifier once for Editable Poly sources, and `getEdgeCount` retries preparation before accepting a zero result. Added `testStraightEdgeFixerLiveTopology` and included it in `testDirectionCheckerRegression`; exact-LMB and Angle-based RMB semantics are unchanged. Project version 0.990.
 
 2026-09-23 — `Straight-Edge-Fixer.ms`, `Wall-Fixer.ms`: fixed the shared project-version registration that could make the UI title fall back to 0.987 even when the bundled loader was newer. Straight Edge Fixer was still using version epoch 2 while the loader/Core/UI use epoch 3; loading it reset `WallFixerVersion`, allowing the older UI project value to win afterward. Straight Edge Fixer now uses epoch 3, so the highest loaded project version remains authoritative. Project version 0.989.
 

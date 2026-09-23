@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer UI 0.938
+Wall-Fixer UI 0.947
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.938"
-global wall_fixer_ui_tool_version = 0.987
+global wall_fixer_ui_file_version = "0.947"
+global wall_fixer_ui_tool_version = 1.000
 
 
 /*
@@ -1282,13 +1282,13 @@ rollout WallFixerPreProcessRollout "1 PRE-PROCESS & FIX GEOMETRY" width:310 heig
     local numbered_button_tooltip
 
 
-    dotNetControl planar_button "System.Windows.Forms.Button" pos:[4,8] width:302 height:34
+    dotNetControl planar_button "System.Windows.Forms.Button" pos:[4,8] width:302 height:38
 
 
-    dotNetControl duplicate_verts_button "System.Windows.Forms.Button" pos:[4,48] width:302 height:34
+    dotNetControl duplicate_verts_button "System.Windows.Forms.Button" pos:[4,48] width:302 height:38
 
 
-    dotNetControl explode_walls_button "System.Windows.Forms.Button" pos:[4,88] width:302 height:30
+    dotNetControl explode_walls_button "System.Windows.Forms.Button" pos:[4,88] width:302 height:34
 
 
 
@@ -1460,16 +1460,14 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:140
     groupBox edge_z_group "6. EDGE ROW FIXING AND BORDER EDGES CHECK" pos:[4,8] width:302 height:98
 
 
-    dotNetControl check_vertical_button "System.Windows.Forms.Button" pos:[8,30] width:112 height:34
+    dotNetControl check_vertical_button "System.Windows.Forms.Button" pos:[8,30] width:112 height:38
 
 
-    spinner edge_angle_spinner "" pos:[124,37] width:48 height:20 \
+    spinner edge_angle_spinner "" pos:[124,37] width:40 height:20 \
         range:[0.1,45.0,45.0] type:#float scale:0.1 \
         tooltip:"Skew angle limit in degrees.\n\nRMB: toggle between the spinner minimum and maximum."
-    label edge_angle_units_label "°" pos:[174,39] width:12 height:18
 
-
-    dotNetControl check_horizontal_button "System.Windows.Forms.Button" pos:[190,30] width:112 height:34
+    dotNetControl check_horizontal_button "System.Windows.Forms.Button" pos:[190,30] width:112 height:38
 
 
     button border_check_button "BORDER CHECK" pos:[18,70] width:264 height:30 \
@@ -1784,28 +1782,28 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:308
     local numbered_button_tooltip
 
 
-    dotNetControl two_edge_verts_button "System.Windows.Forms.Button" pos:[4,8] width:302 height:34
+    dotNetControl two_edge_verts_button "System.Windows.Forms.Button" pos:[4,8] width:302 height:38
 
 
-    dotNetControl duplicated_vertices_button "System.Windows.Forms.Button" pos:[4,48] width:302 height:34
+    dotNetControl duplicated_vertices_button "System.Windows.Forms.Button" pos:[4,48] width:302 height:38
 
 
-    dotNetControl redundant_loops_button "System.Windows.Forms.Button" pos:[4,88] width:302 height:34
+    dotNetControl redundant_loops_button "System.Windows.Forms.Button" pos:[4,88] width:302 height:38
 
 
-    dotNetControl repair_missing_loops_button "System.Windows.Forms.Button" pos:[4,128] width:302 height:34
+    dotNetControl repair_missing_loops_button "System.Windows.Forms.Button" pos:[4,128] width:302 height:38
 
 
-    dotNetControl post_fix_ngons_button "System.Windows.Forms.Button" pos:[4,168] width:302 height:34
+    dotNetControl post_fix_ngons_button "System.Windows.Forms.Button" pos:[4,168] width:302 height:38
 
 
     groupBox walls_completion_group "WALLS COMPLETION" pos:[4,210] width:302 height:90
 
 
-    dotNetControl attach_walls_button "System.Windows.Forms.Button" pos:[18,230] width:264 height:28
+    dotNetControl attach_walls_button "System.Windows.Forms.Button" pos:[18,230] width:264 height:32
 
 
-    dotNetControl weld_corners_button "System.Windows.Forms.Button" pos:[18,264] width:264 height:28
+    dotNetControl weld_corners_button "System.Windows.Forms.Button" pos:[18,264] width:264 height:32
 
 
     on WallFixerPostProcessRollout open do
@@ -1908,7 +1906,7 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:308
 HELPERS contains utility actions that are useful outside the numbered wall-fixing workflow.
 These actions operate on the current scene selection.
 */
-rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
+rollout WallFixerHelpersRollout "HELPERS" width:310 height:156
 (
     button attach_button "Attach" pos:[8,8] width:143 height:30 \
         tooltip:"LMB: Attach all selected geometry into the first selected object.\n\nRMB: Attach selection, center the merged pivot, weld all vertices using Wall-Fixer > Options > Weld Threshold, then quadrify when the merged object has at most 12 triangular faces."
@@ -1932,6 +1930,10 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
 
     button material_button "Material" pos:[159,80] width:143 height:30 \
         tooltip:"LMB: Assign the same WALL FACE CLASSIFIER material used by INNER / OUTTER to selected geometry.\n\nRMB: Remove the material from selected geometry."
+
+
+    button select_degenerated_objects_button "Select Degenerated Objects" pos:[8,116] width:294 height:30 \
+        tooltip:"Select visible geometry collapsed to an edge when all evaluated vertex normals match."
 
 
     on attach_button pressed do
@@ -1980,6 +1982,12 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
     (
         ::WallFixerRollout.runRemoveMaterial()
     )
+
+
+    on select_degenerated_objects_button pressed do
+    (
+        ::WallFixerRollout.runSelectDegeneratedObjects()
+    )
 )
 
 
@@ -1988,7 +1996,7 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
 DEBUG contains optional tracing and Listener diagnostics outside the main workflow.
 These controls do not change the numbered pipeline order.
 */
-rollout WallFixerDebugRollout "DEBUG" width:310 height:116
+rollout WallFixerDebugRollout "DEBUG" width:310 height:152
 (
     checkbutton debug_trace_checkbutton "DEBUG TRACE" pos:[8,8] width:143 height:30 \
         tooltip:"Record classifier inputs, per-face scores, resolution reasons, and class snapshots in object user properties."
@@ -2001,6 +2009,9 @@ rollout WallFixerDebugRollout "DEBUG" width:310 height:116
 
     button angle_of_edges_button "Angle of Edges" pos:[8,80] width:294 height:30 \
         tooltip:"Print horizontal and vertical deviation angles for the selected edges."
+
+    button dialog_info_button "Dialog Info" pos:[8,116] width:294 height:30 \
+        tooltip:"Print the current Wall-Fixer dialog size, position, registration state, and dock state."
 
     on WallFixerDebugRollout open do
     (
@@ -2026,6 +2037,59 @@ rollout WallFixerDebugRollout "DEBUG" width:310 height:116
     (
         ::WallFixerRollout.runPrintSelectedEdgeAngles()
     )
+
+    on dialog_info_button pressed do
+    (
+        dialog_size = undefined
+        dialog_position = undefined
+        dialog_registered = false
+        dialog_dock_state = #unregistered
+
+        try
+        (
+            dialog_size = getDialogSize ::WallFixerRollout
+        )
+        catch
+        (
+        )
+
+        try
+        (
+            dialog_position = getDialogPos ::WallFixerRollout
+        )
+        catch
+        (
+        )
+
+        try
+        (
+            dialog_registered = ::WallFixerRollout.dialogBar
+        )
+        catch
+        (
+            dialog_registered = false
+        )
+
+        if dialog_registered then
+        (
+            try
+            (
+                dialog_dock_state = cui.getDockState ::WallFixerRollout
+            )
+            catch
+            (
+                dialog_dock_state = #unknown
+            )
+        )
+
+        format "\n======================================================================\n"
+        format "WALL-FIXER DIALOG INFO\n"
+        format "Size: %\n" dialog_size
+        format "Position: %\n" dialog_position
+        format "Registered: %\n" dialog_registered
+        format "Dock state: %\n" dialog_dock_state
+        format "======================================================================\n"
+    )
 )
 
 
@@ -2039,6 +2103,20 @@ function testDebugAngleOfEdgesButton =
         (WallFixerDebugRollout.angle_of_edges_button.text == "Angle of Edges") and
         (WallFixerDebugRollout.angle_of_edges_button.width == 294) and
         (WallFixerDebugRollout.angle_of_edges_button.height == 30)
+    )
+    -- return
+)
+
+
+/*
+Tests the DEBUG Dialog Info control layout and label.
+*/
+function testDebugDialogInfoButton =
+(
+    (
+        (WallFixerDebugRollout.dialog_info_button.text == "Dialog Info") and
+        (WallFixerDebugRollout.dialog_info_button.width == 294) and
+        (WallFixerDebugRollout.dialog_info_button.height == 30)
     )
     -- return
 )
@@ -7595,9 +7673,11 @@ function testWallFaceOptionsLayout =
     )
     local controls_ok = (
         (wallFaceClassifierRollout.btn_classify.pos == [4,8]) and
-        (wallFaceClassifierRollout.btn_classify.width == 149) and
-        (wallFaceClassifierRollout.btn_explode.pos == [157,8]) and
-        (wallFaceClassifierRollout.btn_explode.width == 149) and
+        (wallFaceClassifierRollout.btn_classify.width == 126) and
+        (wallFaceClassifierRollout.btn_explode.pos == [134,8]) and
+        (wallFaceClassifierRollout.btn_explode.width == 84) and
+        (wallFaceClassifierRollout.btn_layer.pos == [222,8]) and
+        (wallFaceClassifierRollout.btn_layer.width == 84) and
         (wallFaceClassifierRollout.btn_select_outer.pos == [4,46]) and
         (wallFaceClassifierRollout.btn_select_inner.pos == [80,46]) and
         (wallFaceClassifierRollout.btn_select_up.pos == [156,46]) and
@@ -7681,12 +7761,11 @@ function testEdgeFixerDirectionRow =
         ((abs (angle_spinner.range.x - 0.1)) < 0.00001) and
         ((abs (angle_spinner.range.y - 45.0)) < 0.00001)
     )
-    local size_ok = ((abs (angle_spinner.scale - 0.1)) < 0.00001)
-    local unit_ok = (WallFixerEdgeFixerRollout.edge_angle_units_label.text == "°")
+    local size_ok = (((abs (angle_spinner.scale - 0.1)) < 0.00001) and angle_spinner.width == 40)
 
 
-    local test_passed = order_ok and range_ok and size_ok and unit_ok
-    format "EDGE FIXER direction row test | order:% range:% size:% unit:% | result:%\n" order_ok range_ok size_ok unit_ok test_passed
+    local test_passed = order_ok and range_ok and size_ok
+    format "EDGE FIXER direction row test | order:% range:% size:% | result:%\n" order_ok range_ok size_ok test_passed
 
 
     test_passed
@@ -8224,6 +8303,25 @@ function testWallFaceClassLayerBaseName =
     test_passed -- return
 )
 
+/* Builds one wall-class target layer name from the complete current layer name.
+   No prefix or existing name segment is stripped.
+*/
+function getWallFaceClassTargetLayerName current_layer_name class_suffix =
+(
+    (current_layer_name as string) + "-" + (class_suffix as string)
+    -- return
+)
+
+/* Tests that wall-class target names preserve the complete current layer name.
+*/
+function testWallFaceClassTargetLayerName =
+(
+    test_passed = (getWallFaceClassTargetLayerName "WALLS-01" "OUTTER") == "WALLS-01-OUTTER"
+    format "Wall class target layer name test: %\n" test_passed
+    test_passed
+    -- return
+)
+
 
 /*
 Creates the four wall-class sibling layers beside the current layer and assigns selected single-class objects.
@@ -8242,14 +8340,13 @@ function createWallFaceClassLayersFromCurrent =
     )
     else
     (
-        current_name = current_layer.name
-        base_name = getWallFaceClassLayerBaseName current_name
+        current_name = current_layer.name as string
         current_parent = current_layer.getParent()
         class_suffixes = #("INNER", "OUTTER", "TOP", "BOTTOM")
 
         for class_suffix in class_suffixes do
         (
-            layer_name = base_name + "-" + class_suffix
+            layer_name = getWallFaceClassTargetLayerName current_name class_suffix
             target_layer = LayerManager.getLayerFromName layer_name
 
             if target_layer == undefined then
@@ -8298,7 +8395,7 @@ function createWallFaceClassLayersFromCurrent =
                     4: "BOTTOM"
                     default: ""
                 )
-                target_layer = if class_suffix == "" then undefined else LayerManager.getLayerFromName (base_name + "-" + class_suffix)
+                target_layer = if class_suffix == "" then undefined else LayerManager.getLayerFromName (getWallFaceClassTargetLayerName current_name class_suffix)
 
                 if target_layer != undefined then
                 (
@@ -8326,14 +8423,14 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
 (
     local class_button_tooltip
 
-    dotNetControl btn_classify "System.Windows.Forms.Button" pos:[4,8] width:98 height:32
+    dotNetControl btn_classify "System.Windows.Forms.Button" pos:[4,8] width:126 height:32
 
 
-    button btn_explode "EXPLODE" pos:[106,8] width:98 height:32 \
+    button btn_explode "EXPLODE" pos:[134,8] width:84 height:32 \
         tooltip:"LMB: Split each selected classified object into separate OUTER, INNER, TOP, and BOTTOM objects."
 
 
-    button btn_layer "LAYER" pos:[208,8] width:98 height:32 \
+    button btn_layer "LAYER" pos:[222,8] width:84 height:32 \
         tooltip:"LMB: Create/reuse -INNER, -OUTTER, -TOP, and -BOTTOM sibling layers and move selected single-class wall objects to the matching layer."
 
 
@@ -8574,7 +8671,7 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
 rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 (
     progressbar workflow_progress "" pos:[8,8] width:328 height:14 value:0 color:(color 0 180 0) orient:#horizontal
-    dotNetControl progress_count_label "System.Windows.Forms.Label" pos:[8,8] width:328 height:14
+    dotNetControl progress_count_label "System.Windows.Forms.Label" pos:[8,24] width:328 height:18
     dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,6] width:76 height:40
     dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:19
     dotNetControl status_line_bottom "System.Windows.Forms.RichTextBox" pos:[88,28] width:248 height:19
@@ -9186,6 +9283,171 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         -- return
     )
 
+
+
+    /*
+    Returns true when points occupy one non-zero line within tolerance.
+    A zero-size point cloud is not treated as an edge.
+    */
+    function arePointsCollapsedToEdge point_values position_tolerance:0.001 =
+    (
+        if point_values == undefined or point_values.count < 2 then return false
+
+        origin_point = point_values[1]
+        line_direction = undefined
+
+        for point_index = 2 to point_values.count while line_direction == undefined do
+        (
+            point_delta = point_values[point_index] - origin_point
+
+            if (length point_delta) > position_tolerance then
+            (
+                line_direction = normalize point_delta
+            )
+        )
+
+        if line_direction == undefined then return false
+
+        points_are_collinear = true
+
+        for point_value in point_values while points_are_collinear do
+        (
+            point_offset = point_value - origin_point
+            perpendicular_offset = cross point_offset line_direction
+
+            if (length perpendicular_offset) > position_tolerance then
+            (
+                points_are_collinear = false
+            )
+        )
+
+        points_are_collinear
+        -- return
+    )
+
+
+    /*
+    Returns true only when every supplied normal is non-zero and points in the same direction.
+    */
+    function doNormalsMatch normal_values normal_dot_tolerance:0.9999 =
+    (
+        if normal_values == undefined or normal_values.count == 0 then return false
+
+        reference_normal = undefined
+        normals_match = true
+
+        for normal_value in normal_values while normals_match do
+        (
+            if (length normal_value) <= 0.000001 then
+            (
+                normals_match = false
+            )
+            else
+            (
+                normalized_value = normalize normal_value
+
+                if reference_normal == undefined then
+                (
+                    reference_normal = normalized_value
+                )
+                else if (dot reference_normal normalized_value) < normal_dot_tolerance then
+                (
+                    normals_match = false
+                )
+            )
+        )
+
+        normals_match and reference_normal != undefined
+        -- return
+    )
+
+
+    /*
+    Tests one visible geometry node without changing it.
+    Degenerated matches require collinear evaluated vertices and one shared vertex-normal direction.
+    */
+    function isDegeneratedEdgeObject object_node =
+    (
+        if object_node == undefined or not isValidNode object_node or superclassof object_node != GeometryClass then return false
+
+        evaluated_mesh = undefined
+
+        try
+        (
+            evaluated_mesh = snapshotAsMesh object_node
+        )
+        catch
+        (
+            evaluated_mesh = undefined
+        )
+
+        if evaluated_mesh == undefined or evaluated_mesh.numverts < 2 then return false
+
+        vertex_positions = #()
+        vertex_normals = #()
+
+        for vertex_index = 1 to evaluated_mesh.numverts do
+        (
+            append vertex_positions (getVert evaluated_mesh vertex_index)
+            append vertex_normals (getNormal evaluated_mesh vertex_index)
+        )
+
+        (arePointsCollapsedToEdge vertex_positions) and (doNormalsMatch vertex_normals)
+        -- return
+    )
+
+
+    /*
+    Selects every visible geometry object that matches the degenerated-edge rule.
+    No geometry, modifiers, transforms, or materials are changed.
+    */
+    function runSelectDegeneratedObjects =
+    (
+        source_nodes = for object_node in geometry where not object_node.isHidden collect object_node
+        matching_nodes = #()
+
+        for object_node in source_nodes do
+        (
+            if isDegeneratedEdgeObject object_node then append matching_nodes object_node
+        )
+
+        if matching_nodes.count > 0 then
+        (
+            select matching_nodes
+            setStatus #success ("Select Degenerated Objects: selected " + (matching_nodes.count as string) + " object(s).")
+        )
+        else
+        (
+            clearSelection()
+            setStatus #warning "Select Degenerated Objects: no matching visible objects found."
+        )
+
+        completeRedraw()
+        matching_nodes
+        -- return
+    )
+
+
+    /*
+    Tests the pure collinearity and shared-normal rules without scene geometry.
+    */
+    function testDegeneratedObjectRules =
+    (
+        edge_points = #([0,0,0], [1,0,0], [2,0,0], [3,0,0])
+        non_edge_points = #([0,0,0], [1,0,0], [2,1,0])
+        shared_normals = #([0,0,1], [0,0,1], [0,0,1])
+        mixed_normals = #([0,0,1], [0,1,0])
+
+        passed = \
+            (arePointsCollapsedToEdge edge_points) and \
+            (not (arePointsCollapsedToEdge non_edge_points)) and \
+            (doNormalsMatch shared_normals) and \
+            (not (doNormalsMatch mixed_normals))
+
+        format "Degenerated object rule test | result:%\n" passed
+        passed
+        -- return
+    )
 
     /*
     Prints world horizontal/vertical deviation angles for the current selected edges.
@@ -13154,8 +13416,8 @@ if saved_dialog_position == undefined then
         width:saved_dialog_size.x \
         height:saved_dialog_size.y \
         menu:wall_fixer_main_menu \
-        style:#(#style_titlebar, #style_sysmenu, #style_toolwindow, #style_resizing) \
-        lockWidth:false \
+        style:#(#style_titlebar, #style_sysmenu, #style_toolwindow) \
+        lockWidth:true \
         lockHeight:false
 )
 else
@@ -13165,8 +13427,8 @@ else
         height:saved_dialog_size.y \
         pos:saved_dialog_position \
         menu:wall_fixer_main_menu \
-        style:#(#style_titlebar, #style_sysmenu, #style_toolwindow, #style_resizing) \
-        lockWidth:false \
+        style:#(#style_titlebar, #style_sysmenu, #style_toolwindow) \
+        lockWidth:true \
         lockHeight:false
 )
 

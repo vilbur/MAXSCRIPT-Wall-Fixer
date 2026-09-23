@@ -1,5 +1,5 @@
-/*
-Wall-Fixer Core 0.53
+﻿/*
+Wall-Fixer Core 0.54
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.53"
-global wall_fixer_core_tool_version = 0.985
+global wall_fixer_core_file_version = "0.54"
+global wall_fixer_core_tool_version = 0.996
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -7799,6 +7799,27 @@ modifier.split = false
         if display_hidden_edges != undefined or double_side != undefined then
         (
             setNodesDisplayOptions all_selected_nodes hidden_edges:display_hidden_edges double_side:double_side
+        )
+
+        for selected_node in all_selected_nodes do
+        (
+            if isValidNode selected_node then
+            (
+                try
+                (
+                    if selected_node.modifiers.count > 0 and classOf selected_node.modifiers[1] == Edit_Poly then
+                    (
+                        selected_node.modifiers[1].SetSelection #Face #{} node:selected_node
+                    )
+                    else if classOf selected_node.baseObject == Editable_Poly then
+                    (
+                        polyop.setFaceSelection selected_node.baseObject #{}
+                    )
+                )
+                catch
+                (
+                )
+            )
         )
 
         select all_selected_nodes
