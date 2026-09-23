@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer UI 0.937
+Wall-Fixer UI 0.938
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.937"
-global wall_fixer_ui_tool_version = 0.986
+global wall_fixer_ui_file_version = "0.938"
+global wall_fixer_ui_tool_version = 0.987
 
 
 /*
@@ -1663,7 +1663,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
 
 
     button select_slice_state_button "Select" pos:[194,42] width:54 height:38 \
-        tooltip:"LMB: Filter only SLICED objects. If nothing is selected, use all visible geometry.\n\nRMB: Filter only UNSLICED objects. If nothing is selected, use all visible geometry."
+        tooltip:"LMB: Filter objects with SLICE VERTICAL. If nothing is selected, use all visible geometry.\n\nRMB: Filter objects with SLICE HORIZONTAL. If nothing is selected, use all visible geometry."
 
 
     button delete_slice_modifier_button "Delete" pos:[252,42] width:54 height:38 \
@@ -1752,13 +1752,13 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
 
     on select_slice_state_button pressed do
     (
-        ::WallFixerRollout.selectSliceWallObjects sliced_state:true
+        ::WallFixerRollout.selectSliceWallObjects "SLICE VERTICAL"
     )
 
 
     on select_slice_state_button rightclick do
     (
-        ::WallFixerRollout.selectSliceWallObjects sliced_state:false
+        ::WallFixerRollout.selectSliceWallObjects "SLICE HORIZONTAL"
     )
 
 
@@ -7760,6 +7760,19 @@ function testSliceCornerHelperRouting =
 
 
 /*
+Tests Slice Walls Select directional modifier routing.
+*/
+function testSliceSelectDirectionalRouting =
+(
+    local lmb_modifier = "SLICE VERTICAL"
+    local rmb_modifier = "SLICE HORIZONTAL"
+
+    lmb_modifier == "SLICE VERTICAL" and rmb_modifier == "SLICE HORIZONTAL"
+    -- return
+)
+
+
+/*
 Tests direct Slice Walls LMB/RMB direction routing.
 */
 function testSliceWallMouseRouting =
@@ -12713,12 +12726,12 @@ result_groups
 
 
     /*
-    Filters the current selection by Wall-Fixer slice state.
+    Filters the current selection by one exact Slice Walls modifier name.
     When nothing is selected, all visible geometry is used as the source set.
     */
-    function selectSliceWallObjects sliced_state:true =
+    function selectSliceWallObjects modifier_name =
     (
-        source_nodes = if selection.count > 0 then
+        local source_nodes = if selection.count > 0 then
         (
             selection as array
         )
@@ -12727,18 +12740,22 @@ result_groups
             for object_node in geometry where not object_node.isHidden collect object_node
         )
 
-
-        filtered_nodes = #()
+        local filtered_nodes = #()
+        local normalized_name = toUpper (modifier_name as string)
 
 
         for object_node in source_nodes do
         (
             if object_node != undefined and isValidNode object_node then
             (
-                object_is_sliced = isSliceWallObjectSliced object_node
+                local has_requested_modifier = false
 
+                for stack_modifier in object_node.modifiers while not has_requested_modifier do
+                (
+                    has_requested_modifier = (toUpper (stack_modifier.name as string) == normalized_name)
+                )
 
-                if object_is_sliced == sliced_state then
+                if has_requested_modifier then
                 (
                     append filtered_nodes object_node
                 )
@@ -12756,8 +12773,7 @@ result_groups
         )
 
 
-        state_label = if sliced_state then "SLICED" else "UNSLICED"
-        setStatus #message (("Selected " + (filtered_nodes.count as string)) + " " + state_label + " object(s).")
+        setStatus #message (("Selected " + (filtered_nodes.count as string)) + " object(s) with " + normalized_name + ".")
 
 
         filtered_nodes
@@ -12767,7 +12783,7 @@ result_groups
 
     /*
     Runs one explicit Slice Walls direction from the main action mouse event.
-    LMB supplies Horizontal; RMB supplies Vertical.
+    LMB supplies Vertical; RMB supplies Horizontal.
     */
     function runSliceSelectedWalls cut_mode =
     (

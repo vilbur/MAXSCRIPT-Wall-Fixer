@@ -6,9 +6,6 @@
 
 ## QUEUE
 
-
-ARCHITECTURE: refactor the oversized main source file into smaller logical modules when this improves editing and maintenance; target a maximum file size of about 250 KB per file while preserving behavior, dependencies, and load order.
-
 UI: EDGE FIXER > Angle Threshold: reduce the spinner field width by 8 px and remove the "°" label from the spinner.
 
 UI: dialog: lock the dialog width and disable resizing of the registered dialog.
@@ -22,6 +19,8 @@ BUG: SLICE WALLS > progress bar: fix the progress bar so it visibly updates/show
 SLICE WALLS: after slicing completes, clear all face selection at subObjectLevel 4 so no faces remain selected.
 
 UI: .NET buttons with two-line titles: increase button height by about 4 px so both lines fit cleanly.
+
+LAYERS: fix get/create and assignment so the target layer uses the full current layer name plus the wall suffix; example: "WALLS-01" + "-OUTTER" -> "WALLS-01-OUTTER" (not "0-OUTTER").
 
 ## DONE TODAY
 

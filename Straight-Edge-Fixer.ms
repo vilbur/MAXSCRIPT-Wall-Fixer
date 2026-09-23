@@ -1,5 +1,5 @@
-/*
-Straight Edge Fixer 0.39
+﻿/*
+Straight Edge Fixer 0.41
 Detects repeated horizontal edge rows and aligns nearby horizontal edges to them.
 */
 
@@ -7,8 +7,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.39"
-global straight_edge_fixer_tool_version = 0.979
+global straight_edge_fixer_file_version = "0.41"
+global straight_edge_fixer_tool_version = 0.989
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -19,9 +19,9 @@ if wall_fixer_version_system != 1 then
     wall_fixer_version_system = 1
 )
 
-if wall_fixer_version_epoch != 2 then
+if wall_fixer_version_epoch != 3 then
 (
-    wall_fixer_version_epoch = 2
+    wall_fixer_version_epoch = 3
     WallFixerVersion = undefined
 )
 
@@ -558,6 +558,734 @@ struct StraightEdgeFixer_v
             test_passed = test_passed and (not second_adapter[3])
             test_passed = test_passed and (not third_adapter[3])
             test_passed = test_passed and (modifier_count_after == modifier_count_before)
+        )
+        catch
+        (
+            test_passed = false
+        )
+
+        if ((test_node != undefined) and (isValidNode test_node)) then
+        (
+            delete test_node
+        )
+
+        if original_selection.count > 0 then
+        (
+            select original_selection
+        )
+        else
+        (
+            clearSelection()
+        )
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Returns the number of edges exposed by the current geometry adapter.
+    Supports Editable Poly and Edit Poly.
+    */
+    function getEdgeCount node adapter =
+    (
+        edge_count = 0
+
+        if (adapter[1] == #editable_poly) then
+        (
+            edge_count = polyop.getNumEdges (adapter[2])
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            edge_count = EditPolyMod.GetNumEdges (adapter[2]) node:node
+        )
+
+        edge_count
+        -- return
+    ),
+
+    /*
+    Returns the two vertex IDs used by one edge.
+    Supports Editable Poly and Edit Poly.
+    */
+    function getEdgeVertIds node adapter edge_id =
+    (
+        edge_verts = #()
+
+        if (adapter[1] == #editable_poly) then
+        (
+            edge_verts = polyop.getEdgeVerts (adapter[2]) edge_id
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            vert_a = EditPolyMod.GetEdgeVertex (adapter[2]) edge_id 1 node:node
+            vert_b = EditPolyMod.GetEdgeVertex (adapter[2]) edge_id 2 node:node
+            edge_verts = #(vert_a, vert_b)
+        )
+
+        edge_verts
+        -- return
+    ),
+
+
+    /*
+    Returns true only when the current poly edge is visible.
+    Invisible triangulation edges are ignored by direction checks and edge-level analysis.
+    */
+    function isEdgeVisible node adapter edge_id =
+    (
+        result_value = false
+
+        try
+        (
+            if (adapter[1] == #editable_poly) then
+            (
+                result_value = polyop.getEdgeVis (adapter[2]) edge_id
+            )
+            else if (adapter[1] == #edit_poly) then
+            (
+                result_value = polyop.getEdgeVis node edge_id
+            )
+        )
+        catch
+        (
+            /*
+            Fallback for a top Edit Poly over an Editable Poly base object.
+            Use this only when the evaluated-node query is unavailable.
+            */
+            try
+            (
+                if ((classOf node.baseObject == Editable_Poly) and (edge_id <= polyop.getNumEdges node.baseObject)) then
+                (
+                    result_value = polyop.getEdgeVis node.baseObject edge_id
+                )
+                else
+                (
+                    result_value = false
+                )
+            )
+            catch
+            (
+                result_value = false
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Returns one vertex position in object-local coordinates.
+    Supports Editable Poly and Edit Poly.
+    */
+    function getVertexPosition node adapter vert_id =
+    (
+        vertex_position = [0,0,0]
+
+        if (adapter[1] == #editable_poly) then
+        (
+            vertex_position = polyop.getVert (adapter[2]) vert_id
+        )
+        else if (adapter[1] == #edit_poly) then
+        (
+            vertex_position = EditPolyMod.GetVertex (adapter[2]) vert_id node:node
+        )
+
+        vertex_position
+        -- return
+    ),
+
+    /*
+    Returns one vertex position in world coordinates.
+    The node object transform is applied to the current geometry position.
+    */
+    function getVertexWorldPosition node adapter vert_id =
+    (
+        local_position = getVertexPosition node adapter vert_id
+        world_position = local_position * node.objectTransform
+
+        world_position
+        -- return
+    ),
+
+
+    /*
+    Returns true when one visible poly edge is an open border edge.
+    Border topology is read from the current Editable Poly or evaluated Edit Poly result.
+    */
+    function isBorderEdge node adapter edge_id =
+    (
+        result_value = false
+
+        if (isEdgeVisible node adapter edge_id) then
+        (
+            try
+            (
+                if (adapter[1] == #editable_poly) then
+                (
+                    edge_faces = polyop.getFacesUsingEdge (adapter[2]) edge_id
+                )
+                else
+                (
+                    edge_faces = polyop.getFacesUsingEdge node edge_id
+                )
+
+                result_value = (edge_faces.numberSet == 1)
+            )
+            catch
+            (
+                result_value = false
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Collects all visible open border edges.
+    Invisible triangulation edges never participate in Border Check.
+    */
+    function getVisibleBorderEdges node adapter =
+    (
+        border_edges = #{}
+        edge_count = getEdgeCount node adapter
+
+        for edge_id = 1 to edge_count do
+        (
+            if (isBorderEdge node adapter edge_id) then
+            (
+                border_edges[edge_id] = true
+            )
+        )
+
+        border_edges
+        -- return
+    ),
+
+    /*
+    Returns true when two local XY coordinates match inside tolerance.
+    Local Z is intentionally ignored because it represents wall height.
+    */
+    function localXYMatches point_a point_b tolerance =
+    (
+        ((abs (point_a.x - point_b.x)) <= tolerance) and
+        ((abs (point_a.y - point_b.y)) <= tolerance)
+        -- return
+    ),
+
+    /*
+    Returns true when one border edge follows one local XY column.
+    Both endpoints must share the same local X and Y inside tolerance.
+    */
+    function isLocalVerticalBorderEdge node adapter edge_id tolerance =
+    (
+        result_value = false
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexPosition node adapter edge_verts[1]
+            point_b = getVertexPosition node adapter edge_verts[2]
+            result_value = localXYMatches point_a point_b tolerance
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Tests whether two one-dimensional Z intervals overlap or touch.
+    Tolerance allows tiny coordinate errors around the shared height.
+    */
+    function zRangesOverlapOrTouch min_a max_a min_b max_b tolerance =
+    (
+        ((max_a + tolerance) >= min_b) and ((max_b + tolerance) >= min_a)
+        -- return
+    ),
+
+    /*
+    Returns true when two border edges are separate IDs on the same local XY column
+    and their local Z ranges overlap or touch without sharing a welded vertex.
+    */
+    function borderEdgesFormUnweldedColumn node adapter edge_a edge_b tolerance =
+    (
+        result_value = false
+        edge_a_verts = getEdgeVertIds node adapter edge_a
+        edge_b_verts = getEdgeVertIds node adapter edge_b
+
+        if ((edge_a_verts.count == 2) and (edge_b_verts.count == 2)) then
+        (
+            shared_vertex =
+                (edge_a_verts[1] == edge_b_verts[1]) or
+                (edge_a_verts[1] == edge_b_verts[2]) or
+                (edge_a_verts[2] == edge_b_verts[1]) or
+                (edge_a_verts[2] == edge_b_verts[2])
+
+            if (not shared_vertex) then
+            (
+                if ((isLocalVerticalBorderEdge node adapter edge_a tolerance) and
+                    (isLocalVerticalBorderEdge node adapter edge_b tolerance)) then
+                (
+                    edge_a_point = getVertexPosition node adapter edge_a_verts[1]
+                    edge_b_point = getVertexPosition node adapter edge_b_verts[1]
+
+                    if (localXYMatches edge_a_point edge_b_point tolerance) then
+                    (
+                        edge_a_point_2 = getVertexPosition node adapter edge_a_verts[2]
+                        edge_b_point_2 = getVertexPosition node adapter edge_b_verts[2]
+
+                        min_a = amin edge_a_point.z edge_a_point_2.z
+                        max_a = amax edge_a_point.z edge_a_point_2.z
+                        min_b = amin edge_b_point.z edge_b_point_2.z
+                        max_b = amax edge_b_point.z edge_b_point_2.z
+
+                        result_value = zRangesOverlapOrTouch min_a max_a min_b max_b tolerance
+                    )
+                )
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Finds visible border edges that look like an unwelded vertical seam.
+    Both members of every matching edge pair are selected.
+    */
+    function findUnweldedBorderEdges node adapter border_edges tolerance =
+    (
+        invalid_edges = #{}
+        border_edge_array = for edge_id in border_edges collect edge_id
+
+        if (border_edge_array.count > 1) then
+        (
+            for edge_index_a = 1 to (border_edge_array.count - 1) do
+            (
+                edge_a = border_edge_array[edge_index_a]
+
+                for edge_index_b = (edge_index_a + 1) to border_edge_array.count do
+                (
+                    edge_b = border_edge_array[edge_index_b]
+
+                    if (borderEdgesFormUnweldedColumn node adapter edge_a edge_b tolerance) then
+                    (
+                        invalid_edges[edge_a] = true
+                        invalid_edges[edge_b] = true
+                    )
+                )
+            )
+        )
+
+        invalid_edges
+        -- return
+    ),
+
+    /*
+    Returns all visible border edges using one vertex.
+    Used to walk ordered border loops.
+    */
+    function getBorderEdgesAtVertex node adapter border_edges vert_id =
+    (
+        result_edges = #()
+
+        for edge_id in border_edges do
+        (
+            edge_verts = getEdgeVertIds node adapter edge_id
+
+            if (edge_verts.count == 2) then
+            (
+                if ((edge_verts[1] == vert_id) or (edge_verts[2] == vert_id)) then
+                (
+                    append result_edges edge_id
+                )
+            )
+        )
+
+        result_edges
+        -- return
+    ),
+
+    /*
+    Returns the opposite vertex of an edge.
+    Zero is returned when the supplied vertex is not part of that edge.
+    */
+    function getOtherEdgeVertex node adapter edge_id vert_id =
+    (
+        other_vert = 0
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+        if (edge_verts.count == 2) then
+        (
+            if (edge_verts[1] == vert_id) then
+            (
+                other_vert = edge_verts[2]
+            )
+            else if (edge_verts[2] == vert_id) then
+            (
+                other_vert = edge_verts[1]
+            )
+        )
+
+        other_vert
+        -- return
+    ),
+
+    /*
+    Walks one visible border chain from a seed edge.
+    Returns #(ordered_vertices, ordered_edges, is_closed).
+    */
+    function traceBorderLoop node adapter border_edges seed_edge =
+    (
+        ordered_vertices = #()
+        ordered_edges = #()
+        closed_loop = false
+        seed_verts = getEdgeVertIds node adapter seed_edge
+
+        if (seed_verts.count == 2) then
+        (
+            start_vert = seed_verts[1]
+            current_vert = seed_verts[2]
+            current_edge = seed_edge
+
+            append ordered_vertices start_vert
+            append ordered_vertices current_vert
+            append ordered_edges current_edge
+
+            continue_walk = true
+            safety_count = 0
+            max_steps = border_edges.numberSet + 2
+
+            while (continue_walk and (safety_count < max_steps)) do
+            (
+                safety_count += 1
+                incident_edges = getBorderEdgesAtVertex node adapter border_edges current_vert
+                next_edge = 0
+
+                for candidate_edge in incident_edges while (next_edge == 0) do
+                (
+                    if (candidate_edge != current_edge) then
+                    (
+                        next_edge = candidate_edge
+                    )
+                )
+
+                if (next_edge == 0) then
+                (
+                    continue_walk = false
+                )
+                else
+                (
+                    next_vert = getOtherEdgeVertex node adapter next_edge current_vert
+
+                    if (next_vert == 0) then
+                    (
+                        continue_walk = false
+                    )
+                    else if (next_vert == start_vert) then
+                    (
+                        append ordered_edges next_edge
+                        closed_loop = true
+                        continue_walk = false
+                    )
+                    else if ((findItem ordered_vertices next_vert) > 0) then
+                    (
+                        continue_walk = false
+                    )
+                    else
+                    (
+                        append ordered_edges next_edge
+                        append ordered_vertices next_vert
+                        current_edge = next_edge
+                        current_vert = next_vert
+                    )
+                )
+            )
+        )
+
+        #(ordered_vertices, ordered_edges, closed_loop)
+        -- return
+    ),
+
+    /*
+    Calculates a Newell normal from an ordered local-space border loop.
+    The normal is used only to distinguish convex and reflex turns.
+    */
+    function getBorderLoopNormal node adapter ordered_vertices =
+    (
+        normal_value = [0,0,0]
+        vert_count = ordered_vertices.count
+
+        if (vert_count >= 3) then
+        (
+            for vert_index = 1 to vert_count do
+            (
+                next_index = if (vert_index == vert_count) then 1 else (vert_index + 1)
+                point_a = getVertexPosition node adapter ordered_vertices[vert_index]
+                point_b = getVertexPosition node adapter ordered_vertices[next_index]
+
+                normal_value.x += (point_a.y - point_b.y) * (point_a.z + point_b.z)
+                normal_value.y += (point_a.z - point_b.z) * (point_a.x + point_b.x)
+                normal_value.z += (point_a.x - point_b.x) * (point_a.y + point_b.y)
+            )
+        )
+
+        if ((length normal_value) > 0.0000001) then
+        (
+            normal_value = normalize normal_value
+        )
+
+        normal_value
+        -- return
+    ),
+
+    /*
+    Finds border edges touching reflex border corners with interior angle above 180 degrees.
+    Only closed visible border loops with an unambiguous two-edge border chain are tested.
+    */
+    function findReflexBorderEdges node adapter border_edges =
+    (
+        invalid_edges = #{}
+        remaining_edges = copy border_edges
+
+        while (remaining_edges.numberSet > 0) do
+        (
+            seed_edge = 0
+
+            for edge_id in remaining_edges while (seed_edge == 0) do
+            (
+                seed_edge = edge_id
+            )
+
+            if (seed_edge > 0) then
+            (
+                loop_data = traceBorderLoop node adapter border_edges seed_edge
+                ordered_vertices = loop_data[1]
+                ordered_edges = loop_data[2]
+                closed_loop = loop_data[3]
+
+                for walked_edge in ordered_edges do
+                (
+                    remaining_edges[walked_edge] = false
+                )
+
+                if (closed_loop and (ordered_vertices.count >= 3) and
+                    (ordered_edges.count == ordered_vertices.count)) then
+                (
+                    loop_normal = getBorderLoopNormal node adapter ordered_vertices
+
+                    if ((length loop_normal) > 0.0000001) then
+                    (
+                        vert_count = ordered_vertices.count
+
+                        for vert_index = 1 to vert_count do
+                        (
+                            previous_index = if (vert_index == 1) then vert_count else (vert_index - 1)
+                            next_index = if (vert_index == vert_count) then 1 else (vert_index + 1)
+
+                            previous_point = getVertexPosition node adapter ordered_vertices[previous_index]
+                            current_point = getVertexPosition node adapter ordered_vertices[vert_index]
+                            next_point = getVertexPosition node adapter ordered_vertices[next_index]
+
+                            vector_to_previous = previous_point - current_point
+                            vector_to_next = next_point - current_point
+
+                            previous_length = length vector_to_previous
+                            next_length = length vector_to_next
+
+                            if ((previous_length > 0.0000001) and
+                                (next_length > 0.0000001)) then
+                            (
+                                previous_direction = vector_to_previous / previous_length
+                                next_direction = vector_to_next / next_length
+                                direction_dot = dot previous_direction next_direction
+                                direction_dot = amax -1.0 (amin 1.0 direction_dot)
+
+                                turn_cross = cross vector_to_previous vector_to_next
+                                signed_turn = dot turn_cross loop_normal
+
+                                /*
+                                Standard reflex corner:
+                                With Newell normal built from the same loop order,
+                                negative = convex turn and positive = reflex turn.
+                                */
+                                is_reflex_corner = (signed_turn > 0.0000001)
+
+                                /*
+                                360-degree backtrack:
+                                Both neighboring vertices lie in almost the same direction
+                                from the current border vertex. The border walks out and back
+                                on itself. The two remote vertices do NOT need to share position.
+                                */
+                                is_backtrack_360 = (direction_dot >= 0.9999)
+
+                                if (is_reflex_corner or is_backtrack_360) then
+                                (
+                                    previous_edge_index = if (vert_index == 1) then ordered_edges.count else (vert_index - 1)
+                                    next_edge_index = vert_index
+
+                                    invalid_edges[ordered_edges[previous_edge_index]] = true
+                                    invalid_edges[ordered_edges[next_edge_index]] = true
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        invalid_edges
+        -- return
+    ),
+
+    /*
+    Checks visible open borders for unwelded local-Z seams and reflex corners.
+    The resulting invalid border edges are selected in Edge sub-object mode.
+    */
+    function checkBorders tolerance =
+    (
+        selected_nodes = selection as array
+        total_invalid_edges = 0
+        total_unwelded_edges = 0
+        total_reflex_edges = 0
+        processed_count = 0
+
+        if (selected_nodes.count == 0) then
+        (
+            messageBox "Select at least one geometry object." title:"Straight Edge Fixer"
+        )
+        else
+        (
+            for node in selected_nodes do
+            (
+                if (isValidNode node and (superClassOf node == GeometryClass)) then
+                (
+                    processed_count += 1
+                    adapter = getGeometryAdapter node
+                    border_edges = getVisibleBorderEdges node adapter
+                    unwelded_edges = findUnweldedBorderEdges node adapter border_edges tolerance
+                    reflex_edges = findReflexBorderEdges node adapter border_edges
+                    invalid_edges = copy unwelded_edges
+                    invalid_edges += reflex_edges
+
+                    /*
+                    Select directly here instead of calling the later struct helper.
+                    This avoids MAXScript resolving the forward reference against a Modifier-based selection API.
+                    */
+                    if (adapter[1] == #editable_poly) then
+                    (
+                        polyop.setEdgeSelection (adapter[2]) invalid_edges
+                    )
+                    else if (adapter[1] == #edit_poly) then
+                    (
+                        EditPolyMod.SetEPolySelLevel (adapter[2]) #Edge
+                        EditPolyMod.SetSelection (adapter[2]) #Edge invalid_edges node:node
+                    )
+
+                    total_unwelded_edges += countBits unwelded_edges
+                    total_reflex_edges += countBits reflex_edges
+                    total_invalid_edges += countBits invalid_edges
+                )
+            )
+
+            if (processed_count > 0) then
+            (
+                setCommandPanelTaskMode mode:#modify
+                subObjectLevel = 2
+                completeRedraw()
+
+                format "Border Check: selected % invalid border edge(s). Unwelded/overlapping: %, reflex >180 deg: %.\n" total_invalid_edges total_unwelded_edges total_reflex_edges
+            )
+        )
+
+        total_invalid_edges
+        -- return
+    ),
+
+    /*
+    Returns true when an edge is horizontal within tolerance.
+    Horizontal means endpoint world-Z difference does not exceed tolerance.
+    */
+    function isHorizontalEdge node adapter edge_id tolerance =
+    (
+        result_value = false
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexWorldPosition node adapter edge_verts[1]
+            point_b = getVertexWorldPosition node adapter edge_verts[2]
+            result_value = ((abs (point_a.z - point_b.z)) <= tolerance)
+        )
+
+        result_value
+        -- return
+    ),
+
+    /*
+    Returns true when an edge is vertical within tolerance.
+    Vertical means endpoint world-X and world-Y differences are within tolerance.
+    */
+    function isVerticalEdge node adapter edge_id tolerance =
+    (
+        result_value = false
+        edge_verts = getEdgeVertIds node adapter edge_id
+
+        if (edge_verts.count == 2) then
+        (
+            point_a = getVertexWorldPosition node adapter edge_verts[1]
+            point_b = getVertexWorldPosition node adapter edge_verts[2]
+
+            result_value =
+                ((abs (point_a.x - point_b.x)) <= tolerance) and
+                ((abs (point_a.y - point_b.y)) <= tolerance)
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Verifies the geometry adapter exposes the helper functions required by direction and Border checks.
+    The test confirms edge count, edge vertices, world positions, visibility and exact direction tests.
+    */
+    function testGeometryAdapterHelpers =
+    (
+        test_passed = true
+        test_node = undefined
+        original_selection = selection as array
+
+        try
+        (
+            test_node = box length:10.0 width:10.0 height:10.0
+            adapter = getGeometryAdapter test_node
+            edge_count = getEdgeCount test_node adapter
+
+            test_passed = test_passed and (edge_count > 0)
+
+            if edge_count > 0 then
+            (
+                edge_verts = getEdgeVertIds test_node adapter 1
+                test_passed = test_passed and (edge_verts.count == 2)
+
+                if edge_verts.count == 2 then
+                (
+                    point_a = getVertexWorldPosition test_node adapter edge_verts[1]
+                    point_b = getVertexWorldPosition test_node adapter edge_verts[2]
+                    test_passed = test_passed and (point_a != undefined)
+                    test_passed = test_passed and (point_b != undefined)
+                )
+
+                edge_visible = isEdgeVisible test_node adapter 1
+                test_passed = test_passed and ((edge_visible == true) or (edge_visible == false))
+
+                horizontal_value = isHorizontalEdge test_node adapter 1 0.0
+                vertical_value = isVerticalEdge test_node adapter 1 0.0
+                test_passed = test_passed and ((horizontal_value == true) or (horizontal_value == false))
+                test_passed = test_passed and ((vertical_value == true) or (vertical_value == false))
+            )
         )
         catch
         (
