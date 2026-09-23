@@ -1,6 +1,6 @@
 ﻿/*
-Wall-Fixer Bundled Loader 1.031
-Project version 1.0399.
+Wall-Fixer Bundled Loader 1.036
+Project version 1.0449.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "1.031"
-global wall_fixer_loader_tool_version = 1.0399
+global wall_fixer_loader_file_version = "1.036"
+global wall_fixer_loader_tool_version = 1.0449
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -2191,7 +2191,7 @@ struct WMCWallSlicePipeline
 
 
 /*
-Wall-Fixer Core 0.79
+Wall-Fixer Core 0.82
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -2200,8 +2200,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.79"
-global wall_fixer_core_tool_version = 1.0399
+global wall_fixer_core_file_version = "0.82"
+global wall_fixer_core_tool_version = 1.0449
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -12407,6 +12407,267 @@ struct WallFixer_v
 
 
     /*
+    Returns the straight-through pair for one true visible-edge T-junction direction set.
+    Exactly three directions are required; two must continue oppositely through the vertex.
+    */
+    function getSliceForceTJunctionStraightPair edge_directions angle_threshold:5.0 =
+    (
+        if edge_directions == undefined or edge_directions.count != 3 then return undefined
+
+        local straight_limit = -(cos (amin 45.0 (amax 0.0 angle_threshold)))
+        local best_pair = undefined
+        local best_dot = 1.0
+
+        for direction_a_index = 1 to 2 do
+        (
+            local direction_a = edge_directions[direction_a_index]
+
+            if direction_a != undefined and length direction_a > epsilon then
+            (
+                direction_a = normalize direction_a
+
+                for direction_b_index = direction_a_index + 1 to 3 do
+                (
+                    local direction_b = edge_directions[direction_b_index]
+
+                    if direction_b != undefined and length direction_b > epsilon then
+                    (
+                        direction_b = normalize direction_b
+                        local pair_dot = dot direction_a direction_b
+
+                        if pair_dot <= straight_limit and pair_dot < best_dot then
+                        (
+                            best_dot = pair_dot
+                            best_pair = #(direction_a_index, direction_b_index, 6 - direction_a_index - direction_b_index)
+                        )
+                    )
+                )
+            )
+        )
+
+        best_pair
+        -- return
+    ),
+
+
+    /*
+    Finds true T-junction vertices from visible Editable Poly edges on the baked Slice Force object.
+    Each record stores the local wall frame plus usable vertical/horizontal incident edges for Force plane creation.
+    */
+    function getSliceForceTJunctionData node angle_threshold:5.0 =
+    (
+        local result = #()
+        if node == undefined or not(isValidNode node) then return result
+
+        local base_obj = node.baseObject
+        if classOf base_obj != Editable_Poly then return result
+
+        local surface_data = getSliceForceSurfaceData node
+        if surface_data == undefined then return result
+
+        local world_points = surface_data[1]
+        local vert_count = polyop.getNumVerts base_obj
+        local direction_cos = cos (amin 45.0 (amax 0.0 angle_threshold))
+        local world_up = [0.0,0.0,1.0]
+
+        for vertex_index = 1 to vert_count do
+        (
+            local incident_edges = polyop.getEdgesUsingVert base_obj #{vertex_index}
+            local visible_edges = #()
+            local visible_directions = #()
+
+            for edge_index in incident_edges do
+            (
+                local edge_visible = false
+                try(edge_visible = polyop.getEdgeVis base_obj edge_index)catch(edge_visible = false)
+
+                if edge_visible then
+                (
+                    local edge_verts = polyop.getEdgeVerts base_obj edge_index
+
+                    if edge_verts != undefined and edge_verts.count == 2 then
+                    (
+                        local other_vertex = if edge_verts[1] == vertex_index then edge_verts[2] else edge_verts[1]
+
+                        if other_vertex >= 1 and other_vertex <= world_points.count then
+                        (
+                            local edge_direction = world_points[other_vertex] - world_points[vertex_index]
+
+                            if length edge_direction > epsilon then
+                            (
+                                append visible_edges edge_index
+                                append visible_directions (normalize edge_direction)
+                            )
+                        )
+                    )
+                )
+            )
+
+            if visible_edges.count == 3 then
+            (
+                local straight_pair = getSliceForceTJunctionStraightPair visible_directions angle_threshold:angle_threshold
+
+                if straight_pair != undefined then
+                (
+                    local straight_direction = visible_directions[straight_pair[1]]
+                    local branch_direction = visible_directions[straight_pair[3]]
+                    local wall_normal = cross straight_direction branch_direction
+
+                    if length wall_normal > epsilon then
+                    (
+                        wall_normal = normalize wall_normal
+                        local wall_vertical = world_up - wall_normal * (dot wall_normal world_up)
+
+                        if length wall_vertical > epsilon then
+                        (
+                            wall_vertical = normalize wall_vertical
+                            local wall_horizontal = cross wall_vertical wall_normal
+
+                            if length wall_horizontal > epsilon then
+                            (
+                                wall_horizontal = normalize wall_horizontal
+                                local vertical_edge = 0
+                                local vertical_direction = undefined
+                                local vertical_score = -1.0
+                                local horizontal_edge = 0
+                                local horizontal_direction = undefined
+                                local horizontal_score = -1.0
+
+                                for direction_index = 1 to visible_directions.count do
+                                (
+                                    local edge_direction = visible_directions[direction_index]
+                                    local vertical_dot = abs(dot edge_direction wall_vertical)
+                                    local horizontal_dot = abs(dot edge_direction wall_horizontal)
+
+                                    if vertical_dot >= direction_cos and vertical_dot > vertical_score then
+                                    (
+                                        vertical_score = vertical_dot
+                                        vertical_edge = visible_edges[direction_index]
+                                        vertical_direction = edge_direction
+                                    )
+
+                                    if horizontal_dot >= direction_cos and horizontal_dot > horizontal_score then
+                                    (
+                                        horizontal_score = horizontal_dot
+                                        horizontal_edge = visible_edges[direction_index]
+                                        horizontal_direction = edge_direction
+                                    )
+                                )
+
+                                append result #(vertex_index, world_points[vertex_index], wall_normal, visible_edges, vertical_edge, vertical_direction, horizontal_edge, horizontal_direction)
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        result
+        -- return
+    ),
+
+
+    /*
+    Merges optional true T-junction vertex planes into the existing Slice Force physical-plane cache.
+    The stable Force detector remains unchanged when the option is disabled by the caller.
+    */
+    function mergeSliceForceTJunctionTasks node cached_tasks cut_mode:#all angle_threshold:5.0 match_tolerance:0.001 =
+    (
+        local result = if cached_tasks == undefined then #() else copy cached_tasks
+        if node == undefined or not(isValidNode node) then return result
+        if classOf node.baseObject != Editable_Poly then return result
+
+        local surface_data = getSliceForceSurfaceData node
+        if surface_data == undefined then return result
+
+        local world_points = surface_data[1]
+        local junction_data = getSliceForceTJunctionData node angle_threshold:angle_threshold
+        local added_count = 0
+
+        for junction in junction_data do
+        (
+            local vertex_index = junction[1]
+            local world_anchor = junction[2]
+            local wall_normal = junction[3]
+            local incident_edge_ids = junction[4]
+            local source_edges = #{}
+            local source_vertices = #{vertex_index}
+
+            for edge_index in incident_edge_ids do source_edges[edge_index] = true
+
+            if cut_mode == #all or cut_mode == #vertical then
+            (
+                local vertical_edge = junction[5]
+                local vertical_line = junction[6]
+
+                if vertical_edge > 0 and vertical_line != undefined and length vertical_line > epsilon then
+                (
+                    local vertical_axis = cross vertical_line wall_normal
+
+                    if length vertical_axis > epsilon then
+                    (
+                        vertical_axis = normalize vertical_axis
+
+                        if doesSliceForcePlaneSplitPoints world_points world_anchor vertical_axis match_tolerance:match_tolerance then
+                        (
+                            local vertical_task = #(vertex_index, #vertical, vertical_edge, world_anchor, vertical_axis, copy source_edges, copy source_vertices, world_anchor.z, wall_normal, world_anchor, 0)
+
+                            if findSliceForcePlaneCacheIndex result vertical_task match_tolerance:match_tolerance == 0 then
+                            (
+                                append result vertical_task
+                                added_count += 1
+                            )
+                        )
+                    )
+                )
+            )
+
+            if cut_mode == #all or cut_mode == #horizontal then
+            (
+                local horizontal_edge = junction[7]
+                local horizontal_line = junction[8]
+
+                if horizontal_edge > 0 and horizontal_line != undefined and length horizontal_line > epsilon then
+                (
+                    local horizontal_axis = [0.0,0.0,1.0]
+
+                    if doesSliceForcePlaneSplitPoints world_points world_anchor horizontal_axis match_tolerance:match_tolerance then
+                    (
+                        local horizontal_task = #(vertex_index, #horizontal, horizontal_edge, world_anchor, horizontal_axis, copy source_edges, copy source_vertices, world_anchor.z, wall_normal, world_anchor, 0)
+
+                        if findSliceForcePlaneCacheIndex result horizontal_task match_tolerance:match_tolerance == 0 then
+                        (
+                            append result horizontal_task
+                            added_count += 1
+                        )
+                    )
+                )
+            )
+        )
+
+        if not batch_quiet then format "Wall-Fixer Slice Force T Junctions: node:% junctionVerts:% addedPlanes:% totalPlanes:%\n" node.name junction_data.count added_count result.count
+
+        result
+        -- return
+    ),
+
+
+    /*
+    Tests the true visible-edge T-junction rule used by the optional Slice Force anchor source.
+    A three-edge T passes; a three-edge corner and four-edge crossing do not.
+    */
+    function testSliceForceTJunctionRule =
+    (
+        local t_pair = getSliceForceTJunctionStraightPair #([0,0,1], [0,0,-1], [1,0,0]) angle_threshold:5.0
+        local corner_pair = getSliceForceTJunctionStraightPair #([1,0,0], [0,1,0], [0,0,1]) angle_threshold:5.0
+        local crossing_pair = getSliceForceTJunctionStraightPair #([1,0,0], [-1,0,0], [0,1,0], [0,-1,0]) angle_threshold:5.0
+
+        t_pair != undefined and t_pair[3] == 3 and corner_pair == undefined and crossing_pair == undefined
+        -- return
+    ),
+
+
+    /*
     Flattens normal Slice Walls pass tasks into one object-wide Slice Force cache.
     Duplicate physical planes are removed before any Force modifier is created.
     */
@@ -12536,8 +12797,36 @@ struct WallFixer_v
 
 
     /*
+    Switches Slice Force to 3ds Max Create mode and exits component sub-object mode.
+    Real SliceModifier creation/configuration does not require the Modify panel.
+    */
+    function setSliceForceCreateMode =
+    (
+        local switched = false
+
+        try
+        (
+            try(subObjectLevel = 0)catch()
+            max create mode
+
+            local panel_mode = undefined
+            try(panel_mode = getCommandPanelTaskMode())catch(panel_mode = undefined)
+
+            switched = (panel_mode == undefined or panel_mode == #create)
+        )
+        catch
+        (
+            switched = false
+        )
+
+        switched
+        -- return
+    ),
+
+
+    /*
     Selects the complete Editable Poly face and edge sets before the real Slice modifier stack is added.
-    Face selection gives every Slice modifier whole-object scope; Edge selection is preserved through the stack until final collapse.
+    Face and Edge selections are stored directly on the base object while Slice Force stays in Create mode.
     */
     function prepareSliceForceBaseSelections node =
     (
@@ -12553,8 +12842,7 @@ struct WallFixer_v
         polyop.setEdgeSelection node.baseObject (makeSliceForceFullSelection edge_count)
 
         select node
-        try(max modify mode)catch()
-        try(subObjectLevel = 4)catch()
+        try(setSliceForceCreateMode())catch()
         update node
 
         true
@@ -12708,6 +12996,40 @@ struct WallFixer_v
 
 
     /*
+    Collapses the completed Slice Force stack to one Editable Poly object.
+    Slice Force intentionally bakes the full stack after every unique plane has finished.
+    */
+    function collapseSliceForceObject node =
+    (
+        if node == undefined or not(isValidNode node) then return false
+
+        local completed = false
+
+        try
+        (
+            try(subObjectLevel = 0)catch()
+            select node
+            convertToPoly node
+            update node
+
+            completed = classOf node.baseObject == Editable_Poly and node.modifiers.count == 0
+
+            if completed then
+            (
+                setEditablePolyCageOff node
+            )
+        )
+        catch
+        (
+            completed = false
+        )
+
+        completed
+        -- return
+    ),
+
+
+    /*
     Clears final Editable Poly component selections without changing Slice Force success state.
     Runtime-specific selection API failures are contained here because the completed Slice stack has already been baked.
     */
@@ -12731,6 +13053,8 @@ struct WallFixer_v
             cleanup_ok = false
         )
 
+        try(setSliceForceCreateMode())catch()
+
         cleanup_ok
         -- return
     ),
@@ -12744,6 +13068,12 @@ struct WallFixer_v
     (
         if node == undefined or not(isValidNode node) then return false
         if force_tasks == undefined or force_tasks.count == 0 then return false
+
+        /*
+        Real SliceModifier stacks are built from Create mode.
+        Keep Force independent from any previously active Modify-panel or component state.
+        */
+        try(setSliceForceCreateMode())catch()
 
         local force_modifiers = createSliceForceModifierStack node force_tasks
         if force_modifiers.count != force_tasks.count then
@@ -12783,9 +13113,11 @@ struct WallFixer_v
 
         /*
         Slice Force is already complete once the real Slice stack has collapsed successfully.
-        Final component-selection cleanup is best effort and must never turn a successful geometry result into a failed object.
+        Return Max to Create mode before optional final selection cleanup.
         */
+        try(setSliceForceCreateMode())catch()
         try(clearSliceForceFinalSelections node)catch()
+        try(setSliceForceCreateMode())catch()
 
         true
         -- return
@@ -12801,6 +13133,21 @@ struct WallFixer_v
         local collapse_completed = true
         local cleanup_completed = false
         collapse_completed and not cleanup_completed
+        -- return
+    ),
+
+
+    /*
+    Tests that Slice Force can explicitly switch 3ds Max to Create mode.
+    Leaves the command panel in Create mode, matching the Force execution policy.
+    */
+    function testSliceForceCreateModePolicy =
+    (
+        local switched = setSliceForceCreateMode()
+        local panel_mode = undefined
+        try(panel_mode = getCommandPanelTaskMode())catch(panel_mode = undefined)
+
+        switched and (panel_mode == undefined or panel_mode == #create)
         -- return
     ),
 
@@ -12962,40 +13309,6 @@ struct WallFixer_v
     (
         local direction_name = if slice_kind == #vertical then "VERTICAL" else if slice_kind == #horizontal then "HORIZONTAL" else "ALL"
         "SLICE FORCE " + direction_name + " " + (plane_index as string)
-        -- return
-    ),
-
-
-    /*
-    Collapses the completed Slice Force stack to one Editable Poly object.
-    Slice Force intentionally bakes the full stack after every unique plane has finished.
-    */
-    function collapseSliceForceObject node =
-    (
-        if node == undefined or not(isValidNode node) then return false
-
-        local completed = false
-
-        try
-        (
-            try(subObjectLevel = 0)catch()
-            select node
-            convertToPoly node
-            update node
-
-            completed = classOf node.baseObject == Editable_Poly and node.modifiers.count == 0
-
-            if completed then
-            (
-                setEditablePolyCageOff node
-            )
-        )
-        catch
-        (
-            completed = false
-        )
-
-        completed
         -- return
     ),
 
@@ -13984,7 +14297,7 @@ struct WallFixer_v
     Runs optimized Slice Force as an analyze-once, prebuilt-modifier-stack workflow.
     Incoming modifiers are baked first; proven planar Slice Walls analysis has priority, with Force-only non-planar analysis used only as fallback.
     */
-    function debugSliceSelectedWallsForceInternal cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 progress_callback:undefined =
+    function debugSliceSelectedWallsForceInternal cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 include_t_junctions:false progress_callback:undefined =
     (
         local all_selected_nodes = selection as array
         local selected_nodes = getBatchSliceProcessNodes all_selected_nodes
@@ -14067,6 +14380,16 @@ struct WallFixer_v
                             cut_mode:cut_mode \
                             angle_threshold:angle_threshold \
                             planar_tolerance:planar_tolerance \
+                            match_tolerance:0.001
+                    )
+
+                    if include_t_junctions then
+                    (
+                        force_tasks = mergeSliceForceTJunctionTasks \
+                            node \
+                            force_tasks \
+                            cut_mode:cut_mode \
+                            angle_threshold:angle_threshold \
                             match_tolerance:0.001
                     )
 
@@ -14184,16 +14507,18 @@ struct WallFixer_v
         last_slice_failed_nodes = failed_nodes
         last_slice_report = report
 
-        try(subObjectLevel = 0)catch()
+        try(setSliceForceCreateMode())catch()
 
         if failed_nodes.count > 0 then
         (
             select failed_nodes
+            try(completeRedraw())catch(try(redrawViews())catch())
             false
         )
         else
         (
             if successful_nodes.count > 0 then select successful_nodes
+            try(completeRedraw())catch(try(redrawViews())catch())
             true
         )
         -- return
@@ -14257,7 +14582,7 @@ struct WallFixer_v
     Runs optimized Slice Force.
     Anchor analysis happens once on the baked Editable Poly; all unique-plane modifiers are created before any slice is committed.
     */
-    function debugSliceSelectedWallsForce cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 cleanup_edges:true display_hidden_edges:undefined double_side:undefined progress_callback:undefined quiet:false =
+    function debugSliceSelectedWallsForce cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 cleanup_edges:true display_hidden_edges:undefined double_side:undefined include_t_junctions:false progress_callback:undefined quiet:false =
     (
         local previous_batch_quiet = batch_quiet
         local completed = false
@@ -14268,7 +14593,13 @@ struct WallFixer_v
 
         try
         (
-            completed = debugSliceSelectedWallsForceInternal                 cut_mode:cut_mode                 slice_plane_mode:slice_plane_mode                 angle_threshold:angle_threshold                 planar_tolerance:planar_tolerance                 progress_callback:progress_callback
+            completed = debugSliceSelectedWallsForceInternal \
+                cut_mode:cut_mode \
+                slice_plane_mode:slice_plane_mode \
+                angle_threshold:angle_threshold \
+                planar_tolerance:planar_tolerance \
+                include_t_junctions:include_t_junctions \
+                progress_callback:progress_callback
         )
         catch
         (
@@ -24524,7 +24855,7 @@ createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #
 
 
 /*
-Wall-Fixer UI 0.973
+Wall-Fixer UI 0.977
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -24534,8 +24865,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.973"
-global wall_fixer_ui_tool_version = 1.0329
+global wall_fixer_ui_file_version = "0.977"
+global wall_fixer_ui_tool_version = 1.0449
 
 
 /*
@@ -25293,6 +25624,7 @@ saved_quiet_batch = WallFixer.readIniBool "QuietBatch" false
 saved_dialog_position = WallFixer.loadDialogPosition()
 saved_quiet_batch = wallFixerReadIniBool "Controls" "SliceQuiet" saved_quiet_batch
 saved_slice_no_edge_cleanup = wallFixerReadIniBool "Controls" "SliceNoEdgeCleanup" false
+saved_slice_force_t_junctions = wallFixerReadIniBool "Controls" "SliceForceTJunctionVerts" false
 saved_dialog_position = wallFixerLoadDialogPosition saved_dialog_position
 saved_dialog_size = wallFixerLoadDialogSize wall_fixer_default_dialog_size
 saved_options_rolled_up = wallFixerReadIniBool "Rollouts" "Options" false
@@ -26165,7 +26497,6 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
     local slice_force_action_running = false
 
 
-    dotNetControl slice_event_label "System.Windows.Forms.Label" pos:[8,4] width:176 height:34
 
 
     checkbox quiet_checkbox "Quiet" pos:[236,5] width:62 height:18 checked:saved_quiet_batch \
@@ -26174,6 +26505,10 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
 
     checkbox no_edge_cleanup_checkbox "No edge cleanup" pos:[188,23] width:118 height:18 checked:saved_slice_no_edge_cleanup \
         tooltip:"Keep slice-created edges after cuts. Slice Precision still runs, but Clean Up Sliced Edges is skipped."
+
+
+    checkbox slice_force_t_junction_checkbox "T junction verts" pos:[8,23] width:160 height:18 checked:saved_slice_force_t_junctions \
+        tooltip:"Include true three-edge T-junction vertices as additional Slice Force planes."
 
 
     dotNetControl slice_selected_walls_button "System.Windows.Forms.Button" pos:[4,42] width:128 height:38
@@ -26202,18 +26537,6 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
         )
 
 
-        label_color_class = dotNetClass "System.Drawing.Color"
-        label_font_style_class = dotNetClass "System.Drawing.FontStyle"
-
-        slice_event_label.Text = "LMB: SLICE VERTICAL\r\nRMB: SLICE HORIZONTAL"
-        slice_event_label.Font = dotNetObject \
-            "System.Drawing.Font" \
-            "Segoe UI" \
-            9.0 \
-            label_font_style_class.Bold
-        slice_event_label.ForeColor = label_color_class.FromArgb 220 220 220
-        slice_event_label.BackColor = label_color_class.FromArgb 68 68 68
-        slice_event_label.TextAlign = (dotNetClass "System.Drawing.ContentAlignment").MiddleLeft
 
 
         wallFixerSetupNumberedDarkButton \
@@ -26229,7 +26552,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
             slice_force_button \
             "SLICE FORCE" \
             numbered_button_tooltip \
-            "LMB: FORCE SLICE VERTICAL.\n\nRMB: FORCE SLICE HORIZONTAL.\n\nCreates one temporary slice modifier per unique plane, then collapses the object after all planes finish."
+            "LMB: FORCE SLICE VERTICAL.\n\nRMB: FORCE SLICE HORIZONTAL.\n\nUses one real Slice modifier per unique plane, then collapses once. Enable T junction verts to include true three-edge T-junction anchors."
 
         slice_force_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
     )
@@ -26242,6 +26565,12 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
 
 
     on no_edge_cleanup_checkbox changed control_state do
+    (
+        ::WallFixerRollout.saveUiSettings()
+    )
+
+
+    on slice_force_t_junction_checkbox changed control_state do
     (
         ::WallFixerRollout.saveUiSettings()
     )
@@ -27978,15 +28307,15 @@ function finalizeUnresolvedWallFaces object_data_array =
 
 
 /* Creates the classifier Multi/Sub-Object material with legacy Standard sub-materials.
-   ID 1 = OUTER green, ID 2 = INNER orange, ID 3 = UP pastel blue, ID 4 = DOWN pastel brown.
+   ID 1 = OUTER green, ID 2 = INNER pastel orange, ID 3 = UP pastel blue, ID 4 = DOWN pastel violet.
 */
 function createWallClassifierMaterial =
 (
     local classifier_material = multimaterial numsubs:4 name:"WALL FACE CLASSIFIER"
-    local outer_material = standardMaterial name:"OUTER" diffuse:(color 60 200 80)
-    local inner_material = standardMaterial name:"INNER" diffuse:(color 255 140 0)
-    local up_material = standardMaterial name:"UP" diffuse:(color 155 205 235)
-    local down_material = standardMaterial name:"DOWN" diffuse:(color 190 155 120)
+    local outer_material = standardMaterial name:"OUTER" diffuse:(color 152 221 161)
+    local inner_material = standardMaterial name:"INNER" diffuse:(color 221 189 152)
+    local up_material = standardMaterial name:"UP" diffuse:(color 152 198 221)
+    local down_material = standardMaterial name:"DOWN" diffuse:(color 186 152 221)
 
 
     classifier_material.materialList[1] = outer_material
@@ -32269,7 +32598,7 @@ function testForcedOuterPriority =
 */
 function testWallFaceClassifierColorLegend =
 (
-    format "Green = OUTER | Orange = INNER | Pastel Blue = UP | Pastel Brown = DOWN\n"
+    format "Green = OUTER | Pastel Orange = INNER | Pastel Blue = UP | Pastel Violet = DOWN\n"
     true -- return
 )
 
@@ -32805,6 +33134,44 @@ function testSliceForceMouseRouting =
     wallFixerGetSliceActionMode "Left" == #vertical and
     wallFixerGetSliceActionMode "Right" == #horizontal and
     wallFixerGetSliceActionMode "Middle" == undefined
+    -- return
+)
+
+
+/*
+Tests the persisted Slice Force T-junction option routing key and default state.
+*/
+function testSliceForceTJunctionOptionRouting =
+(
+    local setting_key = "SliceForceTJunctionVerts"
+    local default_enabled = false
+
+    setting_key == "SliceForceTJunctionVerts" and not default_enabled
+    -- return
+)
+
+
+/*
+Tests the Slice Force T-junction checkbox layout and guards against restoring the obsolete overlapping .NET direction label.
+The checkbox stays in its existing slot while LMB/RMB guidance remains in button tooltips.
+*/
+function testSliceForceTJunctionCheckboxLayout =
+(
+    local old_label_exists = false
+    local checkbox_ok = false
+
+    try(old_label_exists = ((findItem (getPropNames WallFixerSliceWallsRollout) #slice_event_label) > 0))catch()
+    try
+    (
+        checkbox_ok = WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.pos.x == 8 and \
+            WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.pos.y == 23
+    )
+    catch
+    (
+        checkbox_ok = false
+    )
+
+    (not old_label_exists) and checkbox_ok
     -- return
 )
 
@@ -33521,16 +33888,16 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
         color_class = dotNetClass "System.Drawing.Color"
         setupDarkButton btn_classify
         btn_classify.Text = "INNER \\ OUTTER"
-        btn_classify.ForeColor = color_class.FromArgb 60 200 80
-        class_button_tooltip.SetToolTip btn_classify "LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. GROUND PIVOT forces the active origin to world Z = 0. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
+        btn_classify.ForeColor = color_class.FromArgb 152 221 161
+        class_button_tooltip.SetToolTip btn_classify "LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. GROUND PIVOT forces the active origin to world Z = 0. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Pastel Orange = INNER | Pastel Blue = TOP | Pastel Violet = BOTTOM."
 
         class_buttons = #(btn_select_outer, btn_select_inner, btn_select_up, btn_select_down)
         class_texts = #("OUTER", "INNER", "TOP", "BOTTOM")
         class_colors = #(
-            color_class.FromArgb 60 200 80,
-            color_class.FromArgb 255 140 0,
-            color_class.FromArgb 155 205 235,
-            color_class.FromArgb 190 155 120
+            color_class.FromArgb 152 221 161,
+            color_class.FromArgb 221 189 152,
+            color_class.FromArgb 152 198 221,
+            color_class.FromArgb 186 152 221
         )
         class_tooltips = #(
             "LMB: Analyze selected objects first if needed, then select OUTER.\n\nRMB: FORCE OUTER.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW.",
@@ -33934,6 +34301,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         setIniSetting wall_fixer_ui_ini_path "Controls" "SlicePrecision" (WallFixerOptionsRollout.slice_precision_spinner.value as string)
         setIniSetting wall_fixer_ui_ini_path "Controls" "SliceQuiet" (if WallFixerSliceWallsRollout.quiet_checkbox.checked then "1" else "0")
         setIniSetting wall_fixer_ui_ini_path "Controls" "SliceNoEdgeCleanup" (if WallFixerSliceWallsRollout.no_edge_cleanup_checkbox.checked then "1" else "0")
+        setIniSetting wall_fixer_ui_ini_path "Controls" "SliceForceTJunctionVerts" (if WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.checked then "1" else "0")
         setIniSetting wall_fixer_ui_ini_path "Rollouts" "Options" (if WallFixerOptionsRollout.open then "0" else "1")
         setIniSetting wall_fixer_ui_ini_path "Rollouts" "PreProcess" (if WallFixerPreProcessRollout.open then "0" else "1")
         if wallFaceClassifierRollout != undefined then setIniSetting wall_fixer_ui_ini_path "Rollouts" "GetOuterWalls" (if wallFaceClassifierRollout.open then "0" else "1")
@@ -38141,6 +38509,7 @@ result_groups
             cleanup_edges:(not WallFixerSliceWallsRollout.no_edge_cleanup_checkbox.checked) \
             display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
             double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
+            include_t_junctions:WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.checked \
             progress_callback:updateSliceProgress \
             quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
 
@@ -38219,8 +38588,15 @@ result_groups
             cleanup_edges:(not WallFixerSliceWallsRollout.no_edge_cleanup_checkbox.checked) \
             display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
             double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
+            include_t_junctions:WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.checked \
             progress_callback:updateSliceProgress \
             quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
+
+        /*
+        Paint the final collapsed geometry before exposing the completion state.
+        The viewport result is the last processing stage; SUCCESS/FAILED is shown only afterward.
+        */
+        try(completeRedraw())catch(try(redrawViews())catch())
 
         setProgress 100
 
@@ -38261,7 +38637,14 @@ result_groups
                 failure_message += "\n\n" + WallFixer.last_slice_report
             )
 
-            messageBox failure_message title:"Wall-Fixer - Slice Force"
+            /*
+            A modal failure report is useful only when Core has a real failed object.
+            Generic/no-op stops remain in the status area and do not cover the finished viewport.
+            */
+            if failed_nodes.count > 0 then
+            (
+                messageBox failure_message title:"Wall-Fixer - Slice Force"
+            )
         )
 
         completed

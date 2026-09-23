@@ -16,6 +16,12 @@ UI: DEBUG rollout: arrange buttons two per row with consistent widths and spacin
 
 HELPERS > Quadrify > LMB: run Ribbon Tools "Quadrify All".
 
+HELPERS > Quadrify > RMB: run Ribbon Tools "Triangulate All".
+
+UI: HELPERS > Material: change the button label to "Multi ID"; keep the existing LMB/RMB behavior unchanged.
+
+INIT: do not automatically open the Straight-Edge-Fixer dialog when Wall-Fixer initializes.
+
 ## DONE TODAY
 
 1.0119 EDGE FIXER > BORDER CHECK > RMB: selects all open borders on supported geometry and enters Border sub-object level; LMB validation remains unchanged.

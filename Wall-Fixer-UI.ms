@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer UI 0.973
+Wall-Fixer UI 0.977
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.973"
-global wall_fixer_ui_tool_version = 1.0329
+global wall_fixer_ui_file_version = "0.977"
+global wall_fixer_ui_tool_version = 1.0449
 
 
 /*
@@ -768,6 +768,7 @@ saved_quiet_batch = WallFixer.readIniBool "QuietBatch" false
 saved_dialog_position = WallFixer.loadDialogPosition()
 saved_quiet_batch = wallFixerReadIniBool "Controls" "SliceQuiet" saved_quiet_batch
 saved_slice_no_edge_cleanup = wallFixerReadIniBool "Controls" "SliceNoEdgeCleanup" false
+saved_slice_force_t_junctions = wallFixerReadIniBool "Controls" "SliceForceTJunctionVerts" false
 saved_dialog_position = wallFixerLoadDialogPosition saved_dialog_position
 saved_dialog_size = wallFixerLoadDialogSize wall_fixer_default_dialog_size
 saved_options_rolled_up = wallFixerReadIniBool "Rollouts" "Options" false
@@ -1640,7 +1641,6 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
     local slice_force_action_running = false
 
 
-    dotNetControl slice_event_label "System.Windows.Forms.Label" pos:[8,4] width:176 height:34
 
 
     checkbox quiet_checkbox "Quiet" pos:[236,5] width:62 height:18 checked:saved_quiet_batch \
@@ -1649,6 +1649,10 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
 
     checkbox no_edge_cleanup_checkbox "No edge cleanup" pos:[188,23] width:118 height:18 checked:saved_slice_no_edge_cleanup \
         tooltip:"Keep slice-created edges after cuts. Slice Precision still runs, but Clean Up Sliced Edges is skipped."
+
+
+    checkbox slice_force_t_junction_checkbox "T junction verts" pos:[8,23] width:160 height:18 checked:saved_slice_force_t_junctions \
+        tooltip:"Include true three-edge T-junction vertices as additional Slice Force planes."
 
 
     dotNetControl slice_selected_walls_button "System.Windows.Forms.Button" pos:[4,42] width:128 height:38
@@ -1677,18 +1681,6 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
         )
 
 
-        label_color_class = dotNetClass "System.Drawing.Color"
-        label_font_style_class = dotNetClass "System.Drawing.FontStyle"
-
-        slice_event_label.Text = "LMB: SLICE VERTICAL\r\nRMB: SLICE HORIZONTAL"
-        slice_event_label.Font = dotNetObject \
-            "System.Drawing.Font" \
-            "Segoe UI" \
-            9.0 \
-            label_font_style_class.Bold
-        slice_event_label.ForeColor = label_color_class.FromArgb 220 220 220
-        slice_event_label.BackColor = label_color_class.FromArgb 68 68 68
-        slice_event_label.TextAlign = (dotNetClass "System.Drawing.ContentAlignment").MiddleLeft
 
 
         wallFixerSetupNumberedDarkButton \
@@ -1704,7 +1696,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
             slice_force_button \
             "SLICE FORCE" \
             numbered_button_tooltip \
-            "LMB: FORCE SLICE VERTICAL.\n\nRMB: FORCE SLICE HORIZONTAL.\n\nCreates one temporary slice modifier per unique plane, then collapses the object after all planes finish."
+            "LMB: FORCE SLICE VERTICAL.\n\nRMB: FORCE SLICE HORIZONTAL.\n\nUses one real Slice modifier per unique plane, then collapses once. Enable T junction verts to include true three-edge T-junction anchors."
 
         slice_force_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
     )
@@ -1717,6 +1709,12 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
 
 
     on no_edge_cleanup_checkbox changed control_state do
+    (
+        ::WallFixerRollout.saveUiSettings()
+    )
+
+
+    on slice_force_t_junction_checkbox changed control_state do
     (
         ::WallFixerRollout.saveUiSettings()
     )
@@ -3453,15 +3451,15 @@ function finalizeUnresolvedWallFaces object_data_array =
 
 
 /* Creates the classifier Multi/Sub-Object material with legacy Standard sub-materials.
-   ID 1 = OUTER green, ID 2 = INNER orange, ID 3 = UP pastel blue, ID 4 = DOWN pastel brown.
+   ID 1 = OUTER green, ID 2 = INNER pastel orange, ID 3 = UP pastel blue, ID 4 = DOWN pastel violet.
 */
 function createWallClassifierMaterial =
 (
     local classifier_material = multimaterial numsubs:4 name:"WALL FACE CLASSIFIER"
-    local outer_material = standardMaterial name:"OUTER" diffuse:(color 60 200 80)
-    local inner_material = standardMaterial name:"INNER" diffuse:(color 255 140 0)
-    local up_material = standardMaterial name:"UP" diffuse:(color 155 205 235)
-    local down_material = standardMaterial name:"DOWN" diffuse:(color 190 155 120)
+    local outer_material = standardMaterial name:"OUTER" diffuse:(color 152 221 161)
+    local inner_material = standardMaterial name:"INNER" diffuse:(color 221 189 152)
+    local up_material = standardMaterial name:"UP" diffuse:(color 152 198 221)
+    local down_material = standardMaterial name:"DOWN" diffuse:(color 186 152 221)
 
 
     classifier_material.materialList[1] = outer_material
@@ -7744,7 +7742,7 @@ function testForcedOuterPriority =
 */
 function testWallFaceClassifierColorLegend =
 (
-    format "Green = OUTER | Orange = INNER | Pastel Blue = UP | Pastel Brown = DOWN\n"
+    format "Green = OUTER | Pastel Orange = INNER | Pastel Blue = UP | Pastel Violet = DOWN\n"
     true -- return
 )
 
@@ -8280,6 +8278,44 @@ function testSliceForceMouseRouting =
     wallFixerGetSliceActionMode "Left" == #vertical and
     wallFixerGetSliceActionMode "Right" == #horizontal and
     wallFixerGetSliceActionMode "Middle" == undefined
+    -- return
+)
+
+
+/*
+Tests the persisted Slice Force T-junction option routing key and default state.
+*/
+function testSliceForceTJunctionOptionRouting =
+(
+    local setting_key = "SliceForceTJunctionVerts"
+    local default_enabled = false
+
+    setting_key == "SliceForceTJunctionVerts" and not default_enabled
+    -- return
+)
+
+
+/*
+Tests the Slice Force T-junction checkbox layout and guards against restoring the obsolete overlapping .NET direction label.
+The checkbox stays in its existing slot while LMB/RMB guidance remains in button tooltips.
+*/
+function testSliceForceTJunctionCheckboxLayout =
+(
+    local old_label_exists = false
+    local checkbox_ok = false
+
+    try(old_label_exists = ((findItem (getPropNames WallFixerSliceWallsRollout) #slice_event_label) > 0))catch()
+    try
+    (
+        checkbox_ok = WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.pos.x == 8 and \
+            WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.pos.y == 23
+    )
+    catch
+    (
+        checkbox_ok = false
+    )
+
+    (not old_label_exists) and checkbox_ok
     -- return
 )
 
@@ -8996,16 +9032,16 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
         color_class = dotNetClass "System.Drawing.Color"
         setupDarkButton btn_classify
         btn_classify.Text = "INNER \\ OUTTER"
-        btn_classify.ForeColor = color_class.FromArgb 60 200 80
-        class_button_tooltip.SetToolTip btn_classify "LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. GROUND PIVOT forces the active origin to world Z = 0. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Orange = INNER | Pastel Blue = TOP | Pastel Brown = BOTTOM."
+        btn_classify.ForeColor = color_class.FromArgb 152 221 161
+        class_button_tooltip.SetToolTip btn_classify "LMB: Classify selected objects from the selection center. If Use Edit Pivot is enabled in OPTIONS, use the manually positioned Working Pivot instead. GROUND PIVOT forces the active origin to world Z = 0. FORCED hints run first; OUTER has priority.\n\nGreen = OUTER | Pastel Orange = INNER | Pastel Blue = TOP | Pastel Violet = BOTTOM."
 
         class_buttons = #(btn_select_outer, btn_select_inner, btn_select_up, btn_select_down)
         class_texts = #("OUTER", "INNER", "TOP", "BOTTOM")
         class_colors = #(
-            color_class.FromArgb 60 200 80,
-            color_class.FromArgb 255 140 0,
-            color_class.FromArgb 155 205 235,
-            color_class.FromArgb 190 155 120
+            color_class.FromArgb 152 221 161,
+            color_class.FromArgb 221 189 152,
+            color_class.FromArgb 152 198 221,
+            color_class.FromArgb 186 152 221
         )
         class_tooltips = #(
             "LMB: Analyze selected objects first if needed, then select OUTER.\n\nRMB: FORCE OUTER.\n\nCTRL+RMB: FORCE OUTER, then AUTO GROW.",
@@ -9409,6 +9445,7 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
         setIniSetting wall_fixer_ui_ini_path "Controls" "SlicePrecision" (WallFixerOptionsRollout.slice_precision_spinner.value as string)
         setIniSetting wall_fixer_ui_ini_path "Controls" "SliceQuiet" (if WallFixerSliceWallsRollout.quiet_checkbox.checked then "1" else "0")
         setIniSetting wall_fixer_ui_ini_path "Controls" "SliceNoEdgeCleanup" (if WallFixerSliceWallsRollout.no_edge_cleanup_checkbox.checked then "1" else "0")
+        setIniSetting wall_fixer_ui_ini_path "Controls" "SliceForceTJunctionVerts" (if WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.checked then "1" else "0")
         setIniSetting wall_fixer_ui_ini_path "Rollouts" "Options" (if WallFixerOptionsRollout.open then "0" else "1")
         setIniSetting wall_fixer_ui_ini_path "Rollouts" "PreProcess" (if WallFixerPreProcessRollout.open then "0" else "1")
         if wallFaceClassifierRollout != undefined then setIniSetting wall_fixer_ui_ini_path "Rollouts" "GetOuterWalls" (if wallFaceClassifierRollout.open then "0" else "1")
@@ -13616,6 +13653,7 @@ result_groups
             cleanup_edges:(not WallFixerSliceWallsRollout.no_edge_cleanup_checkbox.checked) \
             display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
             double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
+            include_t_junctions:WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.checked \
             progress_callback:updateSliceProgress \
             quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
 
@@ -13694,8 +13732,15 @@ result_groups
             cleanup_edges:(not WallFixerSliceWallsRollout.no_edge_cleanup_checkbox.checked) \
             display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
             double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
+            include_t_junctions:WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.checked \
             progress_callback:updateSliceProgress \
             quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
+
+        /*
+        Paint the final collapsed geometry before exposing the completion state.
+        The viewport result is the last processing stage; SUCCESS/FAILED is shown only afterward.
+        */
+        try(completeRedraw())catch(try(redrawViews())catch())
 
         setProgress 100
 
@@ -13736,7 +13781,14 @@ result_groups
                 failure_message += "\n\n" + WallFixer.last_slice_report
             )
 
-            messageBox failure_message title:"Wall-Fixer - Slice Force"
+            /*
+            A modal failure report is useful only when Core has a real failed object.
+            Generic/no-op stops remain in the status area and do not cover the finished viewport.
+            */
+            if failed_nodes.count > 0 then
+            (
+                messageBox failure_message title:"Wall-Fixer - Slice Force"
+            )
         )
 
         completed
