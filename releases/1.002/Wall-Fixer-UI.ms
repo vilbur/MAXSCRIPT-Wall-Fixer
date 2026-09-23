@@ -1,4 +1,4 @@
-/*
+﻿/*
 Wall-Fixer UI 0.948
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
@@ -10,7 +10,7 @@ global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
 global wall_fixer_ui_file_version = "0.948"
-global wall_fixer_ui_tool_version = 0.9993
+global wall_fixer_ui_tool_version = 1.002
 
 
 /*

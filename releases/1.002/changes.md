@@ -1,10 +1,10 @@
-﻿2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: removed the slash separator from the EDGE FIXER direction button captions; they now read `VERTICAL SKEWED` and `HORIZONTAL SLOPED`. Mouse routing and direction-selection behavior are unchanged; project version 0.9993.
+﻿2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: removed the slash separator from the EDGE FIXER direction button captions; they now read `VERTICAL SKEWED` and `HORIZONTAL SLOPED`. Mouse routing and direction-selection behavior are unchanged; project version 1.002.
 
-2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: removed the slash separator from the EDGE FIXER direction button captions; they now read `VERTICAL SKEWED` and `HORIZONTAL SLOPED`. Mouse routing and direction-selection behavior are unchanged; project version 0.9993.
+2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: removed the slash separator from the EDGE FIXER direction button captions; they now read `VERTICAL SKEWED` and `HORIZONTAL SLOPED`. Mouse routing and direction-selection behavior are unchanged; project version 1.002.
 
-2026-09-23 — `Straight-Edge-Fixer.ms`, `Wall-Fixer.ms`: EDGE FIXER direction detection now uses the stable world-space `acos` axis-deviation classifier for exact and Angle checks; added direct `#horizontal`, `#vertical`, `#skewed`, and `#sloped` selection tests; Straight Edge Fixer 0.43, bundled loader 0.984, project version 0.9992.
+2026-09-23 — `Straight-Edge-Fixer.ms`, `Wall-Fixer.ms`: EDGE FIXER direction detection now uses the stable world-space `acos` axis-deviation classifier for exact and Angle checks; added direct `#horizontal`, `#vertical`, `#skewed`, and `#sloped` selection tests; Straight Edge Fixer 0.43, bundled loader 0.984, project version 1.001.
 
-2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: widened GET OUTER WALLS `INNER \\ OUTTER` to 126 px so the title stays on one line, rebalanced adjacent `EXPLODE` and `LAYER` buttons to 84 px each, and corrected `testWallFaceOptionsLayout` to the current three-button row; project version 0.9991.
+2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: widened GET OUTER WALLS `INNER \\ OUTTER` to 126 px so the title stays on one line, rebalanced adjacent `EXPLODE` and `LAYER` buttons to 84 px each, and corrected `testWallFaceOptionsLayout` to the current three-button row; project version 1.000.
 
 2026-09-23 — `Wall-Fixer-UI.ms`, `Wall-Fixer.ms`: added HELPERS > Select Degenerated Objects; LMB scans visible geometry non-destructively and selects objects whose evaluated vertices collapse to one non-zero line and whose evaluated vertex normals all share one direction. Added pure rule regression coverage; project version 0.999.
 

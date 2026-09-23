@@ -1,4 +1,4 @@
-/*
+﻿/*
 Straight Edge Fixer 0.43
 Detects repeated horizontal edge rows and aligns nearby horizontal edges to them.
 */
@@ -8,7 +8,7 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global straight_edge_fixer_file_version = "0.43"
-global straight_edge_fixer_tool_version = 0.9992
+global straight_edge_fixer_tool_version = 1.001
 
 /*
 Registers this file's shared Wall-Fixer tool version.

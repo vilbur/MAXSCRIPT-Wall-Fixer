@@ -1,6 +1,6 @@
-/*
+﻿/*
 Wall-Fixer Bundled Loader 0.985
-Project version 0.9993.
+Project version 1.002.
 
 
 
@@ -17,7 +17,7 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_loader_file_version = "0.985"
-global wall_fixer_loader_tool_version = 0.9993
+global wall_fixer_loader_tool_version = 1.002
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -15360,7 +15360,7 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global straight_edge_fixer_file_version = "0.43"
-global straight_edge_fixer_tool_version = 0.9992
+global straight_edge_fixer_tool_version = 1.001
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -19699,7 +19699,7 @@ global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
 global wall_fixer_ui_file_version = "0.948"
-global wall_fixer_ui_tool_version = 0.9993
+global wall_fixer_ui_tool_version = 1.002
 
 
 /*
