@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer UI 0.937
+Wall-Fixer UI 0.932
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.937"
-global wall_fixer_ui_tool_version = 0.986
+global wall_fixer_ui_file_version = "0.932"
+global wall_fixer_ui_tool_version = 0.980
 
 
 /*
@@ -1641,7 +1641,6 @@ Advanced slicer values continue to come from the existing Wall-Fixer INI setting
 rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
 (
     local numbered_button_tooltip
-    local slice_action_running = false
 
 
     dotNetControl slice_event_label "System.Windows.Forms.Label" pos:[8,4] width:176 height:34
@@ -1655,19 +1654,15 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
         tooltip:"Keep slice-created edges after cuts. Slice Precision still runs, but Clean Up Sliced Edges is skipped."
 
 
-    dotNetControl slice_selected_walls_button "System.Windows.Forms.Button" pos:[4,42] width:128 height:38
+    dotNetControl slice_selected_walls_button "System.Windows.Forms.Button" pos:[4,42] width:150 height:38
 
 
-    button slice_modifier_button "H \\ V" pos:[136,42] width:54 height:38 \
+    button slice_modifier_button "H \\ V" pos:[158,42] width:72 height:38 \
         tooltip:"LMB: Activate SLICE HORIZONTAL.\n\nRMB: Activate SLICE VERTICAL.\n\nCTRL+LMB: Activate SLICE HORIZONTAL and enter Edge level 2.\n\nCTRL+RMB: Activate SLICE VERTICAL and enter Edge level 2."
 
 
-    button select_slice_state_button "Select" pos:[194,42] width:54 height:38 \
-        tooltip:"LMB: Filter only SLICED objects. If nothing is selected, use all visible geometry.\n\nRMB: Filter only UNSLICED objects. If nothing is selected, use all visible geometry."
-
-
-    button delete_slice_modifier_button "Delete" pos:[252,42] width:54 height:38 \
-        tooltip:"LMB: Delete all SLICE VERTICAL modifiers from selected objects.\n\nRMB: Delete all SLICE HORIZONTAL modifiers from selected objects."
+    button select_slice_state_button "Select" pos:[234,42] width:72 height:38 \
+        tooltip:"LMB: Filter only SLICED objects. If nothing is selected, use all visible geometry.\n\nCTRL+LMB: Select only true 90° open-border corner vertices on the current Edit Poly modifier.\n\nRMB: Filter only UNSLICED objects. If nothing is selected, use all visible geometry."
 
 
     on WallFixerSliceWallsRollout open do
@@ -1681,7 +1676,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
         label_color_class = dotNetClass "System.Drawing.Color"
         label_font_style_class = dotNetClass "System.Drawing.FontStyle"
 
-        slice_event_label.Text = "LMB: SLICE VERTICAL\r\nRMB: SLICE HORIZONTAL"
+        slice_event_label.Text = "LMB: SLICE HORIZONTAL\r\nRMB: SLICE VERTICAL"
         slice_event_label.Font = dotNetObject \
             "System.Drawing.Font" \
             "Segoe UI" \
@@ -1696,7 +1691,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
             slice_selected_walls_button \
             "9. SLICE WALLS" \
             numbered_button_tooltip \
-            "LMB: SLICE VERTICAL\n\nRMB: SLICE HORIZONTAL"
+            "LMB: SLICE HORIZONTAL\n\nRMB: SLICE VERTICAL"
 
         slice_selected_walls_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
     )
@@ -1714,26 +1709,16 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
     )
 
 
-    on slice_selected_walls_button MouseDown sender event_args do
+    on slice_selected_walls_button MouseUp sender event_args do
     (
-        local mouse_button = wallFixerGetDotNetMouseButton event_args
-        local slice_mode = wallFixerGetSliceActionMode mouse_button
+        mouse_button = wallFixerGetDotNetMouseButton event_args
 
-        if slice_mode != undefined and not slice_action_running then
+
+        slice_mode = wallFixerGetSliceActionMode mouse_button
+
+        if slice_mode != undefined then
         (
-            slice_action_running = true
-
-            try
-            (
-                ::WallFixerRollout.runSliceSelectedWalls slice_mode
-            )
-            catch
-            (
-                ::WallFixerRollout.setProgress 100
-                ::WallFixerRollout.setStatus #error ("Slice Walls " + (slice_mode as string) + " failed.")
-            )
-
-            slice_action_running = false
+            ::WallFixerRollout.runSliceSelectedWalls slice_mode
         )
     )
 
@@ -1752,25 +1737,20 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:88
 
     on select_slice_state_button pressed do
     (
-        ::WallFixerRollout.selectSliceWallObjects sliced_state:true
+        if keyboard.controlPressed then
+        (
+            ::WallFixerRollout.selectCurrentSlice90BorderCorners()
+        )
+        else
+        (
+            ::WallFixerRollout.selectSliceWallObjects sliced_state:true
+        )
     )
 
 
     on select_slice_state_button rightclick do
     (
         ::WallFixerRollout.selectSliceWallObjects sliced_state:false
-    )
-
-
-    on delete_slice_modifier_button pressed do
-    (
-        ::WallFixerRollout.deleteSliceWallModifiers "SLICE VERTICAL"
-    )
-
-
-    on delete_slice_modifier_button rightclick do
-    (
-        ::WallFixerRollout.deleteSliceWallModifiers "SLICE HORIZONTAL"
     )
 )
 
@@ -1816,7 +1796,7 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:308
         )
 
 
-        wallFixerSetupNumberedDarkButton two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" numbered_button_tooltip "LMB: select every vertex with exactly two visible topology edges.\n\nRMB: run the native Vertex Remove command on the current selection."
+        wallFixerSetupNumberedDarkButton two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" numbered_button_tooltip "LMB: select vertices with exactly two visible edges forming a straight continuation; corners are excluded.\n\nRMB: run the native Vertex Remove command on the current selection."
         wallFixerSetupNumberedDarkButton duplicated_vertices_button "10. DUPLICATED VERTICES" numbered_button_tooltip "LMB: select duplicate-position vertices at 0.01 tolerance.\n\nRMB: run the current duplicate-vertex fix at 0.01 tolerance."
         wallFixerSetupNumberedDarkButton redundant_loops_button "11. REMOVE REDUNDANT LOOPS" numbered_button_tooltip "LMB: Select redundant loop edges.\n\nRMB: Remove selected edges. If no edges are selected, remove all detected redundant loop edges."
         wallFixerSetupNumberedDarkButton repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" numbered_button_tooltip "Reserved for the new missing-loop completion tool." enabled_state:false
@@ -1921,11 +1901,6 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
     button align_camera_button "Align Camera" pos:[8,44] width:143 height:30 \
         tooltip:"LMB: Align the active viewport perpendicular to selected wall faces. If no faces are selected, use the dominant wall-face normal. Switch to orthographic User view and zoom to the selection."
 
-
-    button border_corners_button "90° Corners" pos:[159,44] width:143 height:30 \
-        tooltip:"LMB: Select true 90° open-border corner vertices on the current Edit Poly modifier or Editable Poly base. Straight 180° border vertices are excluded."
-
-
     button split_button "Split" pos:[8,80] width:143 height:30 \
         tooltip:"LMB: Apply Editable Poly, split all selected edges, then explode the resulting elements into separate objects."
 
@@ -1955,12 +1930,6 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:120
     on align_camera_button pressed do
     (
         ::WallFixerRollout.runAlignCameraToWallFaces()
-    )
-
-
-    on border_corners_button pressed do
-    (
-        ::WallFixerRollout.selectCurrentSlice90BorderCorners()
     )
 
 
@@ -7737,8 +7706,8 @@ function wallFixerGetSliceActionMode mouse_button =
 (
     case mouse_button of
     (
-        "Left": #vertical
-        "Right": #horizontal
+        "Left": #horizontal
+        "Right": #vertical
         default: undefined
     )
     -- return
@@ -7748,13 +7717,12 @@ function wallFixerGetSliceActionMode mouse_button =
 /*
 Tests Slice Walls Select CTRL+LMB routing intent.
 */
-function testSliceCornerHelperRouting =
+function testSliceSelectCtrlCornerMode =
 (
-    local helper_action = #select90BorderCorners
-    local slice_select_lmb_action = #filterSliced
+    local control_pressed = true
+    local expected_action = if control_pressed then #select90BorderCorners else #filterSliced
 
-    helper_action == #select90BorderCorners and
-    slice_select_lmb_action == #filterSliced
+    expected_action == #select90BorderCorners
     -- return
 )
 
@@ -7764,22 +7732,9 @@ Tests direct Slice Walls LMB/RMB direction routing.
 */
 function testSliceWallMouseRouting =
 (
-    wallFixerGetSliceActionMode "Left" == #vertical and
-    wallFixerGetSliceActionMode "Right" == #horizontal and
+    wallFixerGetSliceActionMode "Left" == #horizontal and
+    wallFixerGetSliceActionMode "Right" == #vertical and
     wallFixerGetSliceActionMode "Middle" == undefined
-    -- return
-)
-
-
-/*
-Tests Slice Walls Delete LMB/RMB modifier-name routing.
-*/
-function testSliceDeleteRouting =
-(
-    local lmb_modifier = "SLICE VERTICAL"
-    local rmb_modifier = "SLICE HORIZONTAL"
-
-    lmb_modifier == "SLICE VERTICAL" and rmb_modifier == "SLICE HORIZONTAL"
     -- return
 )
 
@@ -8162,56 +8117,6 @@ rollout wallFaceClassifierOptionsRollout "OPTIONS" width:286 height:138
 )
 
 
-/* Returns the unsuffixed base name used by GET OUTER WALLS class layers.
-   A current layer that already ends in -INNER, -OUTTER, -TOP or -BOTTOM resolves back to its sibling base name.
-*/
-function getWallFaceClassLayerBaseName layer_name =
-(
-    class_suffixes = #("INNER", "OUTTER", "TOP", "BOTTOM")
-    base_name = layer_name
-
-    for class_suffix in class_suffixes while base_name == layer_name do
-    (
-        suffix_text = "-" + class_suffix
-        suffix_start = layer_name.count - suffix_text.count + 1
-
-        if suffix_start > 1 then
-        (
-            if (substring layer_name suffix_start suffix_text.count) == suffix_text then
-            (
-                base_name = substring layer_name 1 (suffix_start - 1)
-            )
-        )
-    )
-
-    base_name -- return
-)
-
-/* Tests wall-class layer suffix normalization without modifying the scene.
-   Every recognized class layer must resolve to the same unsuffixed base name.
-*/
-function testWallFaceClassLayerBaseName =
-(
-    test_names = #("Walls", "Walls-INNER", "Walls-OUTTER", "Walls-TOP", "Walls-BOTTOM")
-    expected_name = "Walls"
-    test_passed = true
-
-    for test_name in test_names do
-    (
-        resolved_name = getWallFaceClassLayerBaseName test_name
-        format "Wall class layer base | input: % | base: %\n" test_name resolved_name
-
-        if resolved_name != expected_name then
-        (
-            test_passed = false
-        )
-    )
-
-    format "Wall class layer base test: %\n" test_passed
-    test_passed -- return
-)
-
-
 /*
 Creates the four wall-class sibling layers beside the current layer and assigns selected single-class objects.
 Existing layers are reused; newly created layers inherit the current layer parent.
@@ -8230,13 +8135,12 @@ function createWallFaceClassLayersFromCurrent =
     else
     (
         current_name = current_layer.name
-        base_name = getWallFaceClassLayerBaseName current_name
         current_parent = current_layer.getParent()
         class_suffixes = #("INNER", "OUTTER", "TOP", "BOTTOM")
 
         for class_suffix in class_suffixes do
         (
-            layer_name = base_name + "-" + class_suffix
+            layer_name = current_name + "-" + class_suffix
             target_layer = LayerManager.getLayerFromName layer_name
 
             if target_layer == undefined then
@@ -8285,7 +8189,7 @@ function createWallFaceClassLayersFromCurrent =
                     4: "BOTTOM"
                     default: ""
                 )
-                target_layer = if class_suffix == "" then undefined else LayerManager.getLayerFromName (base_name + "-" + class_suffix)
+                target_layer = if class_suffix == "" then undefined else LayerManager.getLayerFromName (current_name + "-" + class_suffix)
 
                 if target_layer != undefined then
                 (
@@ -12353,7 +12257,7 @@ result_groups
     function runFindTwoEdgeVerts =
     (
         setProgress 0
-        setStatus #message "Finding two-edge vertices..."
+        setStatus #message "Finding straight two-edge vertices..."
         completed = WallFixer.debugFindTwoEdgeVerts angle_threshold:2.0
         setProgress 100
 
@@ -12561,39 +12465,6 @@ result_groups
 
 
     /*
-    Deletes one exact directional Slice Walls modifier type from all selected objects.
-    */
-    function deleteSliceWallModifiers modifier_name =
-    (
-        setProgress 0
-        setStatus #message ("Deleting " + modifier_name + " modifiers...")
-
-        local delete_result = WallFixer.deleteSelectedDirectionalSliceModifiers modifier_name
-
-        setProgress 100
-
-        if delete_result[1] then
-        (
-            if delete_result[2] > 0 then
-            (
-                setStatus #success WallFixer.last_slice_report
-            )
-            else
-            (
-                setStatus #warning WallFixer.last_slice_report
-            )
-        )
-        else
-        (
-            setStatus #warning WallFixer.last_slice_report
-        )
-
-        delete_result[1]
-        -- return
-    )
-
-
-    /*
     Activates one named Wall-Fixer slice modifier on the first selected object.
     CTRL variants also enter Edge sub-object level 2 after activating the modifier.
     */
@@ -12686,15 +12557,15 @@ result_groups
 
 
     /*
-    CTRL+LMB Select: selects only true 90-degree open-border corners on the current Edit Poly or Editable Poly.
+    CTRL+LMB Select: selects only true 90-degree open-border corners on the current Edit Poly modifier.
     Straight 180-degree border vertices are excluded.
     */
     function selectCurrentSlice90BorderCorners =
     (
         setProgress 0
-        setStatus #message "Selecting 90° border corners on current poly source..."
+        setStatus #message "Selecting 90° border corners on current Edit Poly..."
 
-        local completed = WallFixer.selectCurrentPoly90BorderCorners             angle_threshold:saved_right_angle_threshold
+        local completed = WallFixer.selectCurrentEditPoly90BorderCorners             angle_threshold:saved_right_angle_threshold
 
         setProgress 100
 
@@ -12771,12 +12642,6 @@ result_groups
     */
     function runSliceSelectedWalls cut_mode =
     (
-        if cut_mode != #horizontal and cut_mode != #vertical then
-        (
-            setStatus #error "Slice Walls requires exactly one direction: Horizontal or Vertical."
-            return false
-        )
-
         saveUiSettings()
         setProgress 0
         setStatus #message ("Slicing selected walls: " + (cut_mode as string) + "...")

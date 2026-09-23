@@ -1,5 +1,5 @@
-/*
-Wall-Fixer Core 0.53
+﻿/*
+Wall-Fixer Core 0.49
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.53"
-global wall_fixer_core_tool_version = 0.985
+global wall_fixer_core_file_version = "0.49"
+global wall_fixer_core_tool_version = 0.980
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -483,106 +483,6 @@ struct WallFixer_v
         true
         -- return
     ),
-
-    /*
-    Returns true only when one modifier is the exact requested directional Slice Walls modifier.
-    */
-    function isDirectionalSliceModifier stack_modifier modifier_name =
-    (
-        if stack_modifier == undefined then return false
-        if classOf stack_modifier != Edit_Poly then return false
-
-        local normalized_target = toUpper (modifier_name as string)
-        if normalized_target != "SLICE VERTICAL" and normalized_target != "SLICE HORIZONTAL" then return false
-
-        (toUpper (stack_modifier.name as string)) == normalized_target
-        -- return
-    ),
-
-
-    /*
-    Deletes every exact directional Slice Walls modifier from the selected objects.
-    Other Slice Walls and user modifiers are preserved.
-    */
-    function deleteSelectedDirectionalSliceModifiers modifier_name =
-    (
-        local normalized_target = toUpper (modifier_name as string)
-        local selected_nodes = selection as array
-        local deleted_count = 0
-        local changed_objects = 0
-        last_slice_report = ""
-
-        if normalized_target != "SLICE VERTICAL" and normalized_target != "SLICE HORIZONTAL" then
-        (
-            last_slice_report = "Delete Slice: unsupported modifier type."
-            return #(false, 0, 0)
-        )
-
-        if selected_nodes.count == 0 then
-        (
-            last_slice_report = "Delete Slice: select one or more objects."
-            return #(false, 0, 0)
-        )
-
-        for node in selected_nodes do
-        (
-            if node != undefined and isValidNode node then
-            (
-                local node_deleted = 0
-                local modifier_index = node.modifiers.count
-
-                while modifier_index >= 1 do
-                (
-                    local stack_modifier = node.modifiers[modifier_index]
-
-                    if isDirectionalSliceModifier stack_modifier normalized_target then
-                    (
-                        deleteModifier node stack_modifier
-                        deleted_count += 1
-                        node_deleted += 1
-                    )
-
-                    modifier_index -= 1
-                )
-
-                if node_deleted > 0 then
-                (
-                    changed_objects += 1
-                    update node
-                )
-            )
-        )
-
-        last_slice_report = "Delete Slice: removed " + (deleted_count as string) + " " + normalized_target + " modifier(s) from " + (changed_objects as string) + " object(s)."
-        #(true, deleted_count, changed_objects)
-        -- return
-    ),
-
-
-    /*
-    Tests exact-name directional Slice Walls modifier deletion policy.
-    */
-    function testDirectionalSliceDeletePolicy =
-    (
-        local vertical_modifier = Edit_Poly()
-        local horizontal_modifier = Edit_Poly()
-        local all_modifier = Edit_Poly()
-
-        vertical_modifier.name = "SLICE VERTICAL"
-        horizontal_modifier.name = "SLICE HORIZONTAL"
-        all_modifier.name = "SLICE ALL"
-
-        local test_passed = true
-        test_passed = test_passed and isDirectionalSliceModifier vertical_modifier "SLICE VERTICAL"
-        test_passed = test_passed and not(isDirectionalSliceModifier vertical_modifier "SLICE HORIZONTAL")
-        test_passed = test_passed and isDirectionalSliceModifier horizontal_modifier "SLICE HORIZONTAL"
-        test_passed = test_passed and not(isDirectionalSliceModifier all_modifier "SLICE VERTICAL")
-        test_passed = test_passed and not(isDirectionalSliceModifier all_modifier "SLICE HORIZONTAL")
-
-        test_passed
-        -- return
-    ),
-
 
     /*
     Returns true only for Edit Poly modifiers used by the slicing workflow.
@@ -4855,42 +4755,6 @@ struct WallFixer_v
             )
             if node.modifiers.count > 0 do
                 if classOf node.modifiers[1] == Edit_Poly do modifier = node.modifiers[1]
-
-            /* WMC - FIX TWO-EDGE VERTS is a dedicated selection holder, not a slicing modifier.
-               Repair/delete stale zero-topology copies before building a slicing modifier above it. */
-            if modifier != undefined and modifier.name == "WMC - FIX TWO-EDGE VERTS" then
-            (
-                local two_edge_live_vertices = 0
-                local two_edge_modifier = modifier
-                try
-                (
-                    two_edge_modifier.SetPrimaryNode node
-                    two_edge_modifier.useStackSelection = false
-                    try (two_edge_modifier.showCage = off) catch ()
-                    update node
-                    local two_edge_evaluated_mesh = snapshotAsMesh node
-                    if two_edge_evaluated_mesh != undefined then free two_edge_evaluated_mesh
-                    two_edge_live_vertices = two_edge_modifier.GetNumVertices node:node
-                )
-                catch
-                (
-                    two_edge_live_vertices = 0
-                )
-
-                if two_edge_live_vertices <= 0 then
-                (
-                    if not batch_quiet then format "Wall-Fixer: removing invalid WMC - FIX TWO-EDGE VERTS modifier with zero live vertices from %.\n" node.name
-                    deleteModifier node two_edge_modifier
-                    update node
-                    if oldCurrent == two_edge_modifier then
-                    (
-                        if node.modifiers.count > 0 then oldCurrent = node.modifiers[1] else oldCurrent = node.baseObject
-                    )
-                )
-
-                modifier = undefined
-            )
-
             -- Isolate a shared top modifier without changing its base geometry.
             if modifier != undefined do
                 if (refs.dependentNodes modifier).count > 1 do
@@ -7974,54 +7838,6 @@ modifier.split = false
 
 
     /*
-    Tests Slice Walls CTRL+LMB source resolution for both Editable Poly and Edit Poly.
-    The temporary object is removed after the test.
-    */
-    function testSlice90CornerPolySourceSupport =
-    (
-        local test_node = undefined
-        local base_supported = false
-        local modifier_supported = false
-
-        try
-        (
-            test_node = box length:10.0 width:10.0 height:10.0
-            convertToPoly test_node
-
-            local base_data = getDoubleFaceSource test_node undefined
-            base_supported = (
-                base_data != undefined and
-                base_data[1] == #editablePoly and
-                base_data[2] == test_node.baseObject
-            )
-
-            local test_modifier = Edit_Poly()
-            addModifier test_node test_modifier
-
-            local modifier_data = getDoubleFaceSource test_node test_modifier
-            modifier_supported = (
-                modifier_data != undefined and
-                modifier_data[1] == #editPoly and
-                modifier_data[2] == test_modifier
-            )
-        )
-        catch
-        (
-            base_supported = false
-            modifier_supported = false
-        )
-
-        if test_node != undefined and isValidNode test_node then
-        (
-            delete test_node
-        )
-
-        base_supported and modifier_supported
-        -- return
-    ),
-
-
-    /*
     Tests that strict border-corner selection accepts 90 degrees but rejects straight 180 degrees.
     */
     function testExact90BorderCornerRule =
@@ -9768,99 +9584,8 @@ modifier.split = false
     ),
 
     /*
-    Initializes the dedicated two-edge-vertex Edit Poly as a live pass-through modifier.
-    Returns false when the modifier still exposes no live vertices after forced evaluation.
-    */
-    function prepareDebugTwoEdgeVertsModifier node modifier =
-    (
-        if node == undefined or not(isValidNode node) or modifier == undefined then return false
-
-        local live_vertex_count = 0
-        local evaluated_mesh = undefined
-
-        try
-        (
-            select node
-            max modify mode
-            modPanel.setCurrentObject modifier
-            modifier.SetPrimaryNode node
-            modifier.useStackSelection = false
-            try (modifier.showCage = off) catch ()
-            modifier.SetEPolySelLevel #Vertex
-            subObjectLevel = 1
-            update node
-
-            evaluated_mesh = snapshotAsMesh node
-            if evaluated_mesh != undefined then
-            (
-                free evaluated_mesh
-                evaluated_mesh = undefined
-            )
-
-            live_vertex_count = modifier.GetNumVertices node:node
-        )
-        catch
-        (
-            if evaluated_mesh != undefined then free evaluated_mesh
-            live_vertex_count = 0
-        )
-
-        live_vertex_count > 0
-        -- return
-    ),
-
-
-    /*
-    Returns the dedicated Edit Poly used by Find Two-Edge Verts.
-    Existing zero-topology copies are rebuilt instead of being left on the stack.
-    */
-    function getDebugTwoEdgeVertsModifier node create_if_missing:true =
-    (
-        if node == undefined or not(isValidNode node) then return undefined
-
-        local found_modifier = undefined
-
-        for modifier_index = 1 to node.modifiers.count while found_modifier == undefined do
-        (
-            local candidate_modifier = node.modifiers[modifier_index]
-
-            if classOf candidate_modifier == Edit_Poly and candidate_modifier.name == "WMC - FIX TWO-EDGE VERTS" then
-            (
-                found_modifier = candidate_modifier
-            )
-        )
-
-        if found_modifier != undefined then
-        (
-            if not prepareDebugTwoEdgeVertsModifier node found_modifier then
-            (
-                deleteModifier node found_modifier
-                found_modifier = undefined
-                update node
-            )
-        )
-
-        if found_modifier == undefined and create_if_missing then
-        (
-            found_modifier = Edit_Poly name:"WMC - FIX TWO-EDGE VERTS"
-            addModifier node found_modifier
-
-            if not prepareDebugTwoEdgeVertsModifier node found_modifier then
-            (
-                deleteModifier node found_modifier
-                found_modifier = undefined
-                update node
-            )
-        )
-
-        found_modifier
-        -- return
-    ),
-
-
-    /*
-    Selects every vertex with exactly two visible real topology edges.
-    No straightness or corner-angle filter is applied.
+    Selects vertices with exactly two visible topology edges that form one straight continuation.
+    Hidden edges do not count and corner vertices are excluded.
     */
     function debugFindTwoEdgeVerts angle_threshold:2.0 =
     (
@@ -9875,18 +9600,15 @@ modifier.split = false
         )
 
         local node = selected_nodes[1]
-        local modifier = getDebugTwoEdgeVertsModifier node create_if_missing:false
-        local modifier_created = modifier == undefined
+        local modifier = getDebugTopologyModifier node
+        local modifier_created = false
 
         if modifier == undefined then
         (
-            modifier = getDebugTwoEdgeVertsModifier node create_if_missing:true
-        )
-
-        if modifier == undefined then
-        (
-            last_slice_report = node.name + ": WMC - FIX TWO-EDGE VERTS could not be created."
-            return false
+            modifier = Edit_Poly name:"WMC - FIX TWO-EDGE VERTS"
+            addModifier node modifier
+            update node
+            modifier_created = true
         )
 
         local failure = undefined
@@ -9907,11 +9629,14 @@ modifier.split = false
 
             for vertex_index = 1 to live_vertex_count do
             (
-                local visible_neighbors = ::WallFixer.getDebugVisibleTopologyEdgeNeighborVertices node modifier evaluated_mesh vertex_index
+                local vertex_position = modifier.GetVertex vertex_index node:node
 
-                if visible_neighbors.count == 2 then
+                if vertex_position != undefined then
                 (
-                    candidates[vertex_index] = true
+                    if ::WallFixer.isDebugStraightTwoVisibleTopologyVertex                         node modifier evaluated_mesh vertex_index angle_threshold:angle_threshold then
+                    (
+                        candidates[vertex_index] = true
+                    )
                 )
             )
 
@@ -9933,12 +9658,12 @@ modifier.split = false
 
             if actual_selection != candidates then
             (
-                throw ("Could not select every two-visible-edge vertex. Requested:" + (candidates as string) + " actual:" + (actual_selection as string))
+                throw ("Could not select every straight two-visible-edge vertex. Requested:" +                     (candidates as string) + " actual:" + (actual_selection as string))
             )
 
             if not batch_quiet then format "Wall-Fixer Find Two-Edge Verts: node:% candidates:% count:% straightTolerance:% modifier:% created:%\n"                 node.name candidates candidates.numberSet angle_threshold modifier.name modifier_created
 
-            last_slice_report = node.name + ": Find Two-Edge Verts selected " + (candidates.numberSet as string) + " two-visible-edge vertices."
+            last_slice_report = node.name + ": Find Two-Edge Verts selected " +                 (candidates.numberSet as string) + " straight two-visible-edge vertices."
             completeRedraw()
         )
         catch
@@ -9955,7 +9680,7 @@ modifier.split = false
 
 
     /*
-    Verifies the current Vertex selection equals every vertex with exactly two visible topology edges.
+    Verifies the current Vertex selection equals every straight vertex with exactly two visible topology edges.
     Run after Find Two-Edge Verts LMB on one selected object.
     */
     function testFindTwoEdgeVertsVisibleSelection angle_threshold:2.0 =
@@ -9964,7 +9689,7 @@ modifier.split = false
         if selected_nodes.count != 1 then return false
 
         local node = selected_nodes[1]
-        local modifier = getDebugTwoEdgeVertsModifier node create_if_missing:false
+        local modifier = getDebugTopologyModifier node
         if modifier == undefined then return false
 
         local evaluated_mesh = snapshotAsMesh node
@@ -9980,8 +9705,7 @@ modifier.split = false
 
         for vertex_index = 1 to vertex_count do
         (
-            local visible_neighbors = ::WallFixer.getDebugVisibleTopologyEdgeNeighborVertices node modifier evaluated_mesh vertex_index
-            if visible_neighbors.count == 2 then
+            if ::WallFixer.isDebugStraightTwoVisibleTopologyVertex                 node modifier evaluated_mesh vertex_index angle_threshold:angle_threshold then
             (
                 expected_selection[vertex_index] = true
             )
@@ -9992,38 +9716,7 @@ modifier.split = false
         local actual_selection = modifier.GetSelection #Vertex node:node
         local test_passed = actual_selection == expected_selection
 
-        if not batch_quiet then format "Find Two-Edge Verts visible selection test | expected:% actual:% | result:%\n" expected_selection actual_selection test_passed
-
-        test_passed
-        -- return
-    ),
-
-
-    /*
-    Verifies the dedicated two-edge modifier is bound to the selected node and exposes live vertices.
-    Rebuilds a stale zero-topology copy through the normal acquisition path.
-    */
-    function testTwoEdgeVertsModifierLiveTopology =
-    (
-        local selected_nodes = selection as array
-        if selected_nodes.count != 1 then return false
-
-        local node = selected_nodes[1]
-        local modifier = getDebugTwoEdgeVertsModifier node create_if_missing:true
-        if modifier == undefined then return false
-
-        local live_vertex_count = 0
-        try
-        (
-            live_vertex_count = modifier.GetNumVertices node:node
-        )
-        catch
-        (
-            live_vertex_count = 0
-        )
-
-        local test_passed = live_vertex_count > 0
-        if not batch_quiet then format "Two-Edge Verts modifier live topology test | node:% modifier:% liveVerts:% | result:%\n" node.name modifier.name live_vertex_count test_passed
+        if not batch_quiet then format "Find Two-Edge Verts visible selection test | expected:% actual:% tolerance:% | result:%\n"             expected_selection actual_selection angle_threshold test_passed
 
         test_passed
         -- return
@@ -11530,18 +11223,18 @@ modifier.split = false
 
 
     /*
-    Selects true 90-degree open-border corners on the current poly editing source.
-    The current Edit Poly modifier wins; otherwise an Editable Poly base object is used directly.
+    Selects true 90-degree open-border corners on the current Edit Poly modifier.
+    The current modifier must belong to exactly one selected object.
     */
-    function selectCurrentPoly90BorderCorners angle_threshold:0.1 =
+    function selectCurrentEditPoly90BorderCorners angle_threshold:0.1 =
     (
         local selected_nodes = selection as array
-        local active_edit_poly = undefined
+        local current_modifier = undefined
         last_slice_report = ""
 
         if selected_nodes.count != 1 then
         (
-            last_slice_report = "Select exactly one Editable Poly object or one object with the current Edit Poly modifier."
+            last_slice_report = "Select exactly one object and activate its Edit Poly modifier."
             return false
         )
 
@@ -11554,49 +11247,43 @@ modifier.split = false
 
         try
         (
-            local current_object = modPanel.getCurrentObject()
-            if current_object != undefined and classOf current_object == Edit_Poly then
-            (
-                active_edit_poly = current_object
-            )
+            current_modifier = modPanel.getCurrentObject()
         )
         catch
         (
-            active_edit_poly = undefined
+            current_modifier = undefined
         )
 
-        local source_data = getDoubleFaceSource node active_edit_poly
-        if source_data == undefined then
+        if current_modifier == undefined or classOf current_modifier != Edit_Poly then
         (
-            last_slice_report = "CTRL+LMB Select requires an Editable Poly base object or the current Edit Poly modifier."
+            last_slice_report = "Activate an Edit Poly modifier before CTRL+LMB Select."
             return false
         )
 
-        local source_kind = source_data[1]
-        local source_ref = source_data[2]
-        local corner_verts = collectExact90BorderVerts             node             source_kind             source_ref             angle_threshold:(amax 0.0 angle_threshold)
+        local belongs_to_node = false
+        for stack_modifier in node.modifiers while not belongs_to_node do
+        (
+            if stack_modifier == current_modifier then belongs_to_node = true
+        )
 
-        if not(set90AngleVertexSelection node source_kind source_ref corner_verts) then
+        if not belongs_to_node then
+        (
+            last_slice_report = "The current Edit Poly modifier does not belong to the selected object."
+            return false
+        )
+
+        local corner_verts = collectExact90BorderVerts             node             #editPoly             current_modifier             angle_threshold:(amax 0.0 angle_threshold)
+
+        if not(set90AngleVertexSelection node #editPoly current_modifier corner_verts) then
         (
             last_slice_report = node.name + ": could not select 90-degree border corners."
             return false
         )
 
-        local source_name = if source_kind == #editPoly then "Edit Poly" else "Editable Poly"
-        last_slice_report = node.name + ": selected " + (corner_verts.numberSet as string) + " true 90-degree border corner vert(s) on " + source_name + "."
+        last_slice_report = node.name + ": selected " + (corner_verts.numberSet as string) + " true 90-degree border corner vert(s)."
         if not batch_quiet then format "%\n" last_slice_report
         completeRedraw()
         true
-        -- return
-    ),
-
-
-    /*
-    Backward-compatible alias for the original Edit Poly-only helper name.
-    */
-    function selectCurrentEditPoly90BorderCorners angle_threshold:0.1 =
-    (
-        selectCurrentPoly90BorderCorners angle_threshold:angle_threshold
         -- return
     ),
 

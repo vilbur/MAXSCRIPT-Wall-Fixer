@@ -17,11 +17,9 @@ UI: EDGE FIXER > .NET buttons: increase button height by 4 px so two-line labels
 
 UI: DEBUG > Dialog Info: add a button that prints a formatted dialog-state snapshot, including current size, position, and registered/unregistered state.
 
+UI: SLICE WALLS > button 9: swap the current LMB and RMB events/actions.
+
 BUG: SLICE WALLS > progress bar: fix the progress bar so it visibly updates/shows progress while SLICE WALLS is running.
-
-SLICE WALLS: after slicing completes, clear all face selection at subObjectLevel 4 so no faces remain selected.
-
-UI: .NET buttons with two-line titles: increase button height by about 4 px so both lines fit cleanly.
 
 ## DONE TODAY
 
