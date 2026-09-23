@@ -1,6 +1,6 @@
 /*
-Wall-Fixer Bundled Loader 0.994
-Project version 1.0029.
+Wall-Fixer Bundled Loader 0.995
+Project version 1.0049.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "0.994"
-global wall_fixer_loader_tool_version = 1.0029
+global wall_fixer_loader_file_version = "0.996"
+global wall_fixer_loader_tool_version = 1.0049
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -2178,7 +2178,7 @@ struct WMCWallSlicePipeline
 
 
 /*
-Wall-Fixer Core 0.61
+Wall-Fixer Core 0.62
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -2187,8 +2187,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.61"
-global wall_fixer_core_tool_version = 1.0029
+global wall_fixer_core_file_version = "0.63"
+global wall_fixer_core_tool_version = 1.0049
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -2238,6 +2238,1529 @@ if WallFixerRollout != undefined then
     (
     )
 )
+
+
+/*
+Stable Redundant Loop Detector 0.08 integration.
+Used by POST-PROCESS step 11; standalone dialog code is intentionally omitted.
+*/
+global RedundantLoopDetector
+
+struct RedundantLoopDetector_v
+(
+    file_version = 0.08,
+    face_angle_threshold = 0.1,
+    straight_angle_threshold = 2.0,
+    coincidence_tolerance = 0.001,
+    crease_epsilon = 0.000001,
+
+    /*
+    Returns the opposite vertex of an incident edge.
+    Invalid topology returns undefined.
+    */
+    function getOtherVertex vertex_index edge_index edge_vertices =
+    (
+        if edge_index < 1 or edge_index > edge_vertices.count then return undefined
+
+        edge_pair = edge_vertices[edge_index]
+        if edge_pair == undefined or edge_pair.count != 2 then return undefined
+
+        if edge_pair[1] == vertex_index then
+        (
+            edge_pair[2]
+        )
+        else if edge_pair[2] == vertex_index then
+        (
+            edge_pair[1]
+        )
+        else
+        (
+            undefined
+        )
+        -- return
+    ),
+
+    /*
+    Returns the geometric length of one analyzed topology edge.
+    Invalid topology returns zero.
+    */
+    function getEdgeLength edge_index edge_vertices vertex_points =
+    (
+        if edge_index < 1 or edge_index > edge_vertices.count then return 0.0
+
+        edge_pair = edge_vertices[edge_index]
+        if edge_pair == undefined or edge_pair.count != 2 then return 0.0
+
+        point_a = vertex_points[edge_pair[1]]
+        point_b = vertex_points[edge_pair[2]]
+        if point_a == undefined or point_b == undefined then return 0.0
+
+        distance point_a point_b
+        -- return
+    ),
+
+    /*
+    Returns a normalized direction from one vertex along one incident edge.
+    Zero-length edges return undefined.
+    */
+    function getEdgeDirection vertex_index edge_index edge_vertices vertex_points =
+    (
+        other_vertex = getOtherVertex vertex_index edge_index edge_vertices
+        if other_vertex == undefined then return undefined
+
+        direction_value = vertex_points[other_vertex] - vertex_points[vertex_index]
+        if length direction_value <= 0.0000001 then return undefined
+
+        normalize direction_value
+        -- return
+    ),
+
+    /*
+    Recursively pairs every edge with one opposite straight continuation.
+    Backtracking avoids order-dependent rejection at crossings.
+    */
+    function canPairEdges vertex_index edge_array edge_vertices vertex_points straight_limit =
+    (
+        if edge_array.count == 0 then return true
+        if (mod edge_array.count 2) != 0 then return false
+
+        first_edge = edge_array[1]
+        first_direction = getEdgeDirection vertex_index first_edge edge_vertices vertex_points
+        if first_direction == undefined then return false
+
+        for pair_index = 2 to edge_array.count do
+        (
+            pair_edge = edge_array[pair_index]
+            pair_direction = getEdgeDirection vertex_index pair_edge edge_vertices vertex_points
+
+            if pair_direction != undefined then
+            (
+                if (dot first_direction pair_direction) <= -straight_limit then
+                (
+                    remaining_edges = #()
+
+                    for index = 2 to edge_array.count do
+                    (
+                        if index != pair_index then append remaining_edges edge_array[index]
+                    )
+
+                    if canPairEdges vertex_index remaining_edges edge_vertices vertex_points straight_limit then return true
+                )
+            )
+        )
+
+        false
+        -- return
+    ),
+
+    /*
+    Tests whether all supplied incident edges form straight-through opposite pairs.
+    Empty input is accepted; odd or unmatched sets are rejected.
+    */
+    function areEdgesStraightPairs vertex_index edge_set edge_vertices vertex_points angle_threshold:2.0 =
+    (
+        if edge_set.numberSet == 0 then return true
+        if (mod edge_set.numberSet 2) != 0 then return false
+
+        canPairEdges vertex_index (edge_set as array) edge_vertices vertex_points (cos angle_threshold)
+        -- return
+    ),
+
+    /*
+    Reads native Editable Poly topology without changing geometry.
+    Vertex positions and face normals are captured in world space while native edge IDs are preserved.
+    */
+    function buildPolyTopology node poly_value =
+    (
+        if node == undefined or not(isValidNode node) then return undefined
+        if poly_value == undefined or classOf poly_value != Editable_Poly then return undefined
+
+        vertex_count = polyop.getNumVerts poly_value
+        edge_count = polyop.getNumEdges poly_value
+        face_count = polyop.getNumFaces poly_value
+
+        if vertex_count < 2 or edge_count < 1 or face_count < 1 then return undefined
+
+        vertex_points = #()
+        vertex_edges = #()
+        vertex_faces = #()
+
+        for vertex_index = 1 to vertex_count do
+        (
+            vertex_point = undefined
+
+            in coordsys world
+            (
+                vertex_point = polyop.getVert poly_value vertex_index node:node
+            )
+
+            append vertex_points vertex_point
+            append vertex_edges #{}
+            append vertex_faces #{}
+        )
+
+        edge_vertices = #()
+        edge_faces = #()
+        border_edges = #{}
+        border_vertices = #{}
+
+        for edge_index = 1 to edge_count do
+        (
+            edge_pair = polyop.getEdgeVerts poly_value edge_index
+            edge_face_array = polyop.getEdgeFaces poly_value edge_index
+
+            edge_valid = edge_pair != undefined and edge_pair.count == 2
+            if edge_valid then edge_valid = edge_pair[1] >= 1 and edge_pair[1] <= vertex_count and edge_pair[2] >= 1 and edge_pair[2] <= vertex_count
+
+            if edge_valid then
+            (
+                append edge_vertices #(edge_pair[1], edge_pair[2])
+                vertex_edges[edge_pair[1]][edge_index] = true
+                vertex_edges[edge_pair[2]][edge_index] = true
+
+                face_a = 0
+                face_b = 0
+
+                if edge_face_array != undefined then
+                (
+                    if edge_face_array.count >= 1 then face_a = edge_face_array[1]
+                    if edge_face_array.count >= 2 then face_b = edge_face_array[2]
+                )
+
+                append edge_faces #(face_a, face_b)
+
+                if face_a > 0 and face_b == 0 then
+                (
+                    border_edges[edge_index] = true
+                    border_vertices[edge_pair[1]] = true
+                    border_vertices[edge_pair[2]] = true
+                )
+            )
+            else
+            (
+                append edge_vertices undefined
+                append edge_faces undefined
+            )
+        )
+
+        face_normals = #()
+        face_valid = #{}
+
+        for face_index = 1 to face_count do
+        (
+            face_vertices = polyop.getFaceVerts poly_value face_index
+            face_normal = undefined
+
+            if face_vertices != undefined and face_vertices.count >= 3 then
+            (
+                for vertex_index in face_vertices do
+                (
+                    if vertex_index >= 1 and vertex_index <= vertex_count then vertex_faces[vertex_index][face_index] = true
+                )
+
+                in coordsys world
+                (
+                    face_normal = polyop.getFaceNormal poly_value face_index node:node
+                )
+
+                if face_normal != undefined then
+                (
+                    if length face_normal > 0.0000001 then
+                    (
+                        face_normal = normalize face_normal
+                        face_valid[face_index] = true
+                    )
+                    else
+                    (
+                        face_normal = undefined
+                    )
+                )
+            )
+
+            append face_normals face_normal
+        )
+
+        #(
+            vertex_count,
+            edge_count,
+            face_count,
+            vertex_points,
+            vertex_edges,
+            vertex_faces,
+            edge_vertices,
+            edge_faces,
+            border_edges,
+            border_vertices,
+            face_normals,
+            face_valid
+        )
+        -- return
+    ),
+
+    /*
+    Returns explicit edge creases from Editable Poly edge-data channel 2.
+    Unsupported crease data means that no explicit crease is present.
+    */
+    function getCreaseEdges poly_value edge_count =
+    (
+        crease_edges = #{}
+
+        if polyop.getEDataChannelSupport poly_value 2 then
+        (
+            for edge_index = 1 to edge_count do
+            (
+                crease_value = polyop.getEDataValue poly_value 2 edge_index
+                if crease_value != undefined and abs crease_value > crease_epsilon then crease_edges[edge_index] = true
+            )
+        )
+
+        crease_edges
+        -- return
+    ),
+
+    /*
+    Acquires the evaluated top-of-stack geometry for read-only analysis.
+    A modifier-free Editable Poly is read directly; any other stack is evaluated on a disposable collapsed copy.
+    */
+    function acquireAnalysisSource node =
+    (
+        if node == undefined or not(isValidNode node) then return undefined
+
+        if classOf node.baseObject == Editable_Poly and node.modifiers.count == 0 then
+        (
+            #(node, node.baseObject, false)
+        )
+        else
+        (
+            temp_node = undefined
+            result_data = undefined
+
+            try
+            (
+                with undo off
+                (
+                    temp_node = copy node
+                    temp_node.name = uniqueName "__REDUNDANT_LOOP_ANALYSIS__"
+                    convertToPoly temp_node
+
+                    if classOf temp_node.baseObject != Editable_Poly then throw "evaluated copy is not Editable Poly"
+                    result_data = #(temp_node, temp_node.baseObject, true)
+                )
+            )
+            catch
+            (
+                if temp_node != undefined then try(delete temp_node)catch()
+                result_data = undefined
+            )
+
+            result_data
+        )
+        -- return
+    ),
+
+    /*
+    Releases only disposable analysis geometry.
+    The user's original object is never deleted or collapsed.
+    */
+    function releaseAnalysisSource analysis_source =
+    (
+        if analysis_source == undefined then return false
+
+        if analysis_source[3] then
+        (
+            analysis_node = analysis_source[1]
+
+            if analysis_node != undefined and isValidNode analysis_node then
+            (
+                with undo off
+                (
+                    try(delete analysis_node)catch()
+                )
+            )
+        )
+
+        true
+        -- return
+    ),
+
+    /*
+    Removes only near-zero and exact duplicate support edges from terminal topology tests.
+    Real angled branches, border corners, and distinct continuations remain in the effective incidence set.
+    */
+    function getEffectiveIncidentEdges vertex_index chain_edges vertex_edges edge_vertices vertex_points =
+    (
+        if vertex_index < 1 or vertex_index > vertex_edges.count then return #{}
+
+        incident_edges = vertex_edges[vertex_index]
+        effective_edges = #{}
+        chain_other_points = #()
+
+        for chain_edge in (incident_edges * chain_edges) do
+        (
+            chain_other_vertex = getOtherVertex vertex_index chain_edge edge_vertices
+
+            if chain_other_vertex != undefined then
+            (
+                chain_other_point = vertex_points[chain_other_vertex]
+                if chain_other_point != undefined then append chain_other_points chain_other_point
+            )
+        )
+
+        for edge_index in incident_edges do
+        (
+            keep_edge = true
+
+            if not chain_edges[edge_index] then
+            (
+                if getEdgeLength edge_index edge_vertices vertex_points <= coincidence_tolerance then
+                (
+                    keep_edge = false
+                )
+                else
+                (
+                    other_vertex = getOtherVertex vertex_index edge_index edge_vertices
+
+                    if other_vertex == undefined then
+                    (
+                        keep_edge = false
+                    )
+                    else
+                    (
+                        other_point = vertex_points[other_vertex]
+
+                        if other_point == undefined then
+                        (
+                            keep_edge = false
+                        )
+                        else
+                        (
+                            for chain_other_point in chain_other_points while keep_edge do
+                            (
+                                if distance other_point chain_other_point <= coincidence_tolerance then keep_edge = false
+                            )
+                        )
+                    )
+                )
+            )
+
+            if keep_edge then effective_edges[edge_index] = true
+        )
+
+        effective_edges
+        -- return
+    ),
+
+    /*
+    Tests one strict straight open-border terminal.
+    A real border corner is rejected because its two border continuations are not opposite within the straightness tolerance.
+    */
+    function isValidOpenBorderTerminal vertex_index chain_incident_edges border_edges vertex_edges edge_vertices vertex_points angle_threshold:2.0 =
+    (
+        if chain_incident_edges.numberSet != 1 then return false
+
+        effective_edges = getEffectiveIncidentEdges vertex_index chain_incident_edges vertex_edges edge_vertices vertex_points
+        effective_chain = effective_edges * chain_incident_edges
+        effective_border = effective_edges * border_edges
+
+        if effective_chain.numberSet != 1 then return false
+        if effective_border.numberSet != 2 then return false
+        if effective_edges.numberSet != 3 then return false
+        if not(areEdgesStraightPairs vertex_index effective_border edge_vertices vertex_points angle_threshold:angle_threshold) then return false
+
+        true
+        -- return
+    ),
+
+    /*
+    Tests one internal straight T-junction or crossing terminal.
+    Every effective non-chain edge must be consumed by an opposite straight-through pair.
+    */
+    function isValidInternalTerminal vertex_index chain_incident_edges border_edges vertex_edges edge_vertices vertex_points angle_threshold:2.0 =
+    (
+        if chain_incident_edges.numberSet != 1 then return false
+
+        effective_edges = getEffectiveIncidentEdges vertex_index chain_incident_edges vertex_edges edge_vertices vertex_points
+        effective_chain = effective_edges * chain_incident_edges
+
+        if effective_chain.numberSet != 1 then return false
+        if (vertex_edges[vertex_index] * border_edges).numberSet > 0 then return false
+
+        remaining_edges = effective_edges - effective_chain
+        if remaining_edges.numberSet < 2 then return false
+
+        areEdgesStraightPairs vertex_index remaining_edges edge_vertices vertex_points angle_threshold:angle_threshold
+        -- return
+    ),
+
+    /*
+    Tests one legal chain terminal and never lets a border vertex fall through to the internal T-junction rule.
+    Any raw border incidence forces strict open-border validation.
+    */
+    function isValidTerminal vertex_index chain_incident_edges border_edges vertex_edges edge_vertices vertex_points angle_threshold:2.0 =
+    (
+        if vertex_index < 1 or vertex_index > vertex_edges.count then return false
+        if chain_incident_edges.numberSet != 1 then return false
+
+        raw_border_edges = vertex_edges[vertex_index] * border_edges
+
+        if raw_border_edges.numberSet > 0 then
+        (
+            isValidOpenBorderTerminal vertex_index chain_incident_edges border_edges vertex_edges edge_vertices vertex_points angle_threshold:angle_threshold
+        )
+        else
+        (
+            isValidInternalTerminal vertex_index chain_incident_edges border_edges vertex_edges edge_vertices vertex_points angle_threshold:angle_threshold
+        )
+        -- return
+    ),
+
+    /*
+    Tests one internal chain vertex before traversal continues through it.
+    The incoming/outgoing pair must be straight and all unrelated effective edges must pair straight through.
+    */
+    function isValidInternalVertex vertex_index incoming_edge outgoing_edge border_edges vertex_edges edge_vertices vertex_points angle_threshold:2.0 =
+    (
+        if (vertex_edges[vertex_index] * border_edges).numberSet > 0 then return false
+
+        chain_pair = #{}
+        chain_pair[incoming_edge] = true
+        chain_pair[outgoing_edge] = true
+
+        effective_edges = getEffectiveIncidentEdges vertex_index chain_pair vertex_edges edge_vertices vertex_points
+        effective_chain = effective_edges * chain_pair
+
+        if effective_chain.numberSet != 2 then return false
+        if not(areEdgesStraightPairs vertex_index effective_chain edge_vertices vertex_points angle_threshold:angle_threshold) then return false
+
+        transverse_edges = effective_edges - effective_chain
+
+        if transverse_edges.numberSet > 0 then
+        (
+            if not(areEdgesStraightPairs vertex_index transverse_edges edge_vertices vertex_points angle_threshold:angle_threshold) then return false
+        )
+
+        true
+        -- return
+    ),
+
+    /*
+    Verifies every live face incident to one chain vertex against the chain reference plane orientation.
+    Opposite normal direction is accepted by comparing the absolute dot product.
+    */
+    function isVertexPlanar vertex_index vertex_faces face_normals face_valid reference_normal angle_threshold:0.1 =
+    (
+        if vertex_index < 1 or vertex_index > vertex_faces.count then return false
+        if reference_normal == undefined then return false
+
+        normal_limit = cos angle_threshold
+        incident_face_count = 0
+
+        for face_index in vertex_faces[vertex_index] do
+        (
+            if face_index < 1 or face_index > face_normals.count then return false
+            if face_index > face_valid.count or not face_valid[face_index] then return false
+
+            face_normal = face_normals[face_index]
+            if face_normal == undefined then return false
+
+            incident_face_count += 1
+            if abs(dot reference_normal face_normal) < normal_limit then return false
+        )
+
+        incident_face_count > 0
+        -- return
+    ),
+
+    /*
+    Builds the conservative internal edge candidate set.
+    Border, explicit crease, zero-length, invalid-adjacency, and non-coplanar edges are rejected before traversal.
+    */
+    function buildCandidateEdges topology_data crease_edges angle_threshold:0.1 =
+    (
+        edge_count = topology_data[2]
+        face_count = topology_data[3]
+        vertex_points = topology_data[4]
+        edge_vertices = topology_data[7]
+        edge_faces = topology_data[8]
+        border_edges = topology_data[9]
+        face_normals = topology_data[11]
+        face_valid = topology_data[12]
+
+        candidate_edges = #{}
+        normal_limit = cos angle_threshold
+
+        for edge_index = 1 to edge_count do
+        (
+            edge_pair = edge_vertices[edge_index]
+            face_pair = edge_faces[edge_index]
+            is_border = border_edges[edge_index]
+            is_crease = crease_edges[edge_index]
+
+            if edge_pair != undefined and face_pair != undefined and not is_border and not is_crease then
+            (
+                if getEdgeLength edge_index edge_vertices vertex_points > coincidence_tolerance then
+                (
+                    face_a = face_pair[1]
+                    face_b = face_pair[2]
+
+                    if face_a > 0 and face_b > 0 and face_a <= face_count and face_b <= face_count then
+                    (
+                        if face_valid[face_a] and face_valid[face_b] then
+                        (
+                            if abs(dot face_normals[face_a] face_normals[face_b]) >= normal_limit then candidate_edges[edge_index] = true
+                        )
+                    )
+                )
+            )
+        )
+
+        candidate_edges
+        -- return
+    ),
+
+    /*
+    Validates a completed chain as one planar, straight, terminal-to-terminal topology feature.
+    Any invalid endpoint, branch, border incidence, or non-planar incident face rejects the whole chain.
+    */
+    function validateChain chain_edges chain_vertices start_vertex end_vertex candidate_edges topology_data reference_normal face_threshold:0.1 straight_threshold:2.0 =
+    (
+        if chain_edges.numberSet == 0 then return #(false, "empty chain")
+        if chain_vertices.count < 2 then return #(false, "chain has fewer than two vertices")
+        if start_vertex == end_vertex then return #(false, "chain returns to its start")
+        if (chain_edges - candidate_edges).numberSet > 0 then return #(false, "chain contains a non-candidate edge")
+
+        vertex_points = topology_data[4]
+        vertex_edges = topology_data[5]
+        vertex_faces = topology_data[6]
+        edge_vertices = topology_data[7]
+        border_edges = topology_data[9]
+        face_normals = topology_data[11]
+        face_valid = topology_data[12]
+
+        for vertex_index in chain_vertices do
+        (
+            if not(isVertexPlanar vertex_index vertex_faces face_normals face_valid reference_normal angle_threshold:face_threshold) then
+            (
+                return #(false, "non-planar incident faces at vertex " + (vertex_index as string))
+            )
+
+            chain_incident_edges = vertex_edges[vertex_index] * chain_edges
+            is_endpoint = vertex_index == start_vertex or vertex_index == end_vertex
+
+            if is_endpoint then
+            (
+                if not(isValidTerminal vertex_index chain_incident_edges border_edges vertex_edges edge_vertices vertex_points angle_threshold:straight_threshold) then
+                (
+                    return #(false, "invalid terminal topology at vertex " + (vertex_index as string))
+                )
+            )
+            else
+            (
+                if chain_incident_edges.numberSet != 2 then return #(false, "internal vertex does not have exactly two chain edges at vertex " + (vertex_index as string))
+
+                chain_pair = chain_incident_edges as array
+
+                if not(isValidInternalVertex vertex_index chain_pair[1] chain_pair[2] border_edges vertex_edges edge_vertices vertex_points angle_threshold:straight_threshold) then
+                (
+                    return #(false, "invalid internal branch topology at vertex " + (vertex_index as string))
+                )
+            )
+        )
+
+        #(true, "")
+        -- return
+    ),
+
+    /*
+    Creates a stable key for duplicate suppression when the same chain is traversed from both terminals.
+    BitArray iteration keeps edge IDs sorted automatically.
+    */
+    function makeChainKey chain_edges =
+    (
+        key_text = ""
+        for edge_index in chain_edges do key_text += (edge_index as string) + ","
+        key_text
+        -- return
+    ),
+
+    /*
+    Detects redundant straight internal chains on one selected node without changing its geometry or stack.
+    Returns success, chain records, the union edge BitArray, an error message, and immutable analyzed topology.
+    */
+    function detectRedundantLoops node face_threshold:0.1 straight_threshold:2.0 debug_output:false =
+    (
+        loop_records = #()
+        redundant_edges = #{}
+        analysis_source = acquireAnalysisSource node
+
+        if analysis_source == undefined then return #(false, loop_records, redundant_edges, "could not acquire evaluated Editable Poly topology", undefined)
+
+        analysis_node = analysis_source[1]
+        analysis_poly = analysis_source[2]
+        topology_data = buildPolyTopology analysis_node analysis_poly
+
+        if topology_data == undefined then
+        (
+            releaseAnalysisSource analysis_source
+            return #(false, loop_records, redundant_edges, "could not read evaluated Editable Poly topology", undefined)
+        )
+
+        crease_edges = getCreaseEdges analysis_poly topology_data[2]
+        candidate_edges = buildCandidateEdges topology_data crease_edges angle_threshold:face_threshold
+
+        edge_count = topology_data[2]
+        vertex_points = topology_data[4]
+        vertex_edges = topology_data[5]
+        vertex_faces = topology_data[6]
+        edge_vertices = topology_data[7]
+        edge_faces = topology_data[8]
+        border_edges = topology_data[9]
+        face_normals = topology_data[11]
+        face_valid = topology_data[12]
+
+        straight_limit = cos straight_threshold
+        accepted_keys = #()
+        attempted_keys = #()
+
+        for start_edge in candidate_edges do
+        (
+            start_pair = edge_vertices[start_edge]
+
+            if start_pair != undefined then
+            (
+                single_chain = #{}
+                single_chain[start_edge] = true
+                possible_starts = #()
+
+                if isValidTerminal start_pair[1] single_chain border_edges vertex_edges edge_vertices vertex_points angle_threshold:straight_threshold then append possible_starts start_pair[1]
+                if isValidTerminal start_pair[2] single_chain border_edges vertex_edges edge_vertices vertex_points angle_threshold:straight_threshold then append possible_starts start_pair[2]
+
+                for start_vertex in possible_starts do
+                (
+                    attempt_key = (start_edge as string) + ":" + (start_vertex as string)
+
+                    if findItem attempted_keys attempt_key == 0 then
+                    (
+                        append attempted_keys attempt_key
+
+                        chain_edges = #{}
+                        chain_edges[start_edge] = true
+                        chain_vertices = #(start_vertex)
+
+                        previous_vertex = start_vertex
+                        current_edge = start_edge
+                        current_vertex = if start_pair[1] == start_vertex then start_pair[2] else start_pair[1]
+                        append chain_vertices current_vertex
+
+                        reference_normal = undefined
+                        start_faces = edge_faces[start_edge]
+
+                        if start_faces != undefined then
+                        (
+                            reference_face = if start_faces[1] > 0 then start_faces[1] else start_faces[2]
+
+                            if reference_face >= 1 and reference_face <= face_normals.count then
+                            (
+                                if face_valid[reference_face] then reference_normal = face_normals[reference_face]
+                            )
+                        )
+
+                        rejected_reason = ""
+                        completed_chain = false
+                        step_count = 0
+
+                        if reference_normal == undefined then rejected_reason = "missing reference face normal"
+
+                        while rejected_reason == "" and not completed_chain and step_count <= edge_count do
+                        (
+                            step_count += 1
+
+                            if not(isVertexPlanar current_vertex vertex_faces face_normals face_valid reference_normal angle_threshold:face_threshold) then
+                            (
+                                rejected_reason = "non-planar incident faces at vertex " + (current_vertex as string)
+                            )
+                            else
+                            (
+                                incoming_direction = vertex_points[current_vertex] - vertex_points[previous_vertex]
+
+                                if length incoming_direction <= 0.0000001 then
+                                (
+                                    rejected_reason = "zero-length chain segment"
+                                )
+                                else
+                                (
+                                    incoming_direction = normalize incoming_direction
+                                    forward_edges = #()
+                                    incident_candidates = vertex_edges[current_vertex] * candidate_edges
+
+                                    for candidate_edge in incident_candidates do
+                                    (
+                                        if candidate_edge != current_edge then
+                                        (
+                                            next_vertex = getOtherVertex current_vertex candidate_edge edge_vertices
+
+                                            if next_vertex != undefined then
+                                            (
+                                                outgoing_direction = vertex_points[next_vertex] - vertex_points[current_vertex]
+
+                                                if length outgoing_direction > 0.0000001 then
+                                                (
+                                                    outgoing_direction = normalize outgoing_direction
+                                                    if dot incoming_direction outgoing_direction >= straight_limit then append forward_edges candidate_edge
+                                                )
+                                            )
+                                        )
+                                    )
+
+                                    if forward_edges.count == 0 then
+                                    (
+                                        terminal_chain = #{}
+                                        terminal_chain[current_edge] = true
+
+                                        if isValidTerminal current_vertex terminal_chain border_edges vertex_edges edge_vertices vertex_points angle_threshold:straight_threshold then
+                                        (
+                                            completed_chain = true
+                                        )
+                                        else
+                                        (
+                                            rejected_reason = "chain stopped at invalid terminal vertex " + (current_vertex as string)
+                                        )
+                                    )
+                                    else if forward_edges.count > 1 then
+                                    (
+                                        rejected_reason = "ambiguous forward branching at vertex " + (current_vertex as string)
+                                    )
+                                    else
+                                    (
+                                        next_edge = forward_edges[1]
+
+                                        if chain_edges[next_edge] then
+                                        (
+                                            rejected_reason = "closed edge cycle"
+                                        )
+                                        else if not(isValidInternalVertex current_vertex current_edge next_edge border_edges vertex_edges edge_vertices vertex_points angle_threshold:straight_threshold) then
+                                        (
+                                            rejected_reason = "invalid internal branch topology at vertex " + (current_vertex as string)
+                                        )
+                                        else
+                                        (
+                                            next_vertex = getOtherVertex current_vertex next_edge edge_vertices
+
+                                            if next_vertex == undefined then
+                                            (
+                                                rejected_reason = "invalid continuation edge"
+                                            )
+                                            else if findItem chain_vertices next_vertex != 0 then
+                                            (
+                                                rejected_reason = "closed or revisited vertex cycle"
+                                            )
+                                            else
+                                            (
+                                                chain_edges[next_edge] = true
+                                                previous_vertex = current_vertex
+                                                current_vertex = next_vertex
+                                                current_edge = next_edge
+                                                append chain_vertices current_vertex
+                                            )
+                                        )
+                                    )
+                                )
+                            )
+                        )
+
+                        if step_count > edge_count then rejected_reason = "traversal exceeded edge count"
+
+                        if rejected_reason == "" and completed_chain then
+                        (
+                            validation = validateChain chain_edges chain_vertices start_vertex current_vertex candidate_edges topology_data reference_normal face_threshold:face_threshold straight_threshold:straight_threshold
+
+                            if validation[1] then
+                            (
+                                chain_key = makeChainKey chain_edges
+
+                                if findItem accepted_keys chain_key == 0 then
+                                (
+                                    append accepted_keys chain_key
+                                    append loop_records #(chain_edges, chain_vertices, start_vertex, current_vertex)
+                                    redundant_edges = redundant_edges + chain_edges
+
+                                    if debug_output then
+                                    (
+                                        vertex_bits = #{}
+                                        for vertex_index in chain_vertices do vertex_bits[vertex_index] = true
+                                        format "REDUNDANT CHAIN | node:% | verts:% | edges:% | terminal:% -> %\n" node.name vertex_bits chain_edges start_vertex current_vertex
+                                    )
+                                )
+                            )
+                            else
+                            (
+                                rejected_reason = validation[2]
+                            )
+                        )
+
+                        if debug_output and rejected_reason != "" then
+                        (
+                            format "Rejected candidate | node:% | startEdge:% | startVert:% | reason:%\n" node.name start_edge start_vertex rejected_reason
+                        )
+                    )
+                )
+            )
+        )
+
+        releaseAnalysisSource analysis_source
+        #(true, loop_records, redundant_edges, "", topology_data)
+        -- return
+    ),
+
+    /*
+    Prints detailed classification for one analyzed edge ID without changing the object.
+    This is intended for diagnosing a specific expected redundant edge such as edge 31.
+    */
+    function debugEdge node edge_index face_threshold:0.1 straight_threshold:2.0 =
+    (
+        analysis_source = acquireAnalysisSource node
+        if analysis_source == undefined then return false
+
+        analysis_node = analysis_source[1]
+        analysis_poly = analysis_source[2]
+        topology_data = buildPolyTopology analysis_node analysis_poly
+
+        if topology_data == undefined then
+        (
+            releaseAnalysisSource analysis_source
+            return false
+        )
+
+        crease_edges = getCreaseEdges analysis_poly topology_data[2]
+        candidate_edges = buildCandidateEdges topology_data crease_edges angle_threshold:face_threshold
+
+        if edge_index < 1 or edge_index > topology_data[2] then
+        (
+            format "DEBUG EDGE % | invalid edge ID, edgeCount:%\n" edge_index topology_data[2]
+            releaseAnalysisSource analysis_source
+            return false
+        )
+
+        edge_pair = topology_data[7][edge_index]
+        face_pair = topology_data[8][edge_index]
+        border_edges = topology_data[9]
+        vertex_edges = topology_data[5]
+        vertex_points = topology_data[4]
+
+        format "DEBUG EDGE % | verts:% | faces:% | candidate:% | border:% | crease:%\n" edge_index edge_pair face_pair candidate_edges[edge_index] border_edges[edge_index] crease_edges[edge_index]
+
+        if edge_pair != undefined then
+        (
+            chain_set = #{}
+            chain_set[edge_index] = true
+
+            for vertex_index in edge_pair do
+            (
+                effective_edges = getEffectiveIncidentEdges vertex_index chain_set vertex_edges topology_data[7] vertex_points
+                raw_border = vertex_edges[vertex_index] * border_edges
+                effective_border = effective_edges * border_edges
+                terminal_ok = isValidTerminal vertex_index chain_set border_edges vertex_edges topology_data[7] vertex_points angle_threshold:straight_threshold
+
+                format "  V% | rawEdges:% | effective:% | rawBorder:% | effectiveBorder:% | terminal:%\n" vertex_index vertex_edges[vertex_index] effective_edges raw_border effective_border terminal_ok
+            )
+        )
+
+        releaseAnalysisSource analysis_source
+        true
+        -- return
+    ),
+
+    /*
+    Returns the existing exact top selection modifier or creates one.
+    Unrelated Edit Poly modifiers are never used for selection storage.
+    */
+    function acquireSelectionModifier node =
+    (
+        if node.modifiers.count > 0 then
+        (
+            top_modifier = node.modifiers[1]
+
+            if classOf top_modifier == Edit_Poly and top_modifier.name == "SELECT REDUNDANT LOOPS" then
+            (
+                return #(top_modifier, false)
+            )
+        )
+
+        selection_modifier = Edit_Poly name:"SELECT REDUNDANT LOOPS"
+        addModifier node selection_modifier
+        #(selection_modifier, true)
+        -- return
+    ),
+
+    /*
+    Activates the dedicated selection modifier in Edge mode with Show Cage disabled.
+    Geometry detection has already finished before this function runs.
+    */
+    function activateSelectionModifier node selection_modifier =
+    (
+        if node == undefined or not(isValidNode node) then return false
+        if selection_modifier == undefined or classOf selection_modifier != Edit_Poly then return false
+
+        activated = true
+
+        try
+        (
+            select node
+            max modify mode
+            selection_modifier.SetPrimaryNode node
+            selection_modifier.useStackSelection = false
+            selection_modifier.showCage = false
+            selection_modifier.selectMode = 1
+            modPanel.setCurrentObject selection_modifier
+            selection_modifier.SetEPolySelLevel #Edge
+            subObjectLevel = 2
+            update node
+        )
+        catch
+        (
+            activated = false
+        )
+
+        activated
+        -- return
+    ),
+
+    /*
+    Verifies that evaluated edge IDs still describe the same geometry after the selection modifier is added.
+    Verification uses a disposable collapsed copy and compares every edge endpoint pair in world space.
+    */
+    function verifyEdgeIdMapping node source_topology =
+    (
+        verification_source = acquireAnalysisSource node
+        if verification_source == undefined then return false
+
+        verification_topology = buildPolyTopology verification_source[1] verification_source[2]
+        mapping_ok = verification_topology != undefined
+
+        if mapping_ok then mapping_ok = verification_topology[1] == source_topology[1] and verification_topology[2] == source_topology[2] and verification_topology[3] == source_topology[3]
+
+        if mapping_ok then
+        (
+            source_points = source_topology[4]
+            source_edges = source_topology[7]
+            current_points = verification_topology[4]
+            current_edges = verification_topology[7]
+
+            for edge_index = 1 to source_topology[2] while mapping_ok do
+            (
+                source_pair = source_edges[edge_index]
+                current_pair = current_edges[edge_index]
+
+                if source_pair == undefined or current_pair == undefined then
+                (
+                    mapping_ok = source_pair == undefined and current_pair == undefined
+                )
+                else
+                (
+                    source_a = source_points[source_pair[1]]
+                    source_b = source_points[source_pair[2]]
+                    current_a = current_points[current_pair[1]]
+                    current_b = current_points[current_pair[2]]
+
+                    same_forward = distance source_a current_a <= coincidence_tolerance and distance source_b current_b <= coincidence_tolerance
+                    same_reverse = distance source_a current_b <= coincidence_tolerance and distance source_b current_a <= coincidence_tolerance
+
+                    if not same_forward and not same_reverse then mapping_ok = false
+                )
+            )
+        )
+
+        releaseAnalysisSource verification_source
+        mapping_ok
+        -- return
+    ),
+
+    /*
+    Detects one object and stores accepted edges only after detection is complete.
+    A zero-result scan leaves no temporary modifier and removes a stale top SELECT REDUNDANT LOOPS modifier.
+    */
+    function selectRedundantLoopsOnNode node face_threshold:0.1 straight_threshold:2.0 debug_output:true =
+    (
+        if node == undefined or not(isValidNode node) then return #(false, 0, 0, "invalid node", undefined)
+
+        detection = detectRedundantLoops node face_threshold:face_threshold straight_threshold:straight_threshold debug_output:debug_output
+        if not detection[1] then return #(false, 0, 0, detection[4], undefined)
+
+        loop_count = detection[2].count
+        redundant_edges = detection[3]
+        topology_data = detection[5]
+        selected_edge_count = redundant_edges.numberSet
+        selection_modifier = undefined
+        created_now = false
+        operation_error = undefined
+
+        try
+        (
+            if selected_edge_count > 0 then
+            (
+                modifier_data = acquireSelectionModifier node
+                selection_modifier = modifier_data[1]
+                created_now = modifier_data[2]
+
+                if not(activateSelectionModifier node selection_modifier) then throw "could not activate SELECT REDUNDANT LOOPS"
+                if not(verifyEdgeIdMapping node topology_data) then throw "evaluated edge IDs changed before selection storage"
+
+                /* EditPolyMod selection BitArrays must span the complete mesh edge range.
+                   #{22} alone has a shorter BitArray length and can be rejected as an empty selection. */
+                selection_bits = copy redundant_edges
+                selection_bits.count = topology_data[2]
+
+                empty_selection = #{}
+                empty_selection.count = topology_data[2]
+
+                clear_ok = selection_modifier.SetSelection #Edge empty_selection node:node
+                store_ok = selection_modifier.SetSelection #Edge selection_bits node:node
+                update node
+                selection_modifier.RefreshScreen()
+                stored_selection = selection_modifier.GetSelection #Edge node:node
+
+                if not clear_ok then throw "could not clear Edit Poly edge selection before storage"
+                if not store_ok then throw "Edit Poly SetSelection returned false while storing redundant edges"
+
+                stored_selection_bits = copy stored_selection
+                stored_selection_bits.count = topology_data[2]
+
+                if stored_selection_bits != selection_bits then
+                (
+                    throw ("edge selection storage mismatch. requested:" + (redundant_edges as string) + " actual:" + (stored_selection as string))
+                )
+
+                selection_modifier.showCage = false
+
+                if not(activateSelectionModifier node selection_modifier) then throw "could not enter Edge sub-object level after selection storage"
+                selection_modifier.SetEPolySelLevel #Edge
+                subObjectLevel = 2
+                selection_modifier.RefreshScreen()
+            )
+            else
+            (
+                if node.modifiers.count > 0 then
+                (
+                    top_modifier = node.modifiers[1]
+
+                    if classOf top_modifier == Edit_Poly and top_modifier.name == "SELECT REDUNDANT LOOPS" then deleteModifier node top_modifier
+                )
+
+                update node
+            )
+        )
+        catch
+        (
+            operation_error = getCurrentException()
+
+            if selection_modifier != undefined then
+            (
+                if created_now or selection_modifier.name == "SELECT REDUNDANT LOOPS" then try(deleteModifier node selection_modifier)catch()
+                selection_modifier = undefined
+            )
+
+            update node
+        )
+
+        if operation_error == undefined then
+        (
+            #(true, loop_count, selected_edge_count, "", selection_modifier)
+        )
+        else
+        (
+            #(false, 0, 0, operation_error as string, undefined)
+        )
+        -- return
+    ),
+
+    /*
+    Processes every selected object independently and focuses the first object containing accepted redundant edges.
+    Each matching object receives its own SELECT REDUNDANT LOOPS modifier and Edge selection.
+    */
+    function selectRedundantLoops face_threshold:0.1 straight_threshold:2.0 debug_output:true =
+    (
+        selected_nodes = selection as array
+
+        if selected_nodes.count == 0 then
+        (
+            messageBox "Select at least one geometry object." title:"Redundant Loop Detector"
+            return #(false, 0, 0)
+        )
+
+        total_loops = 0
+        total_edges = 0
+        failed_count = 0
+        first_match_node = undefined
+        first_match_modifier = undefined
+
+        for node in selected_nodes do
+        (
+            result_data = selectRedundantLoopsOnNode node face_threshold:face_threshold straight_threshold:straight_threshold debug_output:debug_output
+
+            if result_data[1] then
+            (
+                total_loops += result_data[2]
+                total_edges += result_data[3]
+
+                format "Redundant Loop Detector | node:% | chains:% | selectedEdges:%\n" node.name result_data[2] result_data[3]
+
+                if first_match_modifier == undefined and result_data[3] > 0 then
+                (
+                    first_match_node = node
+                    first_match_modifier = result_data[5]
+                )
+            )
+            else
+            (
+                failed_count += 1
+                format "Redundant Loop Detector FAILED | node:% | %\n" node.name result_data[4]
+            )
+        )
+
+        if first_match_modifier != undefined then
+        (
+            activateSelectionModifier first_match_node first_match_modifier
+            first_match_modifier.RefreshScreen()
+        )
+        else
+        (
+            select selected_nodes
+        )
+
+        completeRedraw()
+        format "Redundant Loop Detector COMPLETE | objects:% | chains:% | edges:% | failures:%\n" selected_nodes.count total_loops total_edges failed_count
+
+        #(failed_count == 0, total_loops, total_edges)
+        -- return
+    ),
+
+    /*
+    Removes the currently selected edges from the dedicated selection modifier.
+    The operation uses Edit Poly Remove Edge + Vertices so adjacent faces are preserved and redundant edge vertices are removed.
+    */
+    function removeSelectedEdges =
+    (
+        if selection.count == 0 then
+        (
+            messageBox "Select the detected object first." title:"Redundant Loop Detector"
+            return false
+        )
+
+        node = selection[1]
+
+        if node.modifiers.count == 0 then
+        (
+            messageBox "No SELECT REDUNDANT LOOPS modifier found." title:"Redundant Loop Detector"
+            return false
+        )
+
+        selection_modifier = node.modifiers[1]
+
+        if classOf selection_modifier != Edit_Poly or selection_modifier.name != "SELECT REDUNDANT LOOPS" then
+        (
+            messageBox "Top modifier must be SELECT REDUNDANT LOOPS." title:"Redundant Loop Detector"
+            return false
+        )
+
+        if not(activateSelectionModifier node selection_modifier) then
+        (
+            messageBox "Could not activate SELECT REDUNDANT LOOPS." title:"Redundant Loop Detector"
+            return false
+        )
+
+        selected_edges = EditPolyMod.GetSelection selection_modifier #Edge node:node
+
+        if selected_edges.numberSet == 0 then
+        (
+            messageBox "No edges are selected." title:"Redundant Loop Detector"
+            return false
+        )
+
+        removed_count = selected_edges.numberSet
+        operation_error = undefined
+        old_remove_ctrl = selection_modifier.remveEdgeCtrlKey
+
+        try
+        (
+            undo "Remove Redundant Loops" on
+            (
+                selection_modifier.remveEdgeCtrlKey = false
+                selection_modifier.ButtonOp #RemoveEdgeRemoveVertices
+                update node
+                selection_modifier.showCage = false
+                selection_modifier.RefreshScreen()
+            )
+        )
+        catch
+        (
+            operation_error = getCurrentException()
+        )
+
+        selection_modifier.remveEdgeCtrlKey = old_remove_ctrl
+
+        if operation_error != undefined then
+        (
+            format "Redundant Loop Detector REMOVE FAILED | node:% | %\n" node.name operation_error
+            messageBox ("Remove failed:\n" + (operation_error as string)) title:"Redundant Loop Detector"
+            return false
+        )
+
+        completeRedraw()
+        format "Redundant Loop Detector REMOVE | node:% | removedEdges:%\n" node.name removed_count
+        true
+        -- return
+    ),
+
+    /*
+    Finds one Editable Poly edge by its two vertex IDs.
+    This helper is used by the standalone regression tests only.
+    */
+    function findPolyEdgeByVertices poly_value vertex_a vertex_b =
+    (
+        edge_count = polyop.getNumEdges poly_value
+
+        for edge_index = 1 to edge_count do
+        (
+            edge_pair = polyop.getEdgeVerts poly_value edge_index
+
+            if edge_pair != undefined then
+            (
+                same_pair = (edge_pair[1] == vertex_a and edge_pair[2] == vertex_b) or (edge_pair[1] == vertex_b and edge_pair[2] == vertex_a)
+                if same_pair then return edge_index
+            )
+        )
+
+        0
+        -- return
+    ),
+
+    /*
+    Creates a planar wall split by one redundant border-to-border divider.
+    The optional crease marks that divider as protected and therefore non-redundant.
+    */
+    function createDividerTestObject creased:false x_offset:0.0 =
+    (
+        test_node = editable_mesh name:(uniqueName "REDUNDANT_LOOP_TEST_")
+        convertTo test_node Editable_Poly
+        test_poly = test_node.baseObject
+
+        vertex_1 = polyop.createVert test_poly [x_offset + 0.0, 0.0, 0.0]
+        vertex_2 = polyop.createVert test_poly [x_offset + 10.0, 0.0, 0.0]
+        vertex_3 = polyop.createVert test_poly [x_offset + 0.0, 5.0, 0.0]
+        vertex_4 = polyop.createVert test_poly [x_offset + 10.0, 5.0, 0.0]
+        vertex_5 = polyop.createVert test_poly [x_offset + 0.0, 10.0, 0.0]
+        vertex_6 = polyop.createVert test_poly [x_offset + 10.0, 10.0, 0.0]
+
+        polyop.createPolygon test_poly #(vertex_1, vertex_2, vertex_4, vertex_3)
+        polyop.createPolygon test_poly #(vertex_3, vertex_4, vertex_6, vertex_5)
+        update test_node
+
+        divider_edge = findPolyEdgeByVertices test_poly vertex_3 vertex_4
+        if divider_edge == 0 then throw "could not create divider test edge"
+
+        if creased then
+        (
+            if not(polyop.getEDataChannelSupport test_poly 2) then polyop.setEDataChannelSupport test_poly 2 true
+            polyop.setEDataValue test_poly 2 #{divider_edge} 1.0
+        )
+
+        #(test_node, divider_edge)
+        -- return
+    ),
+
+    /*
+    Creates a valid border-to-straight-T redundant divider.
+    This mirrors the intended topology of the supplied edge 31 case: one straight border endpoint and one internal straight receiving loop.
+    */
+    function createTJunctionTestObject x_offset:30.0 =
+    (
+        test_node = editable_mesh name:(uniqueName "REDUNDANT_T_TEST_")
+        convertTo test_node Editable_Poly
+        test_poly = test_node.baseObject
+
+        vertex_1 = polyop.createVert test_poly [x_offset + 0.0, 0.0, 0.0]
+        vertex_2 = polyop.createVert test_poly [x_offset + 5.0, 0.0, 0.0]
+        vertex_3 = polyop.createVert test_poly [x_offset + 10.0, 0.0, 0.0]
+        vertex_4 = polyop.createVert test_poly [x_offset + 0.0, 5.0, 0.0]
+        vertex_5 = polyop.createVert test_poly [x_offset + 5.0, 5.0, 0.0]
+        vertex_6 = polyop.createVert test_poly [x_offset + 0.0, 10.0, 0.0]
+        vertex_7 = polyop.createVert test_poly [x_offset + 5.0, 10.0, 0.0]
+        vertex_8 = polyop.createVert test_poly [x_offset + 10.0, 10.0, 0.0]
+
+        polyop.createPolygon test_poly #(vertex_1, vertex_2, vertex_5, vertex_4)
+        polyop.createPolygon test_poly #(vertex_4, vertex_5, vertex_7, vertex_6)
+        polyop.createPolygon test_poly #(vertex_2, vertex_3, vertex_8, vertex_7, vertex_5)
+        update test_node
+
+        divider_edge = findPolyEdgeByVertices test_poly vertex_4 vertex_5
+        if divider_edge == 0 then throw "could not create T-junction divider test edge"
+
+        #(test_node, divider_edge)
+        -- return
+    ),
+
+    /*
+    Creates a divider that ends on a real border corner.
+    The divider must never be classified as redundant even though its adjacent faces are planar.
+    */
+    function createBorderCornerTestObject x_offset:60.0 =
+    (
+        test_node = editable_mesh name:(uniqueName "REDUNDANT_CORNER_TEST_")
+        convertTo test_node Editable_Poly
+        test_poly = test_node.baseObject
+
+        vertex_1 = polyop.createVert test_poly [x_offset + 0.0, 0.0, 0.0]
+        vertex_2 = polyop.createVert test_poly [x_offset + 10.0, 0.0, 0.0]
+        vertex_3 = polyop.createVert test_poly [x_offset + 0.0, 5.0, 0.0]
+        vertex_4 = polyop.createVert test_poly [x_offset + 10.0, 10.0, 0.0]
+        vertex_5 = polyop.createVert test_poly [x_offset + 0.0, 10.0, 0.0]
+
+        polyop.createPolygon test_poly #(vertex_1, vertex_2, vertex_4, vertex_3)
+        polyop.createPolygon test_poly #(vertex_3, vertex_4, vertex_5)
+        update test_node
+
+        divider_edge = findPolyEdgeByVertices test_poly vertex_3 vertex_4
+        if divider_edge == 0 then throw "could not create border-corner divider test edge"
+
+        #(test_node, divider_edge)
+        -- return
+    ),
+
+    /*
+    Tests pure straight-pair and terminal rules without scene geometry.
+    Straight border and straight internal T terminals must pass while a border corner and unmatched branch must fail.
+    */
+    function testTopologyRules =
+    (
+        pair_points = #([0,0,0], [-1,0,0], [1,0,0], [0,-1,0], [0,1,0])
+        pair_edges = #(#(1,2), #(1,3), #(1,4), #(1,5))
+        crossing_ok = areEdgesStraightPairs 1 #{1..4} pair_edges pair_points angle_threshold:2.0
+
+        branch_points = #([0,0,0], [-1,0,0], [1,0,0], [0,1,0])
+        branch_edges = #(#(1,2), #(1,3), #(1,4))
+        branch_rejected = not(areEdgesStraightPairs 1 #{1..3} branch_edges branch_points angle_threshold:2.0)
+
+        border_points = #([0,0,0], [0,-1,0], [0,1,0], [1,0,0])
+        border_edges_value = #(#(1,2), #(1,3), #(1,4))
+        border_vertex_edges = #(#{1,2,3}, #{1}, #{2}, #{3})
+        straight_border_ok = isValidOpenBorderTerminal 1 #{3} #{1,2} border_vertex_edges border_edges_value border_points angle_threshold:2.0
+
+        corner_points = #([0,0,0], [0,-1,0], [1,0,0], [1,1,0])
+        corner_edges = #(#(1,2), #(1,3), #(1,4))
+        corner_vertex_edges = #(#{1,2,3}, #{1}, #{2}, #{3})
+        border_corner_rejected = not(isValidOpenBorderTerminal 1 #{3} #{1,2} corner_vertex_edges corner_edges corner_points angle_threshold:2.0)
+
+        t_points = #([0,0,0], [1,0,0], [0,-1,0], [0,1,0])
+        t_edges = #(#(1,2), #(1,3), #(1,4))
+        t_vertex_edges = #(#{1,2,3}, #{1}, #{2}, #{3})
+        t_ok = isValidInternalTerminal 1 #{1} #{} t_vertex_edges t_edges t_points angle_threshold:2.0
+
+        #(crossing_ok, branch_rejected, straight_border_ok, border_corner_rejected, t_ok)
+        -- return
+    ),
+
+    /*
+    Runs regression tests for direct Editable Poly analysis and terminal behavior.
+    The tests verify divider selection, crease rejection, valid T-junction acceptance, and border-corner rejection.
+    */
+    function runTests =
+    (
+        test_passed = true
+        topology_result = testTopologyRules()
+
+        format "TEST straight crossing pairs: %\n" topology_result[1]
+        format "TEST unmatched branch rejected: %\n" topology_result[2]
+        format "TEST straight border terminal accepted: %\n" topology_result[3]
+        format "TEST border corner terminal rejected: %\n" topology_result[4]
+        format "TEST straight T terminal accepted: %\n" topology_result[5]
+
+        for result_value in topology_result do
+        (
+            if not result_value then test_passed = false
+        )
+
+        plain_test = undefined
+        crease_test = undefined
+        t_test = undefined
+        corner_test = undefined
+
+        try
+        (
+            plain_data = createDividerTestObject creased:false x_offset:0.0
+            plain_test = plain_data[1]
+            plain_edge = plain_data[2]
+            plain_result = selectRedundantLoopsOnNode plain_test face_threshold:0.1 straight_threshold:2.0 debug_output:true
+            plain_selection = #{}
+
+            if plain_result[1] and plain_result[5] != undefined then plain_selection = EditPolyMod.GetSelection plain_result[5] #Edge node:plain_test
+
+            plain_ok = plain_result[1] and plain_selection[plain_edge]
+            format "TEST planar divider selected: % | expectedEdge:% | stored:% | error:%\n" plain_ok plain_edge plain_selection plain_result[4]
+            if not plain_ok then test_passed = false
+
+            crease_data = createDividerTestObject creased:true x_offset:20.0
+            crease_test = crease_data[1]
+            crease_edge = crease_data[2]
+            crease_result = selectRedundantLoopsOnNode crease_test face_threshold:0.1 straight_threshold:2.0 debug_output:true
+            crease_ok = crease_result[1] and crease_result[3] == 0
+            format "TEST creased divider rejected: % | creaseEdge:% | selectedCount:% | error:%\n" crease_ok crease_edge crease_result[3] crease_result[4]
+            if not crease_ok then test_passed = false
+
+            t_data = createTJunctionTestObject x_offset:40.0
+            t_test = t_data[1]
+            t_edge = t_data[2]
+            t_result = selectRedundantLoopsOnNode t_test face_threshold:0.1 straight_threshold:2.0 debug_output:true
+            t_selection = #{}
+
+            if t_result[1] and t_result[5] != undefined then t_selection = EditPolyMod.GetSelection t_result[5] #Edge node:t_test
+
+            t_ok = t_result[1] and t_selection[t_edge]
+            format "TEST T-junction divider selected: % | expectedEdge:% | stored:% | error:%\n" t_ok t_edge t_selection t_result[4]
+            if not t_ok then test_passed = false
+
+            corner_data = createBorderCornerTestObject x_offset:70.0
+            corner_test = corner_data[1]
+            corner_edge = corner_data[2]
+            corner_result = selectRedundantLoopsOnNode corner_test face_threshold:0.1 straight_threshold:2.0 debug_output:true
+            corner_ok = corner_result[1] and corner_result[3] == 0
+            format "TEST border-corner divider rejected: % | cornerEdge:% | selectedCount:% | error:%\n" corner_ok corner_edge corner_result[3] corner_result[4]
+            if not corner_ok then test_passed = false
+        )
+        catch
+        (
+            format "TEST ERROR: %\n" (getCurrentException())
+            test_passed = false
+        )
+
+        if plain_test != undefined then try(delete plain_test)catch()
+        if crease_test != undefined then try(delete crease_test)catch()
+        if t_test != undefined then try(delete t_test)catch()
+        if corner_test != undefined then try(delete corner_test)catch()
+
+        format "REDUNDANT LOOP DETECTOR TESTS PASSED: %\n" test_passed
+        test_passed
+        -- return
+    ),
+
+    /*
+    Creates one visible planar divider test object for manual viewport inspection.
+    Detection is not run automatically.
+    */
+    function createManualTestObject =
+    (
+        test_data = createDividerTestObject creased:false x_offset:0.0
+        select test_data[1]
+        completeRedraw()
+        test_data[1]
+        -- return
+    ),
+
+    on create do
+    (
+    )
+)
+
+RedundantLoopDetector = RedundantLoopDetector_v()
 
 
 global WallFixer_v
@@ -4446,504 +5969,6 @@ struct WallFixer_v
     ),
 
     /*
-    Returns a normalized direction from one modifier vertex along one incident edge.
-    Undefined is returned for dead, disconnected or zero-length edges.
-    */
-    function getRedundantLoopEdgeDirection node modifier vertex_index edge_index edge_vertices vertex_points =
-    (
-        if vertex_index < 1 or vertex_index > vertex_points.count then return undefined
-        if edge_index < 1 or edge_index > edge_vertices.count then return undefined
-
-        edge_pair = edge_vertices[edge_index]
-        if edge_pair == undefined or edge_pair.count != 2 then return undefined
-
-        other_vertex = 0
-        if edge_pair[1] == vertex_index then
-        (
-            other_vertex = edge_pair[2]
-        )
-        else if edge_pair[2] == vertex_index then
-        (
-            other_vertex = edge_pair[1]
-        )
-
-        if other_vertex < 1 or other_vertex > vertex_points.count then return undefined
-        if vertex_points[vertex_index] == undefined or vertex_points[other_vertex] == undefined then return undefined
-
-        edge_direction = vertex_points[other_vertex] - vertex_points[vertex_index]
-        if length edge_direction <= epsilon then return undefined
-
-        normalize edge_direction
-        -- return
-    ),
-
-    /*
-    Returns true when all supplied incident edges can be paired as straight continuations through one vertex.
-    An empty set is valid; any unpaired or bent continuation is rejected.
-    */
-    function areRedundantLoopEdgesStraightPairs node modifier vertex_index edge_set edge_vertices vertex_points angle_threshold:0.1 =
-    (
-        if edge_set.numberSet == 0 then return true
-        if (mod edge_set.numberSet 2) != 0 then return false
-
-        pending_edges = edge_set as array
-        straight_limit = cos angle_threshold
-
-        while pending_edges.count > 0 do
-        (
-            first_edge = pending_edges[1]
-            first_direction = getRedundantLoopEdgeDirection node modifier vertex_index first_edge edge_vertices vertex_points
-            if first_direction == undefined then return false
-
-            pair_index = 0
-            for index = 2 to pending_edges.count while pair_index == 0 do
-            (
-                pair_direction = getRedundantLoopEdgeDirection node modifier vertex_index pending_edges[index] edge_vertices vertex_points
-                if pair_direction != undefined then
-                (
-                    if dot first_direction pair_direction <= -straight_limit then pair_index = index
-                )
-            )
-
-            if pair_index == 0 then return false
-            deleteItem pending_edges pair_index
-            deleteItem pending_edges 1
-        )
-
-        true
-        -- return
-    ),
-
-    /*
-    Returns true when every live face incident to one vertex stays on the reference plane direction.
-    Smoothing groups are intentionally ignored; only geometric face normals are tested.
-    */
-    function isRedundantLoopVertexPlanar vertex_index vertex_faces face_normals face_valid reference_normal angle_threshold:0.1 =
-    (
-        if vertex_index < 1 or vertex_index > vertex_faces.count then return false
-        if reference_normal == undefined or length reference_normal <= epsilon then return false
-
-        normal_limit = cos angle_threshold
-        live_face_count = 0
-
-        for face_index in vertex_faces[vertex_index] do
-        (
-            if face_index >= 1 and face_index <= face_normals.count then
-            (
-                if face_index <= face_valid.count and face_valid[face_index] then
-                (
-                    face_normal = face_normals[face_index]
-                    if face_normal == undefined then return false
-                    live_face_count += 1
-                    if abs(dot reference_normal face_normal) < normal_limit then return false
-                )
-            )
-        )
-
-        live_face_count > 0
-        -- return
-    ),
-
-    /*
-    Returns true when an open-border vertex is a real border corner.
-    Only exactly two border edges continuing straight through the vertex count as a safe border split.
-    */
-    function isRedundantLoopBorderCorner node modifier vertex_index border_edges vertex_edges edge_vertices vertex_points border_corner_angle_threshold:0.1 =
-    (
-        if vertex_index < 1 or vertex_index > vertex_edges.count then return true
-
-        incident_edges = vertex_edges[vertex_index]
-        border_incident_edges = incident_edges * border_edges
-
-        if border_incident_edges.numberSet == 0 then return false
-        if border_incident_edges.numberSet != 2 then return true
-
-        not(areRedundantLoopEdgesStraightPairs node modifier vertex_index border_incident_edges edge_vertices vertex_points angle_threshold:border_corner_angle_threshold)
-        -- return
-    ),
-
-
-    /*
-    Returns true when a redundant straight chain may terminate at one topology vertex.
-    Border endpoints are allowed only on a true straight border split; border corners are always protected.
-    Internal T-junctions may leave only straight-paired continuation edges.
-    */
-    function isRedundantLoopEndpointTopology node modifier vertex_index chain_incident_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:2.0 border_corner_angle_threshold:0.1 =
-    (
-        if vertex_index < 1 or vertex_index > vertex_edges.count then return false
-        if chain_incident_edges.numberSet != 1 then return false
-
-        incident_edges = vertex_edges[vertex_index]
-        border_incident_edges = incident_edges * border_edges
-
-        if border_incident_edges.numberSet > 0 then
-        (
-            if isRedundantLoopBorderCorner node modifier vertex_index border_edges vertex_edges edge_vertices vertex_points border_corner_angle_threshold:border_corner_angle_threshold then return false
-
-            extra_edges = incident_edges - chain_incident_edges - border_incident_edges
-            extra_edges.numberSet == 0
-        )
-        else
-        (
-            remaining_edges = incident_edges - chain_incident_edges
-            if remaining_edges.numberSet < 2 then return false
-
-            areRedundantLoopEdgesStraightPairs node modifier vertex_index remaining_edges edge_vertices vertex_points angle_threshold:straight_angle_threshold
-        )
-        -- return
-    ),
-
-    /*
-    Validates a completed straight redundant chain without changing topology.
-    Endpoints may be open-border splits or straight T-junctions; internal transverse edges must continue straight and every incident face must stay planar.
-    */
-    function validateRedundantLoopChain node modifier chain_edges chain_vertices start_vertex end_vertex border_edges vertex_edges vertex_faces edge_vertices vertex_points face_normals face_valid reference_normal angle_threshold:0.1 straight_angle_threshold:2.0 border_corner_angle_threshold:0.1 =
-    (
-        if chain_edges.numberSet == 0 then return #(false, "empty chain")
-        if chain_vertices.count < 2 then return #(false, "chain has fewer than two vertices")
-        if start_vertex == end_vertex then return #(false, "chain returns to the same border vertex")
-
-        for vertex_index in chain_vertices do
-        (
-            if not(isRedundantLoopVertexPlanar vertex_index vertex_faces face_normals face_valid reference_normal angle_threshold:angle_threshold) then
-            (
-                return #(false, "incident faces are not coplanar at vertex " + (vertex_index as string))
-            )
-
-            incident_edges = vertex_edges[vertex_index]
-            chain_incident_edges = incident_edges * chain_edges
-            border_incident_edges = incident_edges * border_edges
-            is_endpoint = vertex_index == start_vertex or vertex_index == end_vertex
-
-            if is_endpoint then
-            (
-                if not(isRedundantLoopEndpointTopology node modifier vertex_index chain_incident_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:straight_angle_threshold border_corner_angle_threshold:border_corner_angle_threshold) then
-                (
-                    return #(false, "endpoint is not a straight border split or straight T-junction at vertex " + (vertex_index as string))
-                )
-            )
-            else
-            (
-                if border_incident_edges.numberSet > 0 then
-                (
-                    return #(false, "chain touches a border before its endpoint at vertex " + (vertex_index as string))
-                )
-                if chain_incident_edges.numberSet != 2 then
-                (
-                    return #(false, "internal chain vertex does not have exactly two loop edges at vertex " + (vertex_index as string))
-                )
-                if not(areRedundantLoopEdgesStraightPairs node modifier vertex_index chain_incident_edges edge_vertices vertex_points angle_threshold:straight_angle_threshold) then
-                (
-                    return #(false, "loop changes direction at vertex " + (vertex_index as string))
-                )
-
-                transverse_edges = incident_edges - chain_incident_edges
-                if transverse_edges.numberSet > 0 then
-                (
-                    if not(areRedundantLoopEdgesStraightPairs node modifier vertex_index transverse_edges edge_vertices vertex_points angle_threshold:straight_angle_threshold) then
-                    (
-                        return #(false, "transverse continuation changes direction at vertex " + (vertex_index as string))
-                    )
-                )
-            )
-        )
-
-        #(true, "")
-        -- return
-    ),
-
-    /*
-    Detects geometrically redundant straight internal loops on the current Edit Poly topology.
-    Returns #(loop_records, all_redundant_edges); each loop record is #(edge_bitarray, start_vertex, end_vertex).
-    */
-    function detectRedundantLoops node modifier angle_threshold:0.1 straight_angle_threshold:2.0 border_corner_angle_threshold:0.1 debug_output:false =
-    (
-        loop_records = #()
-        all_redundant_edges = #{}
-
-        if node == undefined or not(isValidNode node) then return #(loop_records, all_redundant_edges)
-        if modifier == undefined or classOf modifier != Edit_Poly then return #(loop_records, all_redundant_edges)
-
-        update node
-        vertex_count = modifier.GetNumVertices node:node
-        edge_count = modifier.GetNumEdges node:node
-        face_count = modifier.GetNumFaces node:node
-        if vertex_count < 2 or edge_count < 1 or face_count < 1 then return #(loop_records, all_redundant_edges)
-
-        vertex_points = #()
-        vertex_edges = #()
-        vertex_faces = #()
-        for vertex_index = 1 to vertex_count do
-        (
-            append vertex_points (modifier.GetVertex vertex_index node:node)
-            append vertex_edges #{}
-            append vertex_faces #{}
-        )
-
-        edge_vertices = #()
-        edge_faces = #()
-        border_edges = #{}
-        border_vertices = #{}
-
-        for edge_index = 1 to edge_count do
-        (
-            edge_a = modifier.GetEdgeVertex edge_index 1 node:node
-            edge_b = modifier.GetEdgeVertex edge_index 2 node:node
-            face_a = modifier.GetEdgeFace edge_index 1 node:node
-            face_b = modifier.GetEdgeFace edge_index 2 node:node
-            edge_live = edge_a != undefined and edge_b != undefined and face_a != undefined and face_b != undefined
-
-            if edge_live then
-            (
-                edge_live = edge_a >= 1 and edge_a <= vertex_count and edge_b >= 1 and edge_b <= vertex_count
-            )
-            if edge_live then
-            (
-                edge_live = vertex_points[edge_a] != undefined and vertex_points[edge_b] != undefined
-            )
-
-            if edge_live then
-            (
-                append edge_vertices #(edge_a, edge_b)
-                append edge_faces #(face_a, face_b)
-                vertex_edges[edge_a][edge_index] = true
-                vertex_edges[edge_b][edge_index] = true
-
-                if (face_a == 0) != (face_b == 0) then
-                (
-                    border_edges[edge_index] = true
-                    border_vertices[edge_a] = true
-                    border_vertices[edge_b] = true
-                )
-            )
-            else
-            (
-                append edge_vertices undefined
-                append edge_faces undefined
-            )
-        )
-
-        face_normals = #()
-        face_valid = #{}
-        for face_index = 1 to face_count do
-        (
-            face_degree = modifier.GetFaceDegree face_index node:node
-            face_vertex_ids = #()
-            face_normal_sum = [0,0,0]
-            face_is_valid = face_degree != undefined and face_degree >= 3
-
-            if face_is_valid then
-            (
-                for corner_index = 1 to face_degree while face_is_valid do
-                (
-                    face_vertex = modifier.GetFaceVertex face_index corner_index node:node
-                    if face_vertex == undefined or face_vertex < 1 or face_vertex > vertex_count then
-                    (
-                        face_is_valid = false
-                    )
-                    else if vertex_points[face_vertex] == undefined then
-                    (
-                        face_is_valid = false
-                    )
-                    else
-                    (
-                        append face_vertex_ids face_vertex
-                        vertex_faces[face_vertex][face_index] = true
-                    )
-                )
-            )
-
-            if face_is_valid then
-            (
-                origin_point = vertex_points[face_vertex_ids[1]]
-                for corner_index = 2 to (face_vertex_ids.count - 1) do
-                (
-                    point_b = vertex_points[face_vertex_ids[corner_index]]
-                    point_c = vertex_points[face_vertex_ids[corner_index + 1]]
-                    face_normal_sum += cross (point_b - origin_point) (point_c - origin_point)
-                )
-                if length face_normal_sum <= epsilon then face_is_valid = false
-            )
-
-            if face_is_valid then
-            (
-                append face_normals (normalize face_normal_sum)
-                face_valid[face_index] = true
-            )
-            else
-            (
-                append face_normals undefined
-            )
-        )
-
-        candidate_edges = #{}
-        normal_limit = cos angle_threshold
-        straight_limit = cos straight_angle_threshold
-        for edge_index = 1 to edge_count do
-        (
-            edge_face_pair = edge_faces[edge_index]
-            is_border_edge = edge_index <= border_edges.count and border_edges[edge_index]
-            if edge_face_pair != undefined and not is_border_edge then
-            (
-                face_a = edge_face_pair[1]
-                face_b = edge_face_pair[2]
-                if face_a > 0 and face_b > 0 and face_a <= face_count and face_b <= face_count then
-                (
-                    face_a_valid = face_a <= face_valid.count and face_valid[face_a]
-                    face_b_valid = face_b <= face_valid.count and face_valid[face_b]
-                    if face_a_valid and face_b_valid then
-                    (
-                        if abs(dot face_normals[face_a] face_normals[face_b]) >= normal_limit then candidate_edges[edge_index] = true
-                    )
-                )
-            )
-        )
-
-        accepted_keys = #()
-        attempted_keys = #()
-
-        for start_edge in candidate_edges do
-        (
-            start_edge_vertices = edge_vertices[start_edge]
-            if start_edge_vertices != undefined then
-            (
-                possible_start_vertices = #()
-                start_chain_edges = #{}
-                start_chain_edges[start_edge] = true
-
-                if isRedundantLoopEndpointTopology node modifier start_edge_vertices[1] start_chain_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:straight_angle_threshold border_corner_angle_threshold:border_corner_angle_threshold then
-                (
-                    append possible_start_vertices start_edge_vertices[1]
-                )
-                if isRedundantLoopEndpointTopology node modifier start_edge_vertices[2] start_chain_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:straight_angle_threshold border_corner_angle_threshold:border_corner_angle_threshold then
-                (
-                    append possible_start_vertices start_edge_vertices[2]
-                )
-
-                for start_vertex in possible_start_vertices do
-                (
-                    attempt_key = (start_edge as string) + ":" + (start_vertex as string)
-                    if findItem attempted_keys attempt_key == 0 then
-                    (
-                        append attempted_keys attempt_key
-                        chain_edges = #{}
-                        chain_vertices = #(start_vertex)
-                        chain_edges[start_edge] = true
-                        previous_vertex = start_vertex
-                        current_edge = start_edge
-                        current_vertex = if start_edge_vertices[1] == start_vertex then start_edge_vertices[2] else start_edge_vertices[1]
-                        append chain_vertices current_vertex
-                        rejected_reason = ""
-                        completed_chain = false
-                        step_count = 0
-
-                        while rejected_reason == "" and not completed_chain and step_count <= edge_count do
-                        (
-                            step_count += 1
-
-                            current_is_border = current_vertex <= border_vertices.count and border_vertices[current_vertex]
-                            if current_is_border then
-                            (
-                                completed_chain = true
-                            )
-                            else
-                            (
-                                incoming_direction = vertex_points[current_vertex] - vertex_points[previous_vertex]
-                                if length incoming_direction <= epsilon then
-                                (
-                                    rejected_reason = "zero-length chain segment"
-                                )
-                                else
-                                (
-                                    incoming_direction = normalize incoming_direction
-                                    straight_forward_edges = #()
-                                    incident_candidates = vertex_edges[current_vertex] * candidate_edges
-
-                                    for candidate_edge in incident_candidates do
-                                    (
-                                        if candidate_edge != current_edge then
-                                        (
-                                            candidate_pair = edge_vertices[candidate_edge]
-                                            next_vertex = if candidate_pair[1] == current_vertex then candidate_pair[2] else candidate_pair[1]
-                                            outgoing_direction = vertex_points[next_vertex] - vertex_points[current_vertex]
-                                            if length outgoing_direction > epsilon then
-                                            (
-                                                outgoing_direction = normalize outgoing_direction
-                                                if dot incoming_direction outgoing_direction >= straight_limit then append straight_forward_edges candidate_edge
-                                            )
-                                        )
-                                    )
-
-                                    if straight_forward_edges.count == 0 then
-                                    (
-                                        completed_chain = true
-                                    )
-                                    else if straight_forward_edges.count > 1 then
-                                    (
-                                        rejected_reason = "straight chain branches before reaching another border"
-                                    )
-                                    else
-                                    (
-                                        next_edge = straight_forward_edges[1]
-                                        if chain_edges[next_edge] then
-                                        (
-                                            rejected_reason = "chain cycles before reaching another border"
-                                        )
-                                        else
-                                        (
-                                            next_pair = edge_vertices[next_edge]
-                                            next_vertex = if next_pair[1] == current_vertex then next_pair[2] else next_pair[1]
-                                            chain_edges[next_edge] = true
-                                            previous_vertex = current_vertex
-                                            current_vertex = next_vertex
-                                            current_edge = next_edge
-                                            append chain_vertices current_vertex
-                                        )
-                                    )
-                                )
-                            )
-                        )
-
-                        if rejected_reason == "" and not completed_chain then rejected_reason = "chain exceeded topology traversal limit"
-
-                        if rejected_reason == "" then
-                        (
-                            first_edge_faces = edge_faces[start_edge]
-                            reference_normal = face_normals[first_edge_faces[1]]
-                            validation_result = validateRedundantLoopChain node modifier chain_edges chain_vertices start_vertex current_vertex border_edges vertex_edges vertex_faces edge_vertices vertex_points face_normals face_valid reference_normal angle_threshold:angle_threshold straight_angle_threshold:straight_angle_threshold border_corner_angle_threshold:border_corner_angle_threshold
-                            if not validation_result[1] then rejected_reason = validation_result[2]
-                        )
-
-                        if rejected_reason == "" then
-                        (
-                            chain_key = chain_edges as string
-                            if findItem accepted_keys chain_key == 0 then
-                            (
-                                append accepted_keys chain_key
-                                append loop_records #(copy chain_edges, start_vertex, current_vertex)
-                                all_redundant_edges = all_redundant_edges + chain_edges
-                                if debug_output and not batch_quiet then format "Wall-Fixer Redundant Loop Detected: node:% loop:% edges:% startVert:% endVert:%\n" node.name loop_records.count chain_edges start_vertex current_vertex
-                            )
-                        )
-                        else if debug_output then
-                        (
-                            if not batch_quiet then format "Wall-Fixer Redundant Loop Rejected: node:% startEdge:% startVert:% traversedEdges:% reason:%\n" node.name start_edge start_vertex chain_edges rejected_reason
-                        )
-                    )
-                )
-            )
-        )
-
-        if debug_output then
-        (
-            if not batch_quiet then format "Wall-Fixer Redundant Loop Detection Summary: node:% candidateEdges:% loops:% redundantEdges:%\n" node.name candidate_edges loop_records.count all_redundant_edges
-        )
-
-        #(loop_records, all_redundant_edges)
-        -- return
-    ),
-
-    /*
     Returns true when one polygon point set is geometrically degenerated.
     Repeated corner positions and effectively zero polygon area are treated as degenerated while preserving valid small faces.
     */
@@ -5590,890 +6615,6 @@ struct WallFixer_v
         passed
         -- return
     ),
-
-    /*
-    Returns the POST-PROCESS RMB mode for redundant-loop cleanup.
-    A live edge selection always takes precedence over automatic redundant-loop detection.
-    */
-    function getRedundantLoopRemoveMode selected_edge_count =
-    (
-        if selected_edge_count > 0 then #selectedEdges else #allRedundant
-        -- return
-    ),
-
-    /*
-    Tests redundant-loop endpoint rules, including strict open-border corner protection.
-    Internal T-junctions may use the relaxed chain tolerance, but border endpoints must be true straight splits.
-    */
-    function testRedundantLoopTerminalTopology =
-    (
-        vertex_points = #([0,0,0], [-1,0,0], [0,1,0], [0,-1,0])
-        vertex_edges = #(#{1,2,3}, #{1}, #{2}, #{3})
-        edge_vertices = #(#(1,2), #(1,3), #(1,4))
-        chain_edges = #{1}
-        border_edges = #{}
-
-        t_junction_ok = isRedundantLoopEndpointTopology undefined undefined 1 chain_edges border_edges vertex_edges edge_vertices vertex_points straight_angle_threshold:2.0 border_corner_angle_threshold:0.1
-
-        corner_points = #([0,0,0], [-1,0,0], [0,1,0], [1,0,0])
-        corner_rejected = not(isRedundantLoopEndpointTopology undefined undefined 1 chain_edges border_edges vertex_edges edge_vertices corner_points straight_angle_threshold:2.0 border_corner_angle_threshold:0.1)
-
-        border_vertex_points = #([0,0,0], [0,-1,0], [-1,0,0], [1,0,0])
-        border_vertex_edges = #(#{1,2,3}, #{1}, #{2}, #{3})
-        border_edge_vertices = #(#(1,2), #(1,3), #(1,4))
-        border_chain_edges = #{1}
-        border_edges = #{2,3}
-        straight_border_split_ok = isRedundantLoopEndpointTopology undefined undefined 1 border_chain_edges border_edges border_vertex_edges border_edge_vertices border_vertex_points straight_angle_threshold:2.0 border_corner_angle_threshold:0.1
-
-        border_corner_points = #([0,0,0], [0,-1,0], [-1,0,0], [0,1,0])
-        border_corner_rejected = not(isRedundantLoopEndpointTopology undefined undefined 1 border_chain_edges border_edges border_vertex_edges border_edge_vertices border_corner_points straight_angle_threshold:2.0 border_corner_angle_threshold:0.1)
-
-        shallow_corner_points = #([0,0,0], [0,-1,0], [-1,0,0], [0.9999619,0.00872654,0])
-        shallow_corner_rejected = not(isRedundantLoopEndpointTopology undefined undefined 1 border_chain_edges border_edges border_vertex_edges border_edge_vertices shallow_corner_points straight_angle_threshold:2.0 border_corner_angle_threshold:0.1)
-
-        tolerance_points = #([0,0,0], [1,0,0], [-0.9997807,0.0209424,0])
-        tolerance_edges = #(#(1,2), #(1,3))
-        tolerance_pair = #{1,2}
-        relaxed_ok = areRedundantLoopEdgesStraightPairs undefined undefined 1 tolerance_pair tolerance_edges tolerance_points angle_threshold:2.0
-        strict_rejected = not(areRedundantLoopEdgesStraightPairs undefined undefined 1 tolerance_pair tolerance_edges tolerance_points angle_threshold:0.1)
-
-        passed = t_junction_ok and corner_rejected and straight_border_split_ok and border_corner_rejected and shallow_corner_rejected and relaxed_ok and strict_rejected
-        format "Redundant-loop terminal topology | tJunction:% | internalCornerRejected:% | borderSplit:% | borderCornerRejected:% | shallowBorderCornerRejected:% | relaxed:% | strictRejected:% | passed:%\n" t_junction_ok corner_rejected straight_border_split_ok border_corner_rejected shallow_corner_rejected relaxed_ok strict_rejected passed
-
-        passed
-        -- return
-    ),
-
-    /*
-    Returns one selected edge source for a node, preferring the active Edit Poly, then other Edit Poly modifiers, then Editable Poly.
-    The result is #(source_kind, source_value, selected_edges).
-    */
-    function getRedundantLoopSelectedEdgeSource node =
-    (
-        if node == undefined or not(isValidNode node) then return #(#none, undefined, #{})
-
-        setEditablePolyCageOff node
-
-        current_object = undefined
-        try
-        (
-            current_object = modPanel.getCurrentObject()
-        )
-        catch
-        (
-            current_object = undefined
-        )
-
-        if current_object != undefined and classOf current_object == Edit_Poly then
-        (
-            belongs_to_node = false
-            for modifier in node.modifiers while not belongs_to_node do
-            (
-                if modifier == current_object then belongs_to_node = true
-            )
-
-            if belongs_to_node then
-            (
-                selected_edges = #{}
-                try
-                (
-                    selected_edges = current_object.GetSelection #Edge node:node
-                )
-                catch
-                (
-                    selected_edges = #{}
-                )
-
-                if selected_edges.numberSet > 0 then return #(#editPoly, current_object, selected_edges)
-            )
-        )
-
-        for modifier in node.modifiers do
-        (
-            if classOf modifier == Edit_Poly then
-            (
-                selected_edges = #{}
-                try
-                (
-                    selected_edges = modifier.GetSelection #Edge node:node
-                )
-                catch
-                (
-                    selected_edges = #{}
-                )
-
-                if selected_edges.numberSet > 0 then return #(#editPoly, modifier, selected_edges)
-            )
-        )
-
-        if classOf node.baseObject == Editable_Poly then
-        (
-            selected_edges = #{}
-            try
-            (
-                selected_edges = polyop.getEdgeSelection node.baseObject
-            )
-            catch
-            (
-                selected_edges = #{}
-            )
-
-            if selected_edges.numberSet > 0 then return #(#editablePoly, node.baseObject, selected_edges)
-        )
-
-        #(#none, undefined, #{})
-        -- return
-    ),
-
-    /*
-    Selects detected redundant-loop edges on one node without removing geometry.
-    Modified objects are preflighted with snapshotAsMesh; exactly one SELECT REDUNDANT LOOPS Edit Poly is created/reused and kept even when empty.
-    */
-    function selectRedundantLoopsOnNode node angle_threshold:0.1 debug_output:true =
-    (
-        if node == undefined or not(isValidNode node) then return #(false, 0, 0, "invalid node", undefined, #{})
-        if superclassof node != GeometryClass then return #(false, 0, 0, "requires geometry", undefined, #{})
-
-        selection_modifier = undefined
-        operation_error = undefined
-        loop_count = 0
-        redundant_edge_count = 0
-        redundant_edges = #{}
-        evaluated_mesh = undefined
-        snapshot_vertex_count = undefined
-        select_name = getSelectDeleteModifierName "REDUNDANT LOOPS"
-
-        try
-        (
-            if node.modifiers.count > 0 then
-            (
-                evaluated_mesh = snapshotAsMesh node
-                if evaluated_mesh == undefined then throw "could not create evaluated snapshot"
-                snapshot_vertex_count = getNumVerts evaluated_mesh
-                free evaluated_mesh
-                evaluated_mesh = undefined
-            )
-
-            selection_modifier = ensureNamedEditPolyModifier node select_name #Edge
-            if selection_modifier == undefined then throw (select_name + " could not be created or reused")
-
-            if snapshot_vertex_count != undefined then
-            (
-                live_vertex_count = selection_modifier.GetNumVertices node:node
-                if live_vertex_count != snapshot_vertex_count then
-                (
-                    throw "evaluated snapshot vertex IDs do not match SELECT REDUNDANT LOOPS"
-                )
-            )
-
-            selection_modifier.SetSelection #Edge #{} node:node
-
-            detection_data = detectRedundantLoops node selection_modifier angle_threshold:angle_threshold debug_output:debug_output
-            loop_records = detection_data[1]
-            redundant_edges = detection_data[2]
-            loop_count = loop_records.count
-            redundant_edge_count = redundant_edges.numberSet
-
-            selection_modifier.SetSelection #Edge redundant_edges node:node
-            stored_selection = selection_modifier.GetSelection #Edge node:node
-            if stored_selection != redundant_edges then
-            (
-                throw ("SELECT REDUNDANT LOOPS could not store the detected redundant edges. Requested:" + (redundant_edges as string) + " actual:" + (stored_selection as string))
-            )
-
-            selection_modifier.showCage = off
-            update node
-        )
-        catch
-        (
-            if evaluated_mesh != undefined then free evaluated_mesh
-            operation_error = getCurrentException()
-            update node
-        )
-
-        if operation_error == undefined then
-        (
-            #(true, loop_count, redundant_edge_count, "", selection_modifier, copy redundant_edges)
-        )
-        else
-        (
-            #(false, 0, 0, operation_error as string, selection_modifier, #{})
-        )
-        -- return
-    ),
-
-
-    /*
-    Activates SELECT REDUNDANT LOOPS and writes the requested edges only after the modifier is displayed.
-    Returns #(success, final_selection); success requires exact final modifier selection persistence.
-    */
-    function activateRedundantLoopSelectionDisplay node selection_modifier edge_selection =
-    (
-        if node == undefined or not(isValidNode node) then return #(false, #{})
-        if selection_modifier == undefined or classOf selection_modifier != Edit_Poly then return #(false, #{})
-
-        final_selection = #{}
-        display_ok = false
-
-        try
-        (
-            select node
-            max modify mode
-
-            selection_modifier.useStackSelection = false
-            selection_modifier.showCage = off
-            modPanel.setCurrentObject selection_modifier
-            selection_modifier.SetEPolySelLevel #Edge
-            subObjectLevel = 2
-
-            selection_modifier.SetSelection #Edge edge_selection node:node
-            final_selection = selection_modifier.GetSelection #Edge node:node
-
-            if final_selection != edge_selection then
-            (
-                empty_edges = #{}
-                selection_modifier.SetSelection #Edge empty_edges node:node
-                selection_modifier.Select #Edge edge_selection invert:false select:true node:node
-                final_selection = selection_modifier.GetSelection #Edge node:node
-            )
-
-            update node
-            completeRedraw()
-
-            final_selection = selection_modifier.GetSelection #Edge node:node
-            current_object = modPanel.getCurrentObject()
-
-            display_ok = \
-                (current_object == selection_modifier) and \
-                (subObjectLevel == 2) and \
-                ((EditPolyMod.GetEPolySelLevel selection_modifier) == #Edge) and \
-                (final_selection == edge_selection)
-        )
-        catch
-        (
-            final_selection = #{}
-            display_ok = false
-        )
-
-        #(display_ok, final_selection)
-        -- return
-    ),
-
-
-    /*
-    Selects redundant-loop edges on every selected supported wall and reports the aggregate result.
-    When any loops are found, the first matching node is focused on its SELECT REDUNDANT LOOPS modifier and Edge sub-object mode is activated.
-    */
-    function selectRedundantLoopsSelection angle_threshold:0.1 debug_output:true =
-    (
-        last_slice_error = undefined
-        last_slice_report = ""
-        selected_nodes = selection as array
-
-        if selected_nodes.count == 0 then
-        (
-            last_slice_report = "Select at least one wall object."
-            return #(false, 0, 0)
-        )
-
-        total_loops = 0
-        total_edges = 0
-        failed_nodes = #()
-        report_text = ""
-        display_node = undefined
-        display_modifier = undefined
-        display_edges = #{}
-
-        for node in selected_nodes do
-        (
-            selection_result = selectRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output
-            if selection_result[1] then
-            (
-                total_loops += selection_result[2]
-                total_edges += selection_result[3]
-                report_text += node.name + ": loops " + (selection_result[2] as string) + ", edges selected " + (selection_result[3] as string) + ".\n"
-
-                if display_modifier == undefined then
-                (
-                    display_node = node
-                    display_modifier = selection_result[5]
-                    display_edges = selection_result[6]
-                )
-            )
-            else
-            (
-                append failed_nodes node.name
-                report_text += node.name + ": FAILED - " + selection_result[4] + ".\n"
-            )
-        )
-
-        if display_modifier != undefined then
-        (
-            display_result = activateRedundantLoopSelectionDisplay display_node display_modifier display_edges
-
-            if not display_result[1] then
-            (
-                append failed_nodes display_node.name
-                report_text += display_node.name + ": FAILED - SELECT REDUNDANT LOOPS final selection mismatch. Requested " + (display_edges as string) + ", stored " + (display_result[2] as string) + ".\n"
-            )
-            else if not batch_quiet then
-            (
-                format "SELECT REDUNDANT LOOPS final selection: %\n" display_result[2]
-            )
-        )
-        else
-        (
-            select selected_nodes
-            completeRedraw()
-        )
-
-        if failed_nodes.count == 0 then
-        (
-            if total_edges > 0 then
-            (
-                last_slice_report = "Redundant Loop Selection complete. Loops: " + (total_loops as string) + "; edges selected: " + (total_edges as string) + ".\n" + report_text
-            )
-            else
-            (
-                last_slice_report = "No redundant loops found.\n" + report_text
-            )
-
-            if not batch_quiet then format "%" last_slice_report
-            #(true, total_loops, total_edges)
-        )
-        else
-        (
-            last_slice_report = "Redundant Loop Selection completed with failures.\n" + report_text
-            if not batch_quiet then format "%" last_slice_report
-            #(false, total_loops, total_edges)
-        )
-        -- return
-    ),
-
-    /*
-    Tests that detected redundant-loop edges survive activation of SELECT REDUNDANT LOOPS.
-    Requires exactly one selected supported wall and leaves the selection modifier in place for viewport inspection.
-    */
-    function testRedundantLoopSelectionPersistence angle_threshold:0.1 =
-    (
-        if selection.count != 1 then
-        (
-            format "Redundant-loop selection persistence | passed:false | reason:select exactly one wall object\n"
-            false
-        )
-        else
-        (
-            test_node = selection[1]
-            selection_result = selectRedundantLoopsOnNode test_node angle_threshold:angle_threshold debug_output:false
-            test_passed = selection_result[1]
-
-            if selection_result[1] and selection_result[3] > 0 then
-            (
-                test_modifier = selection_result[5]
-                expected_edges = selection_result[6]
-                display_result = activateRedundantLoopSelectionDisplay test_node test_modifier expected_edges
-                actual_edges = display_result[2]
-
-                test_passed = display_result[1] and (actual_edges == expected_edges)
-
-                format "Redundant-loop selection persistence | expected:% | stored:% | modifier:% | passed:%\n" expected_edges actual_edges test_modifier.name test_passed
-            )
-            else if selection_result[1] then
-            (
-                format "Redundant-loop selection persistence | passed:false | reason:no redundant loops detected\n"
-                test_passed = false
-            )
-            else
-            (
-                format "Redundant-loop selection persistence | passed:false | reason:%\n" selection_result[4]
-                test_passed = false
-            )
-
-            test_passed
-        )
-        -- return
-    ),
-
-
-    /*
-    Removes only the redundant-loop edges stored in SELECT REDUNDANT LOOPS and renames that same modifier DELETED REDUNDANT LOOPS.
-    When RMB is used without a preceding LMB, the snapshot-based selector creates the SELECT modifier first so no unrelated selection is consumed.
-    */
-    function deleteSelectedRedundantLoopsOnNode node angle_threshold:0.1 debug_output:true =
-    (
-        if node == undefined or not(isValidNode node) then return #(false, 0, "invalid node", undefined)
-
-        select_name = getSelectDeleteModifierName "REDUNDANT LOOPS"
-        deleted_name = getSelectDeleteModifierName "REDUNDANT LOOPS" deleted:true
-        selection_modifier = findNamedEditPolyModifier node select_name
-
-        if selection_modifier == undefined then
-        (
-            select_result = selectRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output
-            if not select_result[1] then return #(false, 0, select_result[4], select_result[5])
-            selection_modifier = select_result[5]
-        )
-
-        if selection_modifier == undefined then return #(false, 0, "SELECT REDUNDANT LOOPS modifier unavailable", undefined)
-
-        operation_error = undefined
-        removed_edge_count = 0
-        old_remove_ctrl = undefined
-
-        try
-        (
-            stored_selection = selection_modifier.GetSelection #Edge node:node
-            if stored_selection == undefined then stored_selection = #{}
-
-            detection_data = detectRedundantLoops node selection_modifier angle_threshold:angle_threshold debug_output:false
-            current_redundant_edges = detection_data[2]
-            edges_to_remove = stored_selection * current_redundant_edges
-
-            selection_modifier.useStackSelection = false
-            selection_modifier.showCage = off
-            selection_modifier.SetEPolySelLevel #Edge
-            selection_modifier.SetSelection #Edge edges_to_remove node:node
-
-            verified_selection = selection_modifier.GetSelection #Edge node:node
-            if verified_selection != edges_to_remove then
-            (
-                throw ("DELETED REDUNDANT LOOPS selection mismatch. Requested:" + (edges_to_remove as string) + " actual:" + (verified_selection as string))
-            )
-
-            if edges_to_remove.numberSet > 0 then
-            (
-                old_remove_ctrl = selection_modifier.remveEdgeCtrlKey
-                selection_modifier.remveEdgeCtrlKey = false
-                removed_edge_count = edges_to_remove.numberSet
-                selection_modifier.SetOperation #RemoveEdge
-                selection_modifier.Commit()
-                selection_modifier.remveEdgeCtrlKey = old_remove_ctrl
-                old_remove_ctrl = undefined
-                update node
-            )
-
-            selection_modifier.name = deleted_name
-            selection_modifier.showCage = off
-            update node
-
-            if debug_output and not batch_quiet then
-            (
-                format "Wall-Fixer Redundant Loops Delete: node:% removedEdges:% modifier:%\n" node.name removed_edge_count selection_modifier.name
-            )
-        )
-        catch
-        (
-            if old_remove_ctrl != undefined then
-            (
-                try(selection_modifier.remveEdgeCtrlKey = old_remove_ctrl)catch()
-            )
-
-            operation_error = getCurrentException()
-            update node
-        )
-
-        if operation_error == undefined then
-        (
-            #(true, removed_edge_count, "", selection_modifier)
-        )
-        else
-        (
-            #(false, 0, operation_error as string, selection_modifier)
-        )
-        -- return
-    ),
-
-
-    /*
-    Runs project-standard RMB redundant-loop deletion on all selected geometry objects.
-    Each object finishes with the committed modifier named DELETED REDUNDANT LOOPS and cage display disabled.
-    */
-    function deleteSelectedRedundantLoopsSelection angle_threshold:0.1 debug_output:true =
-    (
-        last_slice_error = undefined
-        last_slice_report = ""
-        selected_nodes = selection as array
-
-        if selected_nodes.count == 0 then
-        (
-            last_slice_report = "Select at least one wall object."
-            return #(false, 0)
-        )
-
-        total_removed = 0
-        failed_nodes = #()
-        report_text = ""
-        display_node = undefined
-        display_modifier = undefined
-
-        undo "Wall-Fixer - Delete Redundant Loops" on
-        (
-            for node in selected_nodes do
-            (
-                if superclassof node == GeometryClass then
-                (
-                    delete_result = deleteSelectedRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output
-
-                    if delete_result[1] then
-                    (
-                        total_removed += delete_result[2]
-                        report_text += node.name + ": removed " + (delete_result[2] as string) + " redundant edge(s).\n"
-
-                        if display_modifier == undefined then
-                        (
-                            display_node = node
-                            display_modifier = delete_result[4]
-                        )
-                    )
-                    else
-                    (
-                        append failed_nodes node.name
-                        report_text += node.name + ": FAILED - " + delete_result[3] + ".\n"
-                    )
-                )
-            )
-        )
-
-        if display_modifier != undefined then
-        (
-            try
-            (
-                select display_node
-                max modify mode
-                display_modifier.showCage = off
-                display_modifier.useStackSelection = false
-                modPanel.setCurrentObject display_modifier
-                display_modifier.SetEPolySelLevel #Edge
-                subObjectLevel = 2
-                completeRedraw()
-            )
-            catch()
-        )
-        else
-        (
-            select selected_nodes
-            completeRedraw()
-        )
-
-        if failed_nodes.count == 0 then
-        (
-            last_slice_report = "Redundant Loop Delete complete. Edges removed: " + (total_removed as string) + ".\n" + report_text
-            if not batch_quiet then format "%" last_slice_report
-            #(true, total_removed)
-        )
-        else
-        (
-            last_slice_report = "Redundant Loop Delete completed with failures.\n" + report_text
-            if not batch_quiet then format "%" last_slice_report
-            #(false, total_removed)
-        )
-        -- return
-    ),
-
-
-    /*
-    Removes the supplied selected edges from one Edit Poly or Editable Poly source without deleting attached faces.
-    Edit Poly uses Remove Edge; Editable Poly uses the native EditablePoly.Remove interface with a temporary user flag.
-    */
-    function removeRedundantLoopSelectedEdgesOnNode node source_kind source_value selected_edges =
-    (
-        if node == undefined or not(isValidNode node) then return #(false, 0, "invalid node")
-        if selected_edges == undefined or selected_edges.numberSet == 0 then return #(false, 0, "no selected edges")
-
-        operation_error = undefined
-        removed_edge_count = selected_edges.numberSet
-        old_remove_ctrl = undefined
-        edge_flag = undefined
-
-        try
-        (
-            case source_kind of
-            (
-                #editPoly:
-                (
-                    if source_value == undefined or classOf source_value != Edit_Poly then throw "invalid Edit Poly source"
-
-                    old_remove_ctrl = source_value.remveEdgeCtrlKey
-                    source_value.remveEdgeCtrlKey = false
-                    source_value.SetPrimaryNode node
-                    source_value.SetEPolySelLevel #Edge
-                    source_value.SetSelection #Edge selected_edges node:node
-
-                    actual_selection = source_value.GetSelection #Edge node:node
-                    if actual_selection != selected_edges then
-                    (
-                        throw ("Could not restore selected edges before removal. Requested:" + (selected_edges as string) + " actual:" + (actual_selection as string))
-                    )
-
-                    source_value.SetOperation #RemoveEdge
-                    source_value.Commit()
-                    source_value.remveEdgeCtrlKey = old_remove_ctrl
-                    old_remove_ctrl = undefined
-                    source_value.RefreshScreen()
-                    update node
-                )
-
-                #editablePoly:
-                (
-                    if classOf node.baseObject != Editable_Poly then throw "invalid Editable Poly source"
-
-                    edge_flag = bit.set 0 30 true
-                    polyop.setEdgeFlags node.baseObject selected_edges edge_flag mask:edge_flag undoable:true
-                    remove_success = source_value.EditablePoly.Remove selLevel:#Edge flag:edge_flag
-                    if not remove_success then throw "Editable Poly Remove Edge failed"
-
-                    try(polyop.setEdgeFlags node.baseObject #all 0 mask:edge_flag undoable:false)catch()
-                    polyop.setEdgeSelection node.baseObject #{}
-                    update node
-                )
-
-                default:
-                (
-                    throw "unsupported selected-edge source"
-                )
-            )
-        )
-        catch
-        (
-            operation_error = getCurrentException()
-        )
-
-        if old_remove_ctrl != undefined and source_value != undefined then
-        (
-            try(source_value.remveEdgeCtrlKey = old_remove_ctrl)catch()
-        )
-
-        if operation_error == undefined then
-        (
-            #(true, removed_edge_count, "")
-        )
-        else
-        (
-            #(false, 0, operation_error as string)
-        )
-        -- return
-    ),
-
-    /*
-    Detects and removes redundant loops in one Cleanup LOOPS Edit Poly modifier.
-    The optional reuse mode lets POST-PROCESS RMB operate in the same dedicated top Cleanup LOOPS modifier used by its preceding LMB selection.
-    */
-    function cleanupRedundantLoopsOnNode node angle_threshold:0.1 debug_output:true commit_delete:false reuse_top_modifier:false =
-    (
-        if node == undefined or not(isValidNode node) then return #(false, 0, 0, "invalid node")
-        if not(isSliceSupportedNode node) then return #(false, 0, 0, "requires Editable Poly geometry or an Edit Poly workflow")
-
-        cleanup_modifier = undefined
-        created_modifier = false
-        operation_error = undefined
-        loop_count = 0
-        redundant_edge_count = 0
-        old_remove_ctrl = undefined
-
-        try
-        (
-            if reuse_top_modifier and node.modifiers.count > 0 and classOf node.modifiers[1] == Edit_Poly and node.modifiers[1].name == "WMC - CLEANUP LOOPS" then
-            (
-                cleanup_modifier = node.modifiers[1]
-            )
-            else
-            (
-                cleanup_modifier = Edit_Poly name:"WMC - CLEANUP LOOPS"
-                addModifier node cleanup_modifier
-                created_modifier = true
-                update node
-            )
-
-            select node
-            max modify mode
-            modPanel.setCurrentObject cleanup_modifier
-            cleanup_modifier.SetPrimaryNode node
-            cleanup_modifier.useStackSelection = false
-
-            detection_data = detectRedundantLoops node cleanup_modifier angle_threshold:angle_threshold debug_output:debug_output
-            loop_records = detection_data[1]
-            redundant_edges = detection_data[2]
-            loop_count = loop_records.count
-            redundant_edge_count = redundant_edges.numberSet
-
-            if redundant_edge_count == 0 then
-            (
-                if created_modifier then
-                (
-                    deleteModifier node cleanup_modifier
-                    cleanup_modifier = undefined
-                    update node
-                )
-                else
-                (
-                    cleanup_modifier.SetEPolySelLevel #Edge
-                    cleanup_modifier.SetSelection #Edge #{} node:node
-                )
-
-                if debug_output then
-                (
-                    if not batch_quiet then format "Wall-Fixer Redundant Loop Cleanup: node:% no redundant loops found.\n" node.name
-                )
-
-                return #(true, 0, 0, "")
-            )
-
-            edge_descriptors = #()
-            for edge_index in redundant_edges do
-            (
-                edge_a = cleanup_modifier.GetEdgeVertex edge_index 1 node:node
-                edge_b = cleanup_modifier.GetEdgeVertex edge_index 2 node:node
-
-                if edge_a == undefined or edge_b == undefined then
-                (
-                    throw ("Detected redundant-loop edge became invalid before cleanup: " + (edge_index as string))
-                )
-
-                point_a = cleanup_modifier.GetVertex edge_a node:node
-                point_b = cleanup_modifier.GetVertex edge_b node:node
-
-                if point_a == undefined or point_b == undefined then
-                (
-                    throw ("Detected redundant-loop edge endpoints became invalid before cleanup: " + (edge_index as string))
-                )
-
-                append edge_descriptors #(edge_index, point_a, point_b)
-            )
-
-            old_remove_ctrl = cleanup_modifier.remveEdgeCtrlKey
-            cleanup_modifier.remveEdgeCtrlKey = false
-            cleanup_modifier.SetEPolySelLevel #Edge
-            cleanup_modifier.SetSelection #Edge #{} node:node
-            cleanup_modifier.Select #Edge redundant_edges node:node
-
-            stored_selection = cleanup_modifier.GetSelection #Edge node:node
-            if stored_selection != redundant_edges then
-            (
-                throw ("Cleanup LOOPS could not select the detected redundant edges. Requested:" + (redundant_edges as string) + " actual:" + (stored_selection as string))
-            )
-
-            cleanup_modifier.SetOperation #RemoveEdge
-            cleanup_modifier.Commit()
-            cleanup_modifier.remveEdgeCtrlKey = old_remove_ctrl
-            old_remove_ctrl = undefined
-            update node
-
-            unresolved_edges = #{}
-            for edge_data in edge_descriptors do
-            (
-                if doesDebugVisibleEdgeExistByEndpointPositions node edge_data[2] edge_data[3] tolerance:0.01 then
-                (
-                    unresolved_edges[edge_data[1]] = true
-                )
-            )
-
-            if unresolved_edges.numberSet > 0 then
-            (
-                throw ("Cleanup LOOPS left detected redundant edges visible: " + (unresolved_edges as string))
-            )
-
-            if debug_output then
-            (
-                if not batch_quiet then format "Wall-Fixer Redundant Loop Cleanup Complete: node:% loops:% removedEdges:% modifier:%\n" node.name loop_count redundant_edge_count cleanup_modifier.name
-            )
-        )
-        catch
-        (
-            operation_error = getCurrentException()
-
-            if old_remove_ctrl != undefined and cleanup_modifier != undefined then
-            (
-                try(cleanup_modifier.remveEdgeCtrlKey = old_remove_ctrl)catch()
-            )
-
-            if cleanup_modifier != undefined and created_modifier then
-            (
-                try(deleteModifier node cleanup_modifier)catch()
-                cleanup_modifier = undefined
-            )
-
-            update node
-        )
-
-        if operation_error == undefined then
-        (
-            #(true, loop_count, redundant_edge_count, "")
-        )
-        else
-        (
-            #(false, 0, 0, operation_error as string)
-        )
-        -- return
-    ),
-
-    /*
-    Runs redundant-loop cleanup on every selected supported wall and restores the original node selection.
-    Nodes with no redundant loops receive no new modifiers unless an existing top Edit Poly is explicitly reused.
-    */
-    function cleanupRedundantLoopsSelection angle_threshold:0.1 debug_output:true reuse_top_modifier:false =
-    (
-        last_slice_error = undefined
-        last_slice_report = ""
-        selected_nodes = selection as array
-
-        if selected_nodes.count == 0 then
-        (
-            last_slice_report = "Select at least one wall object."
-            return false
-        )
-
-        total_loops = 0
-        total_edges = 0
-        processed_nodes = 0
-        failed_nodes = #()
-        report_text = ""
-
-        for node in selected_nodes do
-        (
-            cleanup_result = cleanupRedundantLoopsOnNode node angle_threshold:angle_threshold debug_output:debug_output reuse_top_modifier:reuse_top_modifier
-            if cleanup_result[1] then
-            (
-                processed_nodes += 1
-                total_loops += cleanup_result[2]
-                total_edges += cleanup_result[3]
-                report_text += node.name + ": loops " + (cleanup_result[2] as string) + ", edges " + (cleanup_result[3] as string) + ".\n"
-            )
-            else
-            (
-                append failed_nodes node.name
-                report_text += node.name + ": FAILED - " + cleanup_result[4] + ".\n"
-            )
-        )
-
-        select selected_nodes
-        completeRedraw()
-
-        if failed_nodes.count == 0 then
-        (
-            last_slice_report = "Redundant Loop Cleanup complete. Loops: " + (total_loops as string) + "; edges removed: " + (total_edges as string) + ".\n" + report_text
-            if not batch_quiet then format "%" last_slice_report
-            true
-        )
-        else
-        (
-            last_slice_report = "Redundant Loop Cleanup completed with failures.\n" + report_text
-            if not batch_quiet then format "%" last_slice_report
-            false
-        )
-        -- return
-    ),
-
-    /*
-    Compatibility wrapper for POST-PROCESS redundant-loop RMB.
-    RMB now always consumes the dedicated SELECT REDUNDANT LOOPS modifier and finishes as DELETED REDUNDANT LOOPS.
-    */
-    function removeSelectedOrRedundantLoopEdgesSelection angle_threshold:0.1 debug_output:true =
-    (
-        delete_result = deleteSelectedRedundantLoopsSelection angle_threshold:angle_threshold debug_output:debug_output
-        #(delete_result[1], #storedSelection, delete_result[2])
-        -- return
-    ),
-
 
     /*
     Returns the permanent development loader path for Restart.
@@ -16986,7 +17127,6 @@ modifier.split = false
 WallFixer = WallFixer_v()
 
 
-
 /*
 Straight Edge Fixer 0.44
 Detects repeated horizontal edge rows and aligns nearby horizontal edges to them.
@@ -21397,7 +21537,7 @@ createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #
 
 
 /*
-Wall-Fixer UI 0.952
+Wall-Fixer UI 0.953
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -21407,8 +21547,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.952"
-global wall_fixer_ui_tool_version = 1.0009
+global wall_fixer_ui_file_version = "0.954"
+global wall_fixer_ui_tool_version = 1.0049
 
 
 /*
@@ -23211,7 +23351,7 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:348
         wallFixerSetupNumberedDarkButton degenerated_faces_button "SELECT AND REMOVE DEGENERATED FACES" numbered_button_tooltip "LMB: Find degenerated faces and store them in SELECT DEGENERATED FACES at Face level.\n\nRMB: Delete the stored faces and rename that modifier DELETED DEGENERATED FACES."
         wallFixerSetupNumberedDarkButton two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" numbered_button_tooltip "LMB: Find vertices with exactly two visible topology edges and store them in SELECT TWO-EDGE VERTS.\n\nRMB: Remove the stored vertices and rename that modifier DELETED TWO-EDGE VERTS."
         wallFixerSetupNumberedDarkButton duplicated_vertices_button "10. DUPLICATED VERTICES" numbered_button_tooltip "LMB: Store duplicate-position vertices in SELECT DUPLICATED VERTICES.\n\nRMB: Weld the stored vertices and rename that modifier DELETED DUPLICATED VERTICES."
-        wallFixerSetupNumberedDarkButton redundant_loops_button "11. REMOVE REDUNDANT LOOPS" numbered_button_tooltip "LMB: Store detected redundant loop edges in SELECT REDUNDANT LOOPS.\n\nRMB: Remove the stored edges and rename that modifier DELETED REDUNDANT LOOPS."
+        wallFixerSetupNumberedDarkButton redundant_loops_button "11. REMOVE REDUNDANT LOOPS" numbered_button_tooltip "LMB: Detect redundant straight internal chains and select them.\n\nRMB: Remove the currently selected edges and their redundant vertices from SELECT REDUNDANT LOOPS."
         wallFixerSetupNumberedDarkButton repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" numbered_button_tooltip "Reserved for the new missing-loop completion tool." enabled_state:false
         wallFixerSetupNumberedDarkButton post_fix_ngons_button "13. FIX N-GONS" numbered_button_tooltip "Run the current Wall-Fixer Fix N-gons function again after slicing cleanup."
         wallFixerSetupNumberedDarkButton attach_walls_button "14. ATTACH WALLS TO OBJECTS" numbered_button_tooltip "LMB: attach selected walls into the first selected object, then weld all vertices using Options > WELD DISTANCE."
@@ -29397,27 +29537,43 @@ function testPostProcessDegeneratedFacesControl =
 
 
 /*
-Tests the project-wide SELECT / DELETED modifier naming convention without changing scene geometry.
-All four LMB-select/RMB-delete controls must resolve to their canonical dedicated modifier names.
+Tests POST-PROCESS step 11 routing against the integrated stable detector without changing scene geometry.
+The pure topology rules must all pass and the detector version must remain 0.08.
 */
 function testPostProcessRedundantLoopRouting =
 (
-    function_labels = #("DEGENERATED FACES", "DUPLICATED VERTICES", "TWO-EDGE VERTS", "REDUNDANT LOOPS")
-    passed = true
+    detector_ok = false
+    topology_ok = false
+    button_ok = false
 
-    for function_label in function_labels do
+    try
     (
-        select_name = WallFixer.getSelectDeleteModifierName function_label
-        deleted_name = WallFixer.getSelectDeleteModifierName function_label deleted:true
+        detector_ok = RedundantLoopDetector.file_version == 0.08
+        topology_result = RedundantLoopDetector.testTopologyRules()
+        topology_ok = true
 
-        passed = passed and (findString select_name "SELECT " == 1)
-        passed = passed and (findString deleted_name "DELETED " == 1)
+        for result_value in topology_result do
+        (
+            if not result_value then topology_ok = false
+        )
+    )
+    catch
+    (
+        detector_ok = false
+        topology_ok = false
     )
 
-    passed = passed and ((WallFixer.getSelectDeleteModifierName "REDUNDANT LOOPS") == "SELECT REDUNDANT LOOPS")
-    passed = passed and ((WallFixer.getSelectDeleteModifierName "REDUNDANT LOOPS" deleted:true) == "DELETED REDUNDANT LOOPS")
+    try
+    (
+        button_ok = WallFixerPostProcessRollout.redundant_loops_button.Text == "11. REMOVE REDUNDANT LOOPS"
+    )
+    catch
+    (
+        button_ok = false
+    )
 
-    format "POST-PROCESS select/delete naming | passed:%\n" passed
+    passed = detector_ok and topology_ok and button_ok
+    format "POST-PROCESS redundant-loop stable routing | detector:% | topology:% | button:% | passed:%\n" detector_ok topology_ok button_ok passed
 
     passed
     -- return
@@ -34684,30 +34840,31 @@ result_groups
 
 
     /*
-    Selects detected redundant-loop edges without changing topology.
-    A single selected object is left in Edge sub-object mode for inspection.
+    Runs the integrated stable Redundant Loop Detector LMB event.
+    Detection selects accepted chains in SELECT REDUNDANT LOOPS without changing geometry.
     */
     function runSelectRedundantLoops =
     (
         setProgress 0
         setStatus #message "Selecting redundant loops..."
-        selection_result = WallFixer.selectRedundantLoopsSelection angle_threshold:0.1 debug_output:true
+        selection_result = RedundantLoopDetector.selectRedundantLoops face_threshold:0.1 straight_threshold:2.0 debug_output:true
         completed = selection_result[1]
+        loop_count = selection_result[2]
         selected_edge_count = selection_result[3]
         setProgress 100
 
 
         if completed and selected_edge_count > 0 then
         (
-            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant loops selected.")
+            setStatus #success ("Redundant loops selected. Chains: " + (loop_count as string) + "; edges: " + (selected_edge_count as string) + ".")
         )
         else if completed then
         (
-            setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No redundant loops found.")
+            setStatus #warning "No redundant loops found."
         )
         else
         (
-            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant-loop selection failed.")
+            setStatus #failed ("Redundant-loop detection completed with failures. Chains: " + (loop_count as string) + "; edges: " + (selected_edge_count as string) + ".")
         )
 
 
@@ -34717,29 +34874,23 @@ result_groups
 
 
     /*
-    Removes the stored SELECT REDUNDANT LOOPS edges and leaves the committed modifier named DELETED REDUNDANT LOOPS.
-    RMB creates the SELECT modifier through the same snapshot-based detector when it does not already exist.
+    Runs the integrated stable Redundant Loop Detector RMB event.
+    Only the currently selected edges in the top SELECT REDUNDANT LOOPS modifier are removed.
     */
     function runRemoveRedundantLoops =
     (
         setProgress 0
-        setStatus #message "Removing stored redundant-loop edges..."
-        removal_result = WallFixer.deleteSelectedRedundantLoopsSelection angle_threshold:0.1 debug_output:true
-        completed = removal_result[1]
-        removed_edge_count = removal_result[2]
+        setStatus #message "Removing selected redundant-loop edges..."
+        completed = RedundantLoopDetector.removeSelectedEdges()
         setProgress 100
 
-        if completed and removed_edge_count > 0 then
+        if completed then
         (
-            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant loops removed.")
-        )
-        else if completed then
-        (
-            setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No stored redundant loops found to remove.")
+            setStatus #success "Selected redundant-loop edges removed."
         )
         else
         (
-            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant-loop removal failed.")
+            setStatus #failed "Redundant-loop removal was not completed."
         )
 
         completed

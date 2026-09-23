@@ -1,5 +1,5 @@
 /*
-Wall-Fixer UI 0.952
+Wall-Fixer UI 0.953
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.952"
-global wall_fixer_ui_tool_version = 1.0009
+global wall_fixer_ui_file_version = "0.954"
+global wall_fixer_ui_tool_version = 1.0049
 
 
 /*
@@ -1813,7 +1813,7 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:348
         wallFixerSetupNumberedDarkButton degenerated_faces_button "SELECT AND REMOVE DEGENERATED FACES" numbered_button_tooltip "LMB: Find degenerated faces and store them in SELECT DEGENERATED FACES at Face level.\n\nRMB: Delete the stored faces and rename that modifier DELETED DEGENERATED FACES."
         wallFixerSetupNumberedDarkButton two_edge_verts_button "5. FIND TWO-EDGE VERTS AND REMOVE" numbered_button_tooltip "LMB: Find vertices with exactly two visible topology edges and store them in SELECT TWO-EDGE VERTS.\n\nRMB: Remove the stored vertices and rename that modifier DELETED TWO-EDGE VERTS."
         wallFixerSetupNumberedDarkButton duplicated_vertices_button "10. DUPLICATED VERTICES" numbered_button_tooltip "LMB: Store duplicate-position vertices in SELECT DUPLICATED VERTICES.\n\nRMB: Weld the stored vertices and rename that modifier DELETED DUPLICATED VERTICES."
-        wallFixerSetupNumberedDarkButton redundant_loops_button "11. REMOVE REDUNDANT LOOPS" numbered_button_tooltip "LMB: Store detected redundant loop edges in SELECT REDUNDANT LOOPS.\n\nRMB: Remove the stored edges and rename that modifier DELETED REDUNDANT LOOPS."
+        wallFixerSetupNumberedDarkButton redundant_loops_button "11. REMOVE REDUNDANT LOOPS" numbered_button_tooltip "LMB: Detect redundant straight internal chains and select them.\n\nRMB: Remove the currently selected edges and their redundant vertices from SELECT REDUNDANT LOOPS."
         wallFixerSetupNumberedDarkButton repair_missing_loops_button "12. COMPLETE / REPAIR MISSING LOOPS" numbered_button_tooltip "Reserved for the new missing-loop completion tool." enabled_state:false
         wallFixerSetupNumberedDarkButton post_fix_ngons_button "13. FIX N-GONS" numbered_button_tooltip "Run the current Wall-Fixer Fix N-gons function again after slicing cleanup."
         wallFixerSetupNumberedDarkButton attach_walls_button "14. ATTACH WALLS TO OBJECTS" numbered_button_tooltip "LMB: attach selected walls into the first selected object, then weld all vertices using Options > WELD DISTANCE."
@@ -7999,27 +7999,43 @@ function testPostProcessDegeneratedFacesControl =
 
 
 /*
-Tests the project-wide SELECT / DELETED modifier naming convention without changing scene geometry.
-All four LMB-select/RMB-delete controls must resolve to their canonical dedicated modifier names.
+Tests POST-PROCESS step 11 routing against the integrated stable detector without changing scene geometry.
+The pure topology rules must all pass and the detector version must remain 0.08.
 */
 function testPostProcessRedundantLoopRouting =
 (
-    function_labels = #("DEGENERATED FACES", "DUPLICATED VERTICES", "TWO-EDGE VERTS", "REDUNDANT LOOPS")
-    passed = true
+    detector_ok = false
+    topology_ok = false
+    button_ok = false
 
-    for function_label in function_labels do
+    try
     (
-        select_name = WallFixer.getSelectDeleteModifierName function_label
-        deleted_name = WallFixer.getSelectDeleteModifierName function_label deleted:true
+        detector_ok = RedundantLoopDetector.file_version == 0.08
+        topology_result = RedundantLoopDetector.testTopologyRules()
+        topology_ok = true
 
-        passed = passed and (findString select_name "SELECT " == 1)
-        passed = passed and (findString deleted_name "DELETED " == 1)
+        for result_value in topology_result do
+        (
+            if not result_value then topology_ok = false
+        )
+    )
+    catch
+    (
+        detector_ok = false
+        topology_ok = false
     )
 
-    passed = passed and ((WallFixer.getSelectDeleteModifierName "REDUNDANT LOOPS") == "SELECT REDUNDANT LOOPS")
-    passed = passed and ((WallFixer.getSelectDeleteModifierName "REDUNDANT LOOPS" deleted:true) == "DELETED REDUNDANT LOOPS")
+    try
+    (
+        button_ok = WallFixerPostProcessRollout.redundant_loops_button.Text == "11. REMOVE REDUNDANT LOOPS"
+    )
+    catch
+    (
+        button_ok = false
+    )
 
-    format "POST-PROCESS select/delete naming | passed:%\n" passed
+    passed = detector_ok and topology_ok and button_ok
+    format "POST-PROCESS redundant-loop stable routing | detector:% | topology:% | button:% | passed:%\n" detector_ok topology_ok button_ok passed
 
     passed
     -- return
@@ -13286,30 +13302,31 @@ result_groups
 
 
     /*
-    Selects detected redundant-loop edges without changing topology.
-    A single selected object is left in Edge sub-object mode for inspection.
+    Runs the integrated stable Redundant Loop Detector LMB event.
+    Detection selects accepted chains in SELECT REDUNDANT LOOPS without changing geometry.
     */
     function runSelectRedundantLoops =
     (
         setProgress 0
         setStatus #message "Selecting redundant loops..."
-        selection_result = WallFixer.selectRedundantLoopsSelection angle_threshold:0.1 debug_output:true
+        selection_result = RedundantLoopDetector.selectRedundantLoops face_threshold:0.1 straight_threshold:2.0 debug_output:true
         completed = selection_result[1]
+        loop_count = selection_result[2]
         selected_edge_count = selection_result[3]
         setProgress 100
 
 
         if completed and selected_edge_count > 0 then
         (
-            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant loops selected.")
+            setStatus #success ("Redundant loops selected. Chains: " + (loop_count as string) + "; edges: " + (selected_edge_count as string) + ".")
         )
         else if completed then
         (
-            setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No redundant loops found.")
+            setStatus #warning "No redundant loops found."
         )
         else
         (
-            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant-loop selection failed.")
+            setStatus #failed ("Redundant-loop detection completed with failures. Chains: " + (loop_count as string) + "; edges: " + (selected_edge_count as string) + ".")
         )
 
 
@@ -13319,29 +13336,23 @@ result_groups
 
 
     /*
-    Removes the stored SELECT REDUNDANT LOOPS edges and leaves the committed modifier named DELETED REDUNDANT LOOPS.
-    RMB creates the SELECT modifier through the same snapshot-based detector when it does not already exist.
+    Runs the integrated stable Redundant Loop Detector RMB event.
+    Only the currently selected edges in the top SELECT REDUNDANT LOOPS modifier are removed.
     */
     function runRemoveRedundantLoops =
     (
         setProgress 0
-        setStatus #message "Removing stored redundant-loop edges..."
-        removal_result = WallFixer.deleteSelectedRedundantLoopsSelection angle_threshold:0.1 debug_output:true
-        completed = removal_result[1]
-        removed_edge_count = removal_result[2]
+        setStatus #message "Removing selected redundant-loop edges..."
+        completed = RedundantLoopDetector.removeSelectedEdges()
         setProgress 100
 
-        if completed and removed_edge_count > 0 then
+        if completed then
         (
-            setStatus #success (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant loops removed.")
-        )
-        else if completed then
-        (
-            setStatus #warning (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "No stored redundant loops found to remove.")
+            setStatus #success "Selected redundant-loop edges removed."
         )
         else
         (
-            setStatus #error (if WallFixer.last_slice_report != "" then WallFixer.last_slice_report else "Redundant-loop removal failed.")
+            setStatus #failed "Redundant-loop removal was not completed."
         )
 
         completed

@@ -16,6 +16,8 @@ UI: SLICE WALLS > .NET button: make the button font/text color pink.
 
 UI BUG: top dialog message/status: remove the duplicate so only one message/status display exists at the top of the dialog.
 
+EDGE FIXER > BORDER CHECK > RMB: enter Border sub-object level and select all borders of the object.
+
 ## DONE TODAY
 
 0.999 HELPERS > Select Degenerated Objects: LMB selects visible geometry whose evaluated vertices are collinear and whose vertex normals all match.
