@@ -1,5 +1,5 @@
 ﻿/*
-Wall-Fixer Core 0.82
+Wall-Fixer Core 0.85
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -8,8 +8,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.82"
-global wall_fixer_core_tool_version = 1.0449
+global wall_fixer_core_file_version = "0.85"
+global wall_fixer_core_tool_version = 1.0639
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -2374,42 +2374,59 @@ struct WallFixer_v
     ),
 
     /*
-    Returns true only when one modifier is the exact requested directional Slice Walls modifier.
+    Resolves one Reset Slice direction to its supported modifier-name namespace.
+    Vertical uses SLICE V and Horizontal uses SLICE H, including longer names such as SLICE VERTICAL or SLICE HORIZONTAL.
     */
-    function isDirectionalSliceModifier stack_modifier modifier_name =
+    function getDirectionalSliceNamespace modifier_name =
     (
-        if stack_modifier == undefined then return false
-        if classOf stack_modifier != Edit_Poly then return false
-
         local normalized_target = toUpper (modifier_name as string)
-        if normalized_target != "SLICE VERTICAL" and normalized_target != "SLICE HORIZONTAL" then return false
 
-        (toUpper (stack_modifier.name as string)) == normalized_target
+        if findString normalized_target "SLICE V" == 1 then return "SLICE V"
+        if findString normalized_target "SLICE H" == 1 then return "SLICE H"
+
+        undefined
         -- return
     ),
 
 
     /*
-    Deletes every exact directional Slice Walls modifier from the selected objects.
-    Other Slice Walls and user modifiers are preserved.
+    Returns true when one modifier belongs to the requested directional Slice namespace.
+    Modifier class is intentionally ignored so RESET SLICE supports Edit Poly, real Slice, and other compatible modifier types.
+    */
+    function isDirectionalSliceModifier stack_modifier modifier_name =
+    (
+        if stack_modifier == undefined then return false
+
+        local slice_namespace = getDirectionalSliceNamespace modifier_name
+        if slice_namespace == undefined then return false
+
+        local normalized_name = toUpper (stack_modifier.name as string)
+        findString normalized_name slice_namespace == 1
+        -- return
+    ),
+
+
+    /*
+    Deletes every modifier in the requested SLICE V or SLICE H namespace from selected objects.
+    SLICE ALL and unrelated user modifiers are preserved.
     */
     function deleteSelectedDirectionalSliceModifiers modifier_name =
     (
-        local normalized_target = toUpper (modifier_name as string)
+        local slice_namespace = getDirectionalSliceNamespace modifier_name
         local selected_nodes = selection as array
         local deleted_count = 0
         local changed_objects = 0
         last_slice_report = ""
 
-        if normalized_target != "SLICE VERTICAL" and normalized_target != "SLICE HORIZONTAL" then
+        if slice_namespace == undefined then
         (
-            last_slice_report = "Delete Slice: unsupported modifier type."
+            last_slice_report = "Reset Slice: unsupported modifier namespace."
             return #(false, 0, 0)
         )
 
         if selected_nodes.count == 0 then
         (
-            last_slice_report = "Delete Slice: select one or more objects."
+            last_slice_report = "Reset Slice: select one or more objects."
             return #(false, 0, 0)
         )
 
@@ -2424,7 +2441,7 @@ struct WallFixer_v
                 (
                     local stack_modifier = node.modifiers[modifier_index]
 
-                    if isDirectionalSliceModifier stack_modifier normalized_target then
+                    if isDirectionalSliceModifier stack_modifier slice_namespace then
                     (
                         deleteModifier node stack_modifier
                         deleted_count += 1
@@ -2442,31 +2459,40 @@ struct WallFixer_v
             )
         )
 
-        last_slice_report = "Delete Slice: removed " + (deleted_count as string) + " " + normalized_target + " modifier(s) from " + (changed_objects as string) + " object(s)."
+        completeRedraw()
+        last_slice_report = "Reset Slice: removed " + (deleted_count as string) + " " + slice_namespace + " modifier(s) from " + (changed_objects as string) + " object(s)."
         #(true, deleted_count, changed_objects)
         -- return
     ),
 
 
     /*
-    Tests exact-name directional Slice Walls modifier deletion policy.
+    Tests namespace-based RESET SLICE matching without changing scene geometry.
+    SLICE V and SLICE H accept exact and extended names while SLICE ALL remains protected.
     */
     function testDirectionalSliceDeletePolicy =
     (
         local vertical_modifier = Edit_Poly()
+        local vertical_short_modifier = Edit_Poly()
         local horizontal_modifier = Edit_Poly()
+        local horizontal_short_modifier = Edit_Poly()
         local all_modifier = Edit_Poly()
 
         vertical_modifier.name = "SLICE VERTICAL"
+        vertical_short_modifier.name = "SLICE V 01"
         horizontal_modifier.name = "SLICE HORIZONTAL"
+        horizontal_short_modifier.name = "SLICE H 01"
         all_modifier.name = "SLICE ALL"
 
         local test_passed = true
-        test_passed = test_passed and isDirectionalSliceModifier vertical_modifier "SLICE VERTICAL"
-        test_passed = test_passed and not(isDirectionalSliceModifier vertical_modifier "SLICE HORIZONTAL")
-        test_passed = test_passed and isDirectionalSliceModifier horizontal_modifier "SLICE HORIZONTAL"
-        test_passed = test_passed and not(isDirectionalSliceModifier all_modifier "SLICE VERTICAL")
-        test_passed = test_passed and not(isDirectionalSliceModifier all_modifier "SLICE HORIZONTAL")
+        test_passed = test_passed and isDirectionalSliceModifier vertical_modifier "SLICE V"
+        test_passed = test_passed and isDirectionalSliceModifier vertical_short_modifier "SLICE V"
+        test_passed = test_passed and not(isDirectionalSliceModifier vertical_modifier "SLICE H")
+        test_passed = test_passed and isDirectionalSliceModifier horizontal_modifier "SLICE H"
+        test_passed = test_passed and isDirectionalSliceModifier horizontal_short_modifier "SLICE H"
+        test_passed = test_passed and not(isDirectionalSliceModifier horizontal_modifier "SLICE V")
+        test_passed = test_passed and not(isDirectionalSliceModifier all_modifier "SLICE V")
+        test_passed = test_passed and not(isDirectionalSliceModifier all_modifier "SLICE H")
 
         test_passed
         -- return
@@ -9675,7 +9701,8 @@ struct WallFixer_v
     */
     function doesSliceForcePlaneSplitPoints world_points world_anchor world_axis match_tolerance:0.001 =
     (
-        if world_points == undefined or world_anchor == undefined or world_axis == undefined then return false
+        if classOf world_points != Array then return false
+        if world_anchor == undefined or world_axis == undefined then return false
         if length world_axis <= epsilon then return false
 
         local normalized_axis = normalize world_axis
@@ -10173,7 +10200,8 @@ struct WallFixer_v
     */
     function findSliceForcePlaneCacheIndex cached_tasks slice_task match_tolerance:0.001 =
     (
-        if slice_task == undefined or slice_task.count < 5 then return 0
+        if classOf cached_tasks != Array then return 0
+        if classOf slice_task != Array or slice_task.count < 5 then return 0
 
         local slice_kind = slice_task[2]
         local world_anchor = slice_task[4]
@@ -10220,7 +10248,7 @@ struct WallFixer_v
     */
     function getSliceForceTJunctionStraightPair edge_directions angle_threshold:5.0 =
     (
-        if edge_directions == undefined or edge_directions.count != 3 then return undefined
+        if classOf edge_directions != Array or edge_directions.count != 3 then return undefined
 
         local straight_limit = -(cos (amin 45.0 (amax 0.0 angle_threshold)))
         local best_pair = undefined
@@ -10260,7 +10288,7 @@ struct WallFixer_v
 
     /*
     Finds true T-junction vertices from visible Editable Poly edges on the baked Slice Force object.
-    Each record stores the local wall frame plus usable vertical/horizontal incident edges for Force plane creation.
+    Every polyop result is type-checked so status values such as OK or dead-edge results are skipped safely.
     */
     function getSliceForceTJunctionData node angle_threshold:5.0 =
     (
@@ -10271,98 +10299,109 @@ struct WallFixer_v
         if classOf base_obj != Editable_Poly then return result
 
         local surface_data = getSliceForceSurfaceData node
-        if surface_data == undefined then return result
+        if classOf surface_data != Array or surface_data.count < 1 then return result
 
         local world_points = surface_data[1]
+        if classOf world_points != Array then return result
+
         local vert_count = polyop.getNumVerts base_obj
+        if world_points.count < vert_count then return result
+
         local direction_cos = cos (amin 45.0 (amax 0.0 angle_threshold))
         local world_up = [0.0,0.0,1.0]
 
         for vertex_index = 1 to vert_count do
         (
-            local incident_edges = polyop.getEdgesUsingVert base_obj #{vertex_index}
-            local visible_edges = #()
-            local visible_directions = #()
+            local incident_edges = undefined
+            try(incident_edges = polyop.getEdgesUsingVert base_obj #{vertex_index})catch(incident_edges = undefined)
 
-            for edge_index in incident_edges do
+            if classOf incident_edges == BitArray then
             (
-                local edge_visible = false
-                try(edge_visible = polyop.getEdgeVis base_obj edge_index)catch(edge_visible = false)
+                local visible_edges = #()
+                local visible_directions = #()
 
-                if edge_visible then
+                for edge_index in incident_edges do
                 (
-                    local edge_verts = polyop.getEdgeVerts base_obj edge_index
+                    local edge_visibility_value = undefined
+                    try(edge_visibility_value = polyop.getEdgeVis base_obj edge_index)catch(edge_visibility_value = undefined)
+                    local edge_visible = (edge_visibility_value == true)
 
-                    if edge_verts != undefined and edge_verts.count == 2 then
+                    if edge_visible then
                     (
-                        local other_vertex = if edge_verts[1] == vertex_index then edge_verts[2] else edge_verts[1]
+                        local edge_verts = undefined
+                        try(edge_verts = polyop.getEdgeVerts base_obj edge_index)catch(edge_verts = undefined)
 
-                        if other_vertex >= 1 and other_vertex <= world_points.count then
+                        if classOf edge_verts == Array and edge_verts.count == 2 then
                         (
-                            local edge_direction = world_points[other_vertex] - world_points[vertex_index]
+                            local other_vertex = if edge_verts[1] == vertex_index then edge_verts[2] else edge_verts[1]
 
-                            if length edge_direction > epsilon then
+                            if other_vertex >= 1 and other_vertex <= world_points.count then
                             (
-                                append visible_edges edge_index
-                                append visible_directions (normalize edge_direction)
+                                local edge_direction = world_points[other_vertex] - world_points[vertex_index]
+
+                                if length edge_direction > epsilon then
+                                (
+                                    append visible_edges edge_index
+                                    append visible_directions (normalize edge_direction)
+                                )
                             )
                         )
                     )
                 )
-            )
 
-            if visible_edges.count == 3 then
-            (
-                local straight_pair = getSliceForceTJunctionStraightPair visible_directions angle_threshold:angle_threshold
-
-                if straight_pair != undefined then
+                if visible_edges.count == 3 then
                 (
-                    local straight_direction = visible_directions[straight_pair[1]]
-                    local branch_direction = visible_directions[straight_pair[3]]
-                    local wall_normal = cross straight_direction branch_direction
+                    local straight_pair = getSliceForceTJunctionStraightPair visible_directions angle_threshold:angle_threshold
 
-                    if length wall_normal > epsilon then
+                    if classOf straight_pair == Array and straight_pair.count == 3 then
                     (
-                        wall_normal = normalize wall_normal
-                        local wall_vertical = world_up - wall_normal * (dot wall_normal world_up)
+                        local straight_direction = visible_directions[straight_pair[1]]
+                        local branch_direction = visible_directions[straight_pair[3]]
+                        local wall_normal = cross straight_direction branch_direction
 
-                        if length wall_vertical > epsilon then
+                        if length wall_normal > epsilon then
                         (
-                            wall_vertical = normalize wall_vertical
-                            local wall_horizontal = cross wall_vertical wall_normal
+                            wall_normal = normalize wall_normal
+                            local wall_vertical = world_up - wall_normal * (dot wall_normal world_up)
 
-                            if length wall_horizontal > epsilon then
+                            if length wall_vertical > epsilon then
                             (
-                                wall_horizontal = normalize wall_horizontal
-                                local vertical_edge = 0
-                                local vertical_direction = undefined
-                                local vertical_score = -1.0
-                                local horizontal_edge = 0
-                                local horizontal_direction = undefined
-                                local horizontal_score = -1.0
+                                wall_vertical = normalize wall_vertical
+                                local wall_horizontal = cross wall_vertical wall_normal
 
-                                for direction_index = 1 to visible_directions.count do
+                                if length wall_horizontal > epsilon then
                                 (
-                                    local edge_direction = visible_directions[direction_index]
-                                    local vertical_dot = abs(dot edge_direction wall_vertical)
-                                    local horizontal_dot = abs(dot edge_direction wall_horizontal)
+                                    wall_horizontal = normalize wall_horizontal
+                                    local vertical_edge = 0
+                                    local vertical_direction = undefined
+                                    local vertical_score = -1.0
+                                    local horizontal_edge = 0
+                                    local horizontal_direction = undefined
+                                    local horizontal_score = -1.0
 
-                                    if vertical_dot >= direction_cos and vertical_dot > vertical_score then
+                                    for direction_index = 1 to visible_directions.count do
                                     (
-                                        vertical_score = vertical_dot
-                                        vertical_edge = visible_edges[direction_index]
-                                        vertical_direction = edge_direction
+                                        local edge_direction = visible_directions[direction_index]
+                                        local vertical_dot = abs(dot edge_direction wall_vertical)
+                                        local horizontal_dot = abs(dot edge_direction wall_horizontal)
+
+                                        if vertical_dot >= direction_cos and vertical_dot > vertical_score then
+                                        (
+                                            vertical_score = vertical_dot
+                                            vertical_edge = visible_edges[direction_index]
+                                            vertical_direction = edge_direction
+                                        )
+
+                                        if horizontal_dot >= direction_cos and horizontal_dot > horizontal_score then
+                                        (
+                                            horizontal_score = horizontal_dot
+                                            horizontal_edge = visible_edges[direction_index]
+                                            horizontal_direction = edge_direction
+                                        )
                                     )
 
-                                    if horizontal_dot >= direction_cos and horizontal_dot > horizontal_score then
-                                    (
-                                        horizontal_score = horizontal_dot
-                                        horizontal_edge = visible_edges[direction_index]
-                                        horizontal_direction = edge_direction
-                                    )
+                                    append result #(vertex_index, world_points[vertex_index], wall_normal, visible_edges, vertical_edge, vertical_direction, horizontal_edge, horizontal_direction)
                                 )
-
-                                append result #(vertex_index, world_points[vertex_index], wall_normal, visible_edges, vertical_edge, vertical_direction, horizontal_edge, horizontal_direction)
                             )
                         )
                     )
@@ -10376,77 +10415,87 @@ struct WallFixer_v
 
 
     /*
-    Merges optional true T-junction vertex planes into the existing Slice Force physical-plane cache.
-    The stable Force detector remains unchanged when the option is disabled by the caller.
+    Merges true T-junction vertex planes into the Slice Force physical-plane cache.
+    Non-array analyzer/status values are normalized to empty data instead of throwing on .count or indexing.
     */
     function mergeSliceForceTJunctionTasks node cached_tasks cut_mode:#all angle_threshold:5.0 match_tolerance:0.001 =
     (
-        local result = if cached_tasks == undefined then #() else copy cached_tasks
+        local result = if classOf cached_tasks == Array then copy cached_tasks else #()
         if node == undefined or not(isValidNode node) then return result
         if classOf node.baseObject != Editable_Poly then return result
 
         local surface_data = getSliceForceSurfaceData node
-        if surface_data == undefined then return result
+        if classOf surface_data != Array or surface_data.count < 1 then return result
 
         local world_points = surface_data[1]
+        if classOf world_points != Array then return result
+
         local junction_data = getSliceForceTJunctionData node angle_threshold:angle_threshold
+        if classOf junction_data != Array then junction_data = #()
+
         local added_count = 0
 
         for junction in junction_data do
         (
-            local vertex_index = junction[1]
-            local world_anchor = junction[2]
-            local wall_normal = junction[3]
-            local incident_edge_ids = junction[4]
-            local source_edges = #{}
-            local source_vertices = #{vertex_index}
-
-            for edge_index in incident_edge_ids do source_edges[edge_index] = true
-
-            if cut_mode == #all or cut_mode == #vertical then
+            if classOf junction == Array and junction.count >= 8 then
             (
-                local vertical_edge = junction[5]
-                local vertical_line = junction[6]
+                local vertex_index = junction[1]
+                local world_anchor = junction[2]
+                local wall_normal = junction[3]
+                local incident_edge_ids = junction[4]
+                local source_edges = #{}
+                local source_vertices = #{vertex_index}
 
-                if vertical_edge > 0 and vertical_line != undefined and length vertical_line > epsilon then
+                if classOf incident_edge_ids == Array then
                 (
-                    local vertical_axis = cross vertical_line wall_normal
+                    for edge_index in incident_edge_ids do source_edges[edge_index] = true
+                )
 
-                    if length vertical_axis > epsilon then
+                if cut_mode == #all or cut_mode == #vertical then
+                (
+                    local vertical_edge = junction[5]
+                    local vertical_line = junction[6]
+
+                    if vertical_edge > 0 and vertical_line != undefined and length vertical_line > epsilon then
                     (
-                        vertical_axis = normalize vertical_axis
+                        local vertical_axis = cross vertical_line wall_normal
 
-                        if doesSliceForcePlaneSplitPoints world_points world_anchor vertical_axis match_tolerance:match_tolerance then
+                        if length vertical_axis > epsilon then
                         (
-                            local vertical_task = #(vertex_index, #vertical, vertical_edge, world_anchor, vertical_axis, copy source_edges, copy source_vertices, world_anchor.z, wall_normal, world_anchor, 0)
+                            vertical_axis = normalize vertical_axis
 
-                            if findSliceForcePlaneCacheIndex result vertical_task match_tolerance:match_tolerance == 0 then
+                            if doesSliceForcePlaneSplitPoints world_points world_anchor vertical_axis match_tolerance:match_tolerance then
                             (
-                                append result vertical_task
-                                added_count += 1
+                                local vertical_task = #(vertex_index, #vertical, vertical_edge, world_anchor, vertical_axis, copy source_edges, copy source_vertices, world_anchor.z, wall_normal, world_anchor, 0)
+
+                                if findSliceForcePlaneCacheIndex result vertical_task match_tolerance:match_tolerance == 0 then
+                                (
+                                    append result vertical_task
+                                    added_count += 1
+                                )
                             )
                         )
                     )
                 )
-            )
 
-            if cut_mode == #all or cut_mode == #horizontal then
-            (
-                local horizontal_edge = junction[7]
-                local horizontal_line = junction[8]
-
-                if horizontal_edge > 0 and horizontal_line != undefined and length horizontal_line > epsilon then
+                if cut_mode == #all or cut_mode == #horizontal then
                 (
-                    local horizontal_axis = [0.0,0.0,1.0]
+                    local horizontal_edge = junction[7]
+                    local horizontal_line = junction[8]
 
-                    if doesSliceForcePlaneSplitPoints world_points world_anchor horizontal_axis match_tolerance:match_tolerance then
+                    if horizontal_edge > 0 and horizontal_line != undefined and length horizontal_line > epsilon then
                     (
-                        local horizontal_task = #(vertex_index, #horizontal, horizontal_edge, world_anchor, horizontal_axis, copy source_edges, copy source_vertices, world_anchor.z, wall_normal, world_anchor, 0)
+                        local horizontal_axis = [0.0,0.0,1.0]
 
-                        if findSliceForcePlaneCacheIndex result horizontal_task match_tolerance:match_tolerance == 0 then
+                        if doesSliceForcePlaneSplitPoints world_points world_anchor horizontal_axis match_tolerance:match_tolerance then
                         (
-                            append result horizontal_task
-                            added_count += 1
+                            local horizontal_task = #(vertex_index, #horizontal, horizontal_edge, world_anchor, horizontal_axis, copy source_edges, copy source_vertices, world_anchor.z, wall_normal, world_anchor, 0)
+
+                            if findSliceForcePlaneCacheIndex result horizontal_task match_tolerance:match_tolerance == 0 then
+                            (
+                                append result horizontal_task
+                                added_count += 1
+                            )
                         )
                     )
                 )
@@ -10583,6 +10632,13 @@ struct WallFixer_v
             select node
             try(subObjectLevel = 0)catch()
             convertToPoly node
+
+            if classOf node.baseObject == Editable_Poly then
+            (
+                /* Rebuild Editable Poly adjacency before Force analysis. */
+                try(polyop.fillInMesh node.baseObject)catch()
+            )
+
             update node
 
             if classOf node.baseObject == Editable_Poly and node.modifiers.count == 0 then
@@ -12102,10 +12158,349 @@ struct WallFixer_v
 
 
     /*
+    Captures selected Slice Force vertex positions before the incoming stack is baked.
+    Only Vertex sub-object mode is considered; positions are stored in world space so the later Editable Poly conversion cannot erase the requested slice location.
+    */
+    function captureSliceForceSelectedVertexPositions node match_tolerance:0.001 =
+    (
+        local world_positions = #()
+        if node == undefined or not(isValidNode node) then return world_positions
+        if subObjectLevel != 1 then return world_positions
+
+        local source_positions = #()
+        local current_object = undefined
+
+        try(current_object = modPanel.getCurrentObject())catch(current_object = undefined)
+
+        if current_object != undefined and classOf current_object == Edit_Poly then
+        (
+            local belongs_to_node = false
+
+            for modifier in node.modifiers while not belongs_to_node do
+            (
+                if modifier == current_object then belongs_to_node = true
+            )
+
+            if belongs_to_node then
+            (
+                local selected_vertices = #{}
+                try(selected_vertices = current_object.GetSelection #Vertex node:node)catch(selected_vertices = #{})
+
+                for vertex_index in selected_vertices do
+                (
+                    local object_position = undefined
+                    try(object_position = current_object.GetVertex vertex_index node:node)catch(object_position = undefined)
+
+                    if object_position != undefined then
+                    (
+                        append source_positions (object_position * node.objectTransform)
+                    )
+                )
+            )
+        )
+
+        if source_positions.count == 0 and classOf node.baseObject == Editable_Poly then
+        (
+            local selected_vertices = #{}
+            try(selected_vertices = polyop.getVertSelection node.baseObject)catch(selected_vertices = #{})
+
+            for vertex_index in selected_vertices do
+            (
+                local world_position = undefined
+
+                try
+                (
+                    in coordsys world
+                    (
+                        world_position = polyop.getVert node.baseObject vertex_index node:node
+                    )
+                )
+                catch
+                (
+                    world_position = undefined
+                )
+
+                if world_position != undefined then append source_positions world_position
+            )
+        )
+
+        local point_tolerance = amax epsilon match_tolerance
+
+        for source_position in source_positions do
+        (
+            local duplicate_point = false
+
+            for cached_position in world_positions while not duplicate_point do
+            (
+                if distance source_position cached_position <= point_tolerance then duplicate_point = true
+            )
+
+            if not duplicate_point then append world_positions source_position
+        )
+
+        world_positions
+        -- return
+    ),
+
+
+    /*
+    Chooses a local wall-face normal for one baked Editable Poly vertex.
+    Adjacent mostly-vertical faces are ranked by how strongly their orientation repeats on the object, which favors the wall skin over small reveal/cap faces.
+    */
+    function getSliceForceSelectedVertexWallNormal topology_data vertex_index angle_threshold:5.0 =
+    (
+        if classOf topology_data != Array or topology_data.count < 12 then return undefined
+        if vertex_index < 1 or vertex_index > topology_data[1] then return undefined
+
+        local vertex_faces = topology_data[6]
+        local face_normals = topology_data[11]
+        local incident_faces = vertex_faces[vertex_index]
+        local normal_limit = cos (amin 45.0 (amax 0.1 angle_threshold))
+        local best_normal = undefined
+        local best_count = -1
+
+        for face_index in incident_faces do
+        (
+            local candidate_normal = if face_index >= 1 and face_index <= face_normals.count then face_normals[face_index] else undefined
+
+            if candidate_normal != undefined and length candidate_normal > epsilon and abs(candidate_normal.z) < 0.95 then
+            (
+                candidate_normal = normalize candidate_normal
+                local parallel_count = 0
+
+                for other_normal in face_normals do
+                (
+                    if other_normal != undefined and length other_normal > epsilon and abs(other_normal.z) < 0.95 then
+                    (
+                        if abs(dot candidate_normal (normalize other_normal)) >= normal_limit then parallel_count += 1
+                    )
+                )
+
+                if parallel_count > best_count then
+                (
+                    best_count = parallel_count
+                    best_normal = candidate_normal
+                )
+            )
+        )
+
+        best_normal
+        -- return
+    ),
+
+
+    /*
+    Builds the complete Slice Force task cache from explicitly selected vertex positions.
+    Selected positions replace automatic hole/T-junction anchor locations; existing automatic tasks are consulted only for local orientation.
+    */
+    function buildSliceForceSelectedVertexTaskCache node selected_positions orientation_tasks cut_mode:#all angle_threshold:5.0 match_tolerance:0.001 =
+    (
+        local cached_tasks = #()
+        if node == undefined or not(isValidNode node) then return cached_tasks
+        if classOf node.baseObject != Editable_Poly then return cached_tasks
+        if classOf selected_positions != Array or selected_positions.count == 0 then return cached_tasks
+
+        local topology_data = buildPolyTopology node node.baseObject
+        if classOf topology_data != Array or topology_data.count < 12 then return cached_tasks
+
+        local world_points = topology_data[4]
+        if classOf world_points != Array then return cached_tasks
+        local vertex_count = topology_data[1]
+        local plane_tolerance = amax epsilon match_tolerance
+
+        for selected_position in selected_positions do
+        (
+            local nearest_vertex = 0
+            local nearest_distance = 1e30
+
+            for vertex_index = 1 to vertex_count do
+            (
+                local world_point = world_points[vertex_index]
+
+                if world_point != undefined then
+                (
+                    local current_distance = distance selected_position world_point
+
+                    if current_distance < nearest_distance then
+                    (
+                        nearest_distance = current_distance
+                        nearest_vertex = vertex_index
+                    )
+                )
+            )
+
+            if nearest_vertex > 0 then
+            (
+                local world_anchor = selected_position
+                local selected_wall_normal = getSliceForceSelectedVertexWallNormal \
+                    topology_data \
+                    nearest_vertex \
+                    angle_threshold:angle_threshold
+
+                local requested_kinds = case cut_mode of
+                (
+                    #vertical: #(#vertical)
+                    #horizontal: #(#horizontal)
+                    default: #(#vertical, #horizontal)
+                )
+
+                for slice_kind in requested_kinds do
+                (
+                    local orientation_task = undefined
+                    local orientation_distance = 1e30
+
+                    if orientation_tasks != undefined then
+                    (
+                        for candidate_task in orientation_tasks do
+                        (
+                            if candidate_task != undefined and candidate_task.count >= 9 and candidate_task[2] == slice_kind then
+                            (
+                                local candidate_anchor = candidate_task[4]
+
+                                if candidate_anchor != undefined then
+                                (
+                                    local current_distance = distance world_anchor candidate_anchor
+
+                                    if current_distance < orientation_distance then
+                                    (
+                                        orientation_distance = current_distance
+                                        orientation_task = candidate_task
+                                    )
+                                )
+                            )
+                        )
+                    )
+
+                    local wall_normal = selected_wall_normal
+                    local world_axis = undefined
+
+                    if orientation_task != undefined then
+                    (
+                        if orientation_task.count >= 9 and orientation_task[9] != undefined then wall_normal = orientation_task[9]
+                        if slice_kind == #vertical then world_axis = orientation_task[5]
+                    )
+
+                    if slice_kind == #horizontal then
+                    (
+                        world_axis = [0.0,0.0,1.0]
+                    )
+                    else if world_axis == undefined or length world_axis <= epsilon then
+                    (
+                        if wall_normal != undefined and length wall_normal > epsilon then
+                        (
+                            world_axis = cross [0.0,0.0,1.0] wall_normal
+                        )
+                    )
+
+                    if world_axis != undefined and length world_axis > epsilon then
+                    (
+                        world_axis = normalize world_axis
+
+                        if doesSliceForcePlaneSplitPoints world_points world_anchor world_axis match_tolerance:plane_tolerance then
+                        (
+                            local selected_task = #(
+                                nearest_vertex,
+                                slice_kind,
+                                0,
+                                world_anchor,
+                                world_axis,
+                                #{},
+                                #{nearest_vertex},
+                                world_anchor.z,
+                                wall_normal,
+                                world_anchor,
+                                0
+                            )
+
+                            if findSliceForcePlaneCacheIndex cached_tasks selected_task match_tolerance:plane_tolerance == 0 then
+                            (
+                                append cached_tasks selected_task
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        if not batch_quiet then
+        (
+            format "Wall-Fixer Slice Force Selected Vertex Override: node:% selectedPositions:% direction:% planes:%\n" node.name selected_positions.count cut_mode cached_tasks.count
+        )
+
+        cached_tasks
+        -- return
+    ),
+
+
+    /*
+    Returns whether Slice Force should replace automatic anchor locations with selected vertex positions.
+    The override is intentionally limited to one selected wall in Vertex sub-object mode.
+    */
+    function shouldUseSliceForceSelectedVertexOverride object_count subobject_level selected_position_count =
+    (
+        object_count == 1 and subobject_level == 1 and selected_position_count > 0
+        -- return
+    ),
+
+
+    /*
+    Tests selected-vertex Slice Force override gating without changing scene geometry.
+    */
+    function testSliceForceSelectedVertexOverridePolicy =
+    (
+        shouldUseSliceForceSelectedVertexOverride 1 1 1 and
+        shouldUseSliceForceSelectedVertexOverride 1 1 3 and
+        not(shouldUseSliceForceSelectedVertexOverride 2 1 1) and
+        not(shouldUseSliceForceSelectedVertexOverride 1 0 1) and
+        not(shouldUseSliceForceSelectedVertexOverride 1 1 0)
+        -- return
+    ),
+
+
+    /*
+    Tests the dedicated CTRL+RMB T-junction-only Force policy.
+    This mode suppresses automatic and selected-vertex anchor sources and starts from an empty plane cache.
+    */
+    function testSliceForceTJunctionOnlyPolicy =
+    (
+        local t_junction_only = true
+        local automatic_anchors_enabled = not t_junction_only
+        local selected_vertex_override_enabled = not t_junction_only
+        local initial_plane_count = 0
+
+        t_junction_only and not automatic_anchors_enabled and not selected_vertex_override_enabled and initial_plane_count == 0
+        -- return
+    ),
+
+
+    /*
+    Tests Slice Force analysis result normalization.
+    Non-array status values such as OK must never be treated as task arrays.
+    */
+    function testSliceForceAnalysisResultSafety =
+    (
+        local task_array = #()
+        local status_value = OK
+
+        local result_value = (
+            classOf task_array == Array and
+            classOf status_value != Array and
+            (getSliceForceTJunctionStraightPair status_value == undefined) and
+            (findSliceForcePlaneCacheIndex status_value status_value == 0) and
+            (not (doesSliceForcePlaneSplitPoints status_value [0,0,0] [0,0,1]))
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
     Runs optimized Slice Force as an analyze-once, prebuilt-modifier-stack workflow.
     Incoming modifiers are baked first; proven planar Slice Walls analysis has priority, with Force-only non-planar analysis used only as fallback.
+    A selected Vertex sub-object position overrides automatic anchor locations for a single selected wall.
     */
-    function debugSliceSelectedWallsForceInternal cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 include_t_junctions:false progress_callback:undefined =
+    function debugSliceSelectedWallsForceInternal cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 include_t_junctions:false t_junction_only:false progress_callback:undefined =
     (
         local all_selected_nodes = selection as array
         local selected_nodes = getBatchSliceProcessNodes all_selected_nodes
@@ -12114,6 +12509,15 @@ struct WallFixer_v
         local total_task_count = 0
         local processed_vertex_count = 0
         local report = ""
+        local original_subobject_level = subObjectLevel
+        local selected_vertex_positions = #()
+        local use_selected_vertex_override = false
+
+        if not t_junction_only and selected_nodes.count == 1 and original_subobject_level == 1 then
+        (
+            selected_vertex_positions = captureSliceForceSelectedVertexPositions selected_nodes[1] match_tolerance:0.001
+            use_selected_vertex_override = shouldUseSliceForceSelectedVertexOverride selected_nodes.count original_subobject_level selected_vertex_positions.count
+        )
 
         last_slice_report = ""
         last_slice_error = undefined
@@ -12131,6 +12535,7 @@ struct WallFixer_v
         (
             last_slice_report = "Slice Force: all selected walls have only four vertices; nothing to cut."
             select all_selected_nodes
+            try(completeRedraw())catch(try(redrawViews())catch())
             return true
         )
 
@@ -12168,42 +12573,164 @@ struct WallFixer_v
                     clearResetInnerVertSelection node
                     clearLastDebugSliceContext node:node
 
+                    local orientation_tasks = #()
+                    local planar_analysis_error = undefined
+                    local nonplanar_analysis_error = undefined
+                    local selected_analysis_error = undefined
+                    local t_junction_analysis_error = undefined
+
                     /*
-                    Preserve the known-good flat-wall behavior first: use the exact normal Slice Walls planar task builder.
-                    Only when that produces no planes does Force fall back to its non-planar/local-surface analyzer.
-                    Component selections are already cleared by prepareSliceForceBaseObject, so both paths analyze the whole baked object.
+                    CTRL+RMB T-junction-only mode bypasses every automatic/selected anchor source.
+                    It starts from an empty physical-plane cache so only true T-junction vertices may contribute planes.
                     */
-                    force_tasks = buildSliceForcePlanarTaskCache \
-                        node \
-                        cut_mode:cut_mode \
-                        slice_plane_mode:slice_plane_mode \
-                        angle_threshold:angle_threshold \
-                        planar_tolerance:planar_tolerance \
-                        match_tolerance:0.001
+                    if t_junction_only then
+                    (
+                        try
+                        (
+                            force_tasks = mergeSliceForceTJunctionTasks \
+                                node \
+                                #() \
+                                cut_mode:cut_mode \
+                                angle_threshold:angle_threshold \
+                                match_tolerance:0.001
+
+                            if classOf force_tasks != Array then
+                            (
+                                t_junction_analysis_error = "T-junction-only analyzer returned " + (force_tasks as string)
+                                force_tasks = #()
+                            )
+                        )
+                        catch
+                        (
+                            t_junction_analysis_error = (getCurrentException()) as string
+                            force_tasks = #()
+                        )
+                    )
+                    else
+                    (
+                        /*
+                        Force treats analyzer failures as local fallbacks instead of aborting the object.
+                        Non-array status values such as OK are normalized to an empty task array.
+                        */
+                        try
+                        (
+                            orientation_tasks = buildSliceForcePlanarTaskCache \
+                                node \
+                                cut_mode:cut_mode \
+                                slice_plane_mode:slice_plane_mode \
+                                angle_threshold:angle_threshold \
+                                planar_tolerance:planar_tolerance \
+                                match_tolerance:0.001
+
+                            if classOf orientation_tasks != Array then
+                            (
+                                planar_analysis_error = "planar analyzer returned " + (orientation_tasks as string)
+                                orientation_tasks = #()
+                            )
+                        )
+                        catch
+                        (
+                            planar_analysis_error = (getCurrentException()) as string
+                            orientation_tasks = #()
+                        )
+
+                        if orientation_tasks.count == 0 then
+                        (
+                            try
+                            (
+                                orientation_tasks = buildSliceForceNonPlanarTaskCache \
+                                    node \
+                                    cut_mode:cut_mode \
+                                    angle_threshold:angle_threshold \
+                                    planar_tolerance:planar_tolerance \
+                                    match_tolerance:0.001
+
+                                if classOf orientation_tasks != Array then
+                                (
+                                    nonplanar_analysis_error = "non-planar analyzer returned " + (orientation_tasks as string)
+                                    orientation_tasks = #()
+                                )
+                            )
+                            catch
+                            (
+                                nonplanar_analysis_error = (getCurrentException()) as string
+                                orientation_tasks = #()
+                            )
+                        )
+
+                        if use_selected_vertex_override and node == selected_nodes[1] then
+                        (
+                            try
+                            (
+                                force_tasks = buildSliceForceSelectedVertexTaskCache \
+                                    node \
+                                    selected_vertex_positions \
+                                    orientation_tasks \
+                                    cut_mode:cut_mode \
+                                    angle_threshold:angle_threshold \
+                                    match_tolerance:0.001
+
+                                if classOf force_tasks != Array then
+                                (
+                                    selected_analysis_error = "selected-vertex analyzer returned " + (force_tasks as string)
+                                    force_tasks = #()
+                                )
+                            )
+                            catch
+                            (
+                                selected_analysis_error = (getCurrentException()) as string
+                                force_tasks = #()
+                            )
+                        )
+                        else
+                        (
+                            force_tasks = orientation_tasks
+
+                            if include_t_junctions then
+                            (
+                                try
+                                (
+                                    force_tasks = mergeSliceForceTJunctionTasks \
+                                        node \
+                                        force_tasks \
+                                        cut_mode:cut_mode \
+                                        angle_threshold:angle_threshold \
+                                        match_tolerance:0.001
+
+                                    if classOf force_tasks != Array then
+                                    (
+                                        t_junction_analysis_error = "T-junction analyzer returned " + (force_tasks as string)
+                                        force_tasks = #()
+                                    )
+                                )
+                                catch
+                                (
+                                    t_junction_analysis_error = (getCurrentException()) as string
+                                )
+                            )
+                        )
+                    )
 
                     if force_tasks.count == 0 then
                     (
-                        force_tasks = buildSliceForceNonPlanarTaskCache \
-                            node \
-                            cut_mode:cut_mode \
-                            angle_threshold:angle_threshold \
-                            planar_tolerance:planar_tolerance \
-                            match_tolerance:0.001
-                    )
+                        if t_junction_only then
+                        (
+                            node_error = node.name + ": Slice Force found no interior horizontal slice plane at any true T-junction vertex."
+                            if t_junction_analysis_error != undefined then node_error += " T-junction: " + t_junction_analysis_error
+                        )
+                        else if use_selected_vertex_override and node == selected_nodes[1] then
+                        (
+                            node_error = node.name + ": selected vertex position does not define an interior Slice Force plane for the requested direction."
+                            if selected_analysis_error != undefined then node_error += " Selected vertex: " + selected_analysis_error
+                        )
+                        else
+                        (
+                            node_error = node.name + ": Slice Force found no interior slice planes after stable planar analysis and non-planar fallbacks."
+                            if t_junction_analysis_error != undefined then node_error += " T-junction: " + t_junction_analysis_error
+                        )
 
-                    if include_t_junctions then
-                    (
-                        force_tasks = mergeSliceForceTJunctionTasks \
-                            node \
-                            force_tasks \
-                            cut_mode:cut_mode \
-                            angle_threshold:angle_threshold \
-                            match_tolerance:0.001
-                    )
-
-                    if force_tasks.count == 0 then
-                    (
-                        node_error = node.name + ": Slice Force found no interior slice planes after stable planar analysis and non-planar fallbacks."
+                        if planar_analysis_error != undefined then node_error += " Planar: " + planar_analysis_error
+                        if nonplanar_analysis_error != undefined then node_error += " Non-planar: " + nonplanar_analysis_error
                         node_ok = false
                     )
                 )
@@ -12237,6 +12764,9 @@ struct WallFixer_v
             last_slice_report = report
 
             if failed_nodes.count > 0 then select failed_nodes
+            try(subObjectLevel = 0)catch()
+            try(setSliceForceCreateMode())catch()
+            try(completeRedraw())catch(try(redrawViews())catch())
             return false
         )
 
@@ -12300,7 +12830,9 @@ struct WallFixer_v
             (
                 append successful_nodes node
                 if report != "" then report += "\n"
-                report += node.name + ": Slice Force cached " + (force_tasks.count as string) + " unique plane(s), prebuilt the full modifier stack, and collapsed to Editable Poly."
+                report += node.name + ": Slice Force " + \
+                    (if t_junction_only then "used T-junction-only anchors with " else if use_selected_vertex_override and node == selected_nodes[1] then "used selected vertex position override with " else "cached ") + \
+                    (force_tasks.count as string) + " unique plane(s), prebuilt the full modifier stack, and collapsed to Editable Poly."
             )
             else
             (
@@ -12315,20 +12847,35 @@ struct WallFixer_v
         last_slice_failed_nodes = failed_nodes
         last_slice_report = report
 
-        try(setSliceForceCreateMode())catch()
+        local force_completed = failed_nodes.count == 0
 
-        if failed_nodes.count > 0 then
+        if force_completed then
         (
-            select failed_nodes
-            try(completeRedraw())catch(try(redrawViews())catch())
-            false
+            if successful_nodes.count > 0 then select successful_nodes
         )
         else
         (
-            if successful_nodes.count > 0 then select successful_nodes
-            try(completeRedraw())catch(try(redrawViews())catch())
-            true
+            select failed_nodes
         )
+
+        /*
+        Finalize the actual viewport before the UI exposes SUCCESS/FAILED.
+        Result selection, Editable Poly evaluation and Create-mode state are committed first.
+        */
+        try(subObjectLevel = 0)catch()
+        try(setSliceForceCreateMode())catch()
+
+        for viewport_node in (selection as array) do
+        (
+            if viewport_node != undefined and isValidNode viewport_node then
+            (
+                try(update viewport_node)catch()
+            )
+        )
+
+        try(completeRedraw())catch(try(redrawViews())catch())
+
+        force_completed
         -- return
     ),
 
@@ -12390,7 +12937,7 @@ struct WallFixer_v
     Runs optimized Slice Force.
     Anchor analysis happens once on the baked Editable Poly; all unique-plane modifiers are created before any slice is committed.
     */
-    function debugSliceSelectedWallsForce cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 cleanup_edges:true display_hidden_edges:undefined double_side:undefined include_t_junctions:false progress_callback:undefined quiet:false =
+    function debugSliceSelectedWallsForce cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 cleanup_edges:true display_hidden_edges:undefined double_side:undefined include_t_junctions:false t_junction_only:false progress_callback:undefined quiet:false =
     (
         local previous_batch_quiet = batch_quiet
         local completed = false
@@ -12407,6 +12954,7 @@ struct WallFixer_v
                 angle_threshold:angle_threshold \
                 planar_tolerance:planar_tolerance \
                 include_t_junctions:include_t_junctions \
+                t_junction_only:t_junction_only \
                 progress_callback:progress_callback
         )
         catch

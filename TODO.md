@@ -6,23 +6,25 @@
 
 ## QUEUE
 
-UI: progress bar: increase height from 4 px to 8 px (2x higher).
-
-PERFORMANCE BUG: EDGE FIXER > BORDER CHECK > RMB: selecting all borders is too slow; optimize it as a fast direct Border sub-object selection and avoid unnecessary heavy geometry analysis.
-
-UI: EDGE FIXER > Options: fix the controls layout so spacing, alignment, widths, and row placement are clean and consistent.
-
-UI: DEBUG rollout: arrange buttons two per row with consistent widths and spacing.
-
-HELPERS > Quadrify > LMB: run Ribbon Tools "Quadrify All".
-
-HELPERS > Quadrify > RMB: run Ribbon Tools "Triangulate All".
-
-UI: HELPERS > Material: change the button label to "Multi ID"; keep the existing LMB/RMB behavior unchanged.
-
-INIT: do not automatically open the Straight-Edge-Fixer dialog when Wall-Fixer initializes.
+HELPERS > QUADRIFY > LMB: run `macros.run "PolyTools" "Quadrify"`.
 
 ## DONE TODAY
+
+1.0529 INIT: bundled Wall-Fixer loading no longer opens or closes the standalone Straight Edge Fixer dialog; directly running Straight-Edge-Fixer.ms still opens it.
+
+1.0519 UI: HELPERS > Material: renamed the button label to "Multi ID"; existing LMB/RMB behavior is unchanged.
+
+1.0509 HELPERS > Quadrify > RMB: runs the registered 3ds Max action named "Triangulate All" by action text, with a clean FAILED result when that action is unavailable.
+
+1.0499 HELPERS > Quadrify > LMB: added Quadrify beside Split and run Ribbon Tools Quadrify All through the existing PolyToolsModeling.Quadrify false false path.
+
+1.0489 UI: DEBUG rollout: arranged controls on a consistent two-column 143 px grid and compacted the rollout height.
+
+1.0479 UI: EDGE FIXER > Options: compacted controls into clean aligned Rows distance / Min Edges / Quiet rows with wider spinners.
+
+1.0469 PERFORMANCE: EDGE FIXER > BORDER CHECK > RMB now uses native Border sub-object Select All directly, avoiding geometry-adapter and border-analysis work.
+
+1.0459 UI: progress bar: increased the always-visible top bar from 4 px to 8 px and moved the shared status row down to avoid overlap.
 
 1.0119 EDGE FIXER > BORDER CHECK > RMB: selects all open borders on supported geometry and enters Border sub-object level; LMB validation remains unchanged.
 

@@ -1,5 +1,5 @@
-﻿/*
-Wall-Fixer UI 0.977
+/*
+Wall-Fixer UI 0.991
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.977"
-global wall_fixer_ui_tool_version = 1.0449
+global wall_fixer_ui_file_version = "0.991"
+global wall_fixer_ui_tool_version = 1.0609
 
 
 /*
@@ -183,6 +183,32 @@ This keeps LMB/RMB routing explicit without relying on the native rollout button
 function wallFixerGetDotNetMouseButton event_args =
 (
     ((event_args.Button.ToString()) as string) -- return
+)
+
+
+/*
+Returns the Slice Walls cut mode for the main action mouse button.
+*/
+function wallFixerGetSliceActionMode mouse_button =
+(
+    case mouse_button of
+    (
+        "Left": #vertical
+        "Right": #horizontal
+        default: undefined
+    )
+    -- return
+)
+
+
+/*
+Returns true for Slice Force CTRL+LMB/CTRL+RMB T-junction-only modes.
+The mouse button keeps its normal Vertical/Horizontal direction while CTRL restricts anchors to true T-junction vertices.
+*/
+function wallFixerIsSliceForceTJunctionOnly mouse_button control_pressed =
+(
+    control_pressed and (mouse_button == "Left" or mouse_button == "Right")
+    -- return
 )
 
 
@@ -1377,20 +1403,20 @@ The controls are separated from the main EDGE FIXER workflow without changing ge
 */
 rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:82
 (
-    label level_tolerance_label "Rows distance:" pos:[8,32] width:80 height:18
-    spinner level_tolerance_spinner "" pos:[90,29] width:40 height:20 \
+    label level_tolerance_label "Rows distance:" pos:[8,8] width:80 height:18
+    spinner level_tolerance_spinner "" pos:[90,5] width:96 height:20 \
         range:[0.000001,1000000.0,0.01] type:#worldUnits scale:0.001 \
         tooltip:"Maximum world-space distance used to detect and group horizontal edge rows."
-    label rows_distance_units_label "unit" pos:[132,32] width:30 height:18
+    label rows_distance_units_label "unit" pos:[190,8] width:70 height:18
 
 
-    label min_edges_label "Min Edges:" pos:[164,32] width:54 height:18
-    spinner min_level_edges_spinner "" pos:[220,29] width:30 height:20 \
+    label min_edges_label "Min Edges:" pos:[8,32] width:80 height:18
+    spinner min_level_edges_spinner "" pos:[90,29] width:96 height:20 \
         range:[1,100000,3] type:#integer scale:1 \
         tooltip:"Minimum horizontal edge count needed to define a valid edge row."
 
 
-    checkbox straight_quiet_checkbox "Quiet" pos:[8,57] width:58 height:18 checked:false \
+    checkbox straight_quiet_checkbox "Quiet" pos:[8,56] width:80 height:18 checked:false \
         tooltip:"Suppress the Straight Edge Fixer final report dialog."
 
 
@@ -1634,7 +1660,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:140
 SLICE WALLS routes direction directly from the main action mouse event.
 Advanced slicer values continue to come from the existing Wall-Fixer INI settings.
 */
-rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
+rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:172
 (
     local numbered_button_tooltip
     local slice_action_running = false
@@ -1655,22 +1681,22 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
         tooltip:"Include true three-edge T-junction vertices as additional Slice Force planes."
 
 
-    dotNetControl slice_selected_walls_button "System.Windows.Forms.Button" pos:[4,42] width:128 height:38
+    dotNetControl slice_selected_walls_button "System.Windows.Forms.Button" pos:[4,42] width:148 height:38
 
 
-    button slice_modifier_button "H \\ V" pos:[136,42] width:54 height:38 \
+    button reset_slice_button "RESET SLICE" pos:[156,42] width:150 height:38 \
+        tooltip:"LMB: Remove all vertical Slice modifiers using the SLICE V namespace.\n\nRMB: Remove all horizontal Slice modifiers using the SLICE H namespace."
+
+
+    button slice_modifier_button "H \\ V" pos:[4,84] width:149 height:38 \
         tooltip:"LMB: Activate SLICE HORIZONTAL.\n\nRMB: Activate SLICE VERTICAL.\n\nCTRL+LMB: Activate SLICE HORIZONTAL and enter Edge level 2.\n\nCTRL+RMB: Activate SLICE VERTICAL and enter Edge level 2."
 
 
-    button select_slice_state_button "Select" pos:[194,42] width:54 height:38 \
+    button select_slice_state_button "Select" pos:[157,84] width:149 height:38 \
         tooltip:"LMB: Filter objects with SLICE VERTICAL. If nothing is selected, use all visible geometry.\n\nRMB: Filter objects with SLICE HORIZONTAL. If nothing is selected, use all visible geometry."
 
 
-    button delete_slice_modifier_button "Delete" pos:[252,42] width:54 height:38 \
-        tooltip:"LMB: Delete all SLICE VERTICAL modifiers from selected objects.\n\nRMB: Delete all SLICE HORIZONTAL modifiers from selected objects."
-
-
-    dotNetControl slice_force_button "System.Windows.Forms.Button" pos:[4,84] width:302 height:38
+    dotNetControl slice_force_button "System.Windows.Forms.Button" pos:[4,126] width:302 height:38
 
 
     on WallFixerSliceWallsRollout open do
@@ -1696,7 +1722,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
             slice_force_button \
             "SLICE FORCE" \
             numbered_button_tooltip \
-            "LMB: FORCE SLICE VERTICAL.\n\nRMB: FORCE SLICE HORIZONTAL.\n\nUses one real Slice modifier per unique plane, then collapses once. Enable T junction verts to include true three-edge T-junction anchors."
+            "LMB: FORCE SLICE VERTICAL.\n\nRMB: FORCE SLICE HORIZONTAL.\n\nCTRL+LMB: FORCE SLICE VERTICAL only at true T-junction vertices.\n\nCTRL+RMB: FORCE SLICE HORIZONTAL only at true T-junction vertices.\n\nUses one real Slice modifier per unique plane, then collapses once. Enable T junction verts to include T-junction anchors in ordinary Force runs."
 
         slice_force_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
     )
@@ -1748,6 +1774,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
     (
         local mouse_button = wallFixerGetDotNetMouseButton event_args
         local slice_mode = wallFixerGetSliceActionMode mouse_button
+        local t_junction_only = wallFixerIsSliceForceTJunctionOnly mouse_button keyboard.controlPressed
 
         if slice_mode != undefined and not slice_force_action_running then
         (
@@ -1755,7 +1782,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
 
             try
             (
-                ::WallFixerRollout.runSliceForce slice_mode
+                ::WallFixerRollout.runSliceForce slice_mode t_junction_only:t_junction_only
             )
             catch
             (
@@ -1792,15 +1819,15 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
     )
 
 
-    on delete_slice_modifier_button pressed do
+    on reset_slice_button pressed do
     (
-        ::WallFixerRollout.deleteSliceWallModifiers "SLICE VERTICAL"
+        ::WallFixerRollout.deleteSliceWallModifiers "SLICE V"
     )
 
 
-    on delete_slice_modifier_button rightclick do
+    on reset_slice_button rightclick do
     (
-        ::WallFixerRollout.deleteSliceWallModifiers "SLICE HORIZONTAL"
+        ::WallFixerRollout.deleteSliceWallModifiers "SLICE H"
     )
 )
 
@@ -1956,7 +1983,7 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:348
 HELPERS contains utility actions that are useful outside the numbered wall-fixing workflow.
 These actions operate on the current scene selection.
 */
-rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
+rollout WallFixerHelpersRollout "HELPERS" width:310 height:332
 (
     button attach_button "Attach" pos:[8,8] width:143 height:30 \
         tooltip:"LMB: Attach all selected geometry into the first selected object.\n\nRMB: Attach selection, center the merged pivot, weld all vertices using Wall-Fixer > Options > Weld Threshold, then quadrify when the merged object has at most 12 triangular faces."
@@ -1974,14 +2001,18 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
         tooltip:"LMB: Select true 90° open-border corner vertices on the current Edit Poly modifier or Editable Poly base. Straight 180° border vertices are excluded."
 
 
-    button split_button "Split" pos:[8,80] width:294 height:30 \
+    button split_button "Split" pos:[8,80] width:143 height:30 \
         tooltip:"LMB: Apply Editable Poly, split all selected edges, then explode the resulting elements into separate objects."
+
+
+    button quadrify_button "Quadrify" pos:[159,80] width:143 height:30 \
+        tooltip:"LMB: Run Ribbon Tools Quadrify All.\n\nRMB: Run Ribbon Tools Triangulate All."
 
 
     groupBox material_group "MATERIAL" pos:[4,116] width:302 height:66
 
 
-    button material_button "Material" pos:[8,140] width:143 height:30 \
+    button material_button "Multi ID" pos:[8,140] width:143 height:30 \
         tooltip:"LMB: Assign the same WALL FACE CLASSIFIER material used by INNER / OUTTER to selected geometry.\n\nRMB: Remove the material from selected geometry."
 
 
@@ -1991,6 +2022,21 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
 
     button select_degenerated_objects_button "Select Degenerated Objects" pos:[8,188] width:294 height:30 \
         tooltip:"Select visible geometry collapsed to an edge when all evaluated vertex normals match."
+
+
+    groupBox modifiers_group "MODIFIERS" pos:[4,224] width:302 height:102
+
+
+    button stl_check_button "STL CHECK" pos:[8,248] width:143 height:30 \
+        tooltip:"LMB: Apply an STL Check modifier to selected geometry and turn Check on."
+
+
+    button vertex_weld_button "VertexWeld" pos:[159,248] width:143 height:30 \
+        tooltip:"LMB: Apply Vertex Weld with Threshold 0.0.\n\nRMB: Apply Vertex Weld with Threshold 0.001."
+
+
+    button world_borders_button "Weld Borders" pos:[8,284] width:294 height:30 \
+        tooltip:"LMB: Prepend WELD BORDERS Poly Select below the topmost VertexWeld, select all open-border vertices, and leave Vertex sub-object active so VertexWeld uses only those vertices."
 
 
     on attach_button pressed do
@@ -2035,6 +2081,18 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
     )
 
 
+    on quadrify_button pressed do
+    (
+        ::WallFixerRollout.runQuadrifyAll()
+    )
+
+
+    on quadrify_button rightclick do
+    (
+        ::WallFixerRollout.runTriangulateAll()
+    )
+
+
     on material_button pressed do
     (
         ::WallFixerRollout.runAssignMultiMaterial()
@@ -2057,6 +2115,30 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
     (
         ::WallFixerRollout.runSelectDegeneratedObjects()
     )
+
+
+    on stl_check_button pressed do
+    (
+        ::WallFixerRollout.runApplyStlCheck()
+    )
+
+
+    on vertex_weld_button pressed do
+    (
+        ::WallFixerRollout.runApplyVertexWeld weld_threshold:0.0
+    )
+
+
+    on vertex_weld_button rightclick do
+    (
+        ::WallFixerRollout.runApplyVertexWeld weld_threshold:0.001
+    )
+
+
+    on world_borders_button pressed do
+    (
+        ::WallFixerRollout.runApplyWorldBorders()
+    )
 )
 
 
@@ -2065,7 +2147,7 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
 DEBUG contains optional tracing and Listener diagnostics outside the main workflow.
 These controls do not change the numbered pipeline order.
 */
-rollout WallFixerDebugRollout "DEBUG" width:310 height:152
+rollout WallFixerDebugRollout "DEBUG" width:310 height:116
 (
     checkbutton debug_trace_checkbutton "DEBUG TRACE" pos:[8,8] width:143 height:30 \
         tooltip:"Record classifier inputs, per-face scores, resolution reasons, and class snapshots in object user properties."
@@ -2073,13 +2155,13 @@ rollout WallFixerDebugRollout "DEBUG" width:310 height:152
     button btn_print_debug "PRINT DEBUG" pos:[159,8] width:143 height:30 \
         tooltip:"Print selected or last analyzed wall geometry, trace properties, vertices, faces, normals, Material IDs, scores, and resolution reasons to the MAXScript Listener."
 
-    button print_objs_button "Print Objs" pos:[8,44] width:294 height:30 \
+    button print_objs_button "Print Objs" pos:[8,44] width:143 height:30 \
         tooltip:"Clear the Listener and print detailed diagnostics for the selected objects."
 
-    button angle_of_edges_button "Angle of Edges" pos:[8,80] width:294 height:30 \
+    button angle_of_edges_button "Angle of Edges" pos:[159,44] width:143 height:30 \
         tooltip:"Print horizontal and vertical deviation angles for the selected edges."
 
-    button dialog_info_button "Dialog Info" pos:[8,116] width:294 height:30 \
+    button dialog_info_button "Dialog Info" pos:[8,80] width:143 height:30 \
         tooltip:"Print the current Wall-Fixer dialog size, position, registration state, and dock state."
 
     on WallFixerDebugRollout open do
@@ -8229,21 +8311,6 @@ Verifies full-row parent controls and parent group boxes use 4px side padding.
 The test checks width equals parent rollout width minus 8 and left position equals 4.
 */
 /*
-Returns the Slice Walls cut mode for the main action mouse button.
-*/
-function wallFixerGetSliceActionMode mouse_button =
-(
-    case mouse_button of
-    (
-        "Left": #vertical
-        "Right": #horizontal
-        default: undefined
-    )
-    -- return
-)
-
-
-/*
 Tests Slice Walls Select CTRL+LMB routing intent.
 */
 function testSliceCornerHelperRouting =
@@ -8271,13 +8338,18 @@ function testSliceSelectDirectionalRouting =
 
 
 /*
-Tests Slice Force mouse routing; it intentionally matches the main Slice Walls mapping.
+Tests Slice Force mouse routing including CTRL T-junction-only modes for both directions.
 */
 function testSliceForceMouseRouting =
 (
     wallFixerGetSliceActionMode "Left" == #vertical and
     wallFixerGetSliceActionMode "Right" == #horizontal and
-    wallFixerGetSliceActionMode "Middle" == undefined
+    wallFixerGetSliceActionMode "Middle" == undefined and
+    wallFixerIsSliceForceTJunctionOnly "Left" true and
+    wallFixerIsSliceForceTJunctionOnly "Right" true and
+    not(wallFixerIsSliceForceTJunctionOnly "Left" false) and
+    not(wallFixerIsSliceForceTJunctionOnly "Right" false) and
+    not(wallFixerIsSliceForceTJunctionOnly "Middle" true)
     -- return
 )
 
@@ -8333,14 +8405,31 @@ function testSliceWallMouseRouting =
 
 
 /*
-Tests Slice Walls Delete LMB/RMB modifier-name routing.
+Tests RESET SLICE LMB/RMB namespace routing.
 */
 function testSliceDeleteRouting =
 (
-    local lmb_modifier = "SLICE VERTICAL"
-    local rmb_modifier = "SLICE HORIZONTAL"
+    local lmb_modifier = "SLICE V"
+    local rmb_modifier = "SLICE H"
 
-    lmb_modifier == "SLICE VERTICAL" and rmb_modifier == "SLICE HORIZONTAL"
+    lmb_modifier == "SLICE V" and rmb_modifier == "SLICE H"
+    -- return
+)
+
+
+/*
+Tests RESET SLICE placement beside the main Slice Walls control.
+The Reset button shares the first action row and Slice Force remains on the final row.
+*/
+function testResetSliceLayout =
+(
+    local slice_x = 4
+    local slice_width = 148
+    local reset_x = 156
+    local reset_width = 150
+    local force_y = 126
+
+    slice_x + slice_width <= reset_x and reset_x + reset_width <= 310 and force_y > 84
     -- return
 )
 
@@ -9188,11 +9277,11 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
 
 rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 (
-    progressbar workflow_progress "" pos:[0,0] width:344 height:4 value:0 color:(color 0 180 0) orient:#horizontal
-    dotNetControl progress_count_label "System.Windows.Forms.Label" pos:[8,6] width:328 height:40
-    dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,6] width:76 height:40
-    dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:40
-    subRollout workflow_subrollout "" pos:[0,54] width:344 height:686
+    progressbar workflow_progress "" pos:[0,0] width:344 height:8 value:0 color:(color 0 180 0) orient:#horizontal
+    dotNetControl progress_count_label "System.Windows.Forms.Label" pos:[8,10] width:328 height:40
+    dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,10] width:76 height:40
+    dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,10] width:248 height:40
+    subRollout workflow_subrollout "" pos:[0,58] width:344 height:682
 
 
     local status_texts = #("Ready.")
@@ -9610,6 +9699,169 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
+    Runs Ribbon Tools Quadrify All on the current modeling context.
+    Uses the same PolyToolsModeling call already used by the Attach RMB workflow.
+    */
+    function runQuadrifyAll =
+    (
+        setProgress 0
+        setStatus #message "Running Quadrify All..."
+        operation_success = false
+
+
+        undo "Wall-Fixer - Quadrify All" on
+        (
+            try
+            (
+                max modify mode
+                operation_success = PolyToolsModeling.Quadrify false false
+            )
+            catch
+            (
+                operation_success = false
+            )
+        )
+
+
+        setProgress 100
+
+
+        if operation_success then
+        (
+            completeRedraw()
+            setStatus #success "Quadrify All completed."
+        )
+        else
+        (
+            setStatus #failed "Quadrify All failed."
+        )
+
+
+        operation_success
+        -- return
+    )
+
+
+    /*
+    Executes a registered 3ds Max action whose visible text exactly matches the requested command.
+    Button, menu and description text are checked so Ribbon actions can be resolved without guessing macro names.
+    */
+    function runRegisteredActionByText action_text =
+    (
+        requested_text = toLower action_text
+        operation_success = false
+
+
+        for table_index = 1 to actionMan.numActionTables while not operation_success do
+        (
+            action_table = actionMan.getActionTable table_index
+
+
+            for item_index = 1 to action_table.numActionItems while not operation_success do
+            (
+                action_item = action_table.getActionItem item_index
+                button_text = ""
+                menu_text = ""
+                description_text = ""
+
+
+                try (action_item.getButtonText &button_text) catch (button_text = "")
+                try (action_item.getMenuText &menu_text) catch (menu_text = "")
+                try (action_item.getDescription &description_text) catch (description_text = "")
+
+
+                if (toLower button_text) == requested_text or (toLower menu_text) == requested_text or (toLower description_text) == requested_text then
+                (
+                    persistent_id = undefined
+
+
+                    try
+                    (
+                        persistent_id = action_item.persistentActionId
+                    )
+                    catch
+                    (
+                        persistent_id = undefined
+                    )
+
+
+                    if persistent_id != undefined then
+                    (
+                        try
+                        (
+                            operation_success = actionMan.executeAction action_table.id persistent_id
+                        )
+                        catch
+                        (
+                            operation_success = false
+                        )
+                    )
+                    else
+                    (
+                        try
+                        (
+                            operation_success = actionMan.executeAction action_table.id (action_item.id as string)
+                        )
+                        catch
+                        (
+                            operation_success = false
+                        )
+                    )
+                )
+            )
+        )
+
+
+        operation_success
+        -- return
+    )
+
+
+    /*
+    Runs the registered Ribbon Tools Triangulate All action.
+    The action is resolved by its visible command text so no unverified macro name is hardcoded.
+    */
+    function runTriangulateAll =
+    (
+        setProgress 0
+        setStatus #message "Running Triangulate All..."
+        operation_success = false
+
+
+        undo "Wall-Fixer - Triangulate All" on
+        (
+            try
+            (
+                max modify mode
+                operation_success = runRegisteredActionByText "Triangulate All"
+            )
+            catch
+            (
+                operation_success = false
+            )
+        )
+
+
+        setProgress 100
+
+
+        if operation_success then
+        (
+            completeRedraw()
+            setStatus #success "Triangulate All completed."
+        )
+        else
+        (
+            setStatus #failed "Triangulate All action was not available."
+        )
+
+
+        operation_success
+        -- return
+    )
+
+
+    /*
     Aligns the active viewport perpendicular to selected wall faces and frames the selection.
     A temporary orthographic camera transfers the face orientation into the final User view.
     */
@@ -9820,6 +10072,686 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
             setStatus #success ("Material: removed from " + (selected_nodes.count as string) + " object(s).")
             true
         )
+        -- return
+    )
+
+
+    /*
+    Applies STL Check to selected geometry and enables its Check toggle.
+    Unsupported selected geometry is skipped and reported without changing other STL Check defaults.
+    */
+    function runApplyStlCheck =
+    (
+        selected_nodes = for object_node in (selection as array) where object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #warning "STL CHECK: select one or more geometry objects."
+            false
+        )
+        else
+        (
+            added_count = 0
+            failed_names = #()
+
+
+            undo "Wall-Fixer - STL Check" on
+            (
+                for object_node in selected_nodes do
+                (
+                    modifier_supported = false
+
+
+                    try
+                    (
+                        modifier_supported = validModifier object_node STL_Check
+                    )
+                    catch
+                    (
+                        modifier_supported = false
+                    )
+
+
+                    if modifier_supported then
+                    (
+                        stl_check_modifier = STL_Check()
+
+
+                        try
+                        (
+                            addModifier object_node stl_check_modifier
+                            stl_check_modifier.Check_Now = 1
+                            added_count += 1
+                        )
+                        catch
+                        (
+                            append failed_names object_node.name
+                        )
+                    )
+                    else
+                    (
+                        append failed_names object_node.name
+                    )
+                )
+            )
+
+
+            redrawViews()
+
+
+            if added_count == selected_nodes.count then
+            (
+                setStatus #success ("STL CHECK: applied with Check on to " + (added_count as string) + " object(s).")
+                true
+            )
+            else if added_count > 0 then
+            (
+                setStatus #warning ("STL CHECK: applied to " + (added_count as string) + " object(s); skipped " + (failed_names.count as string) + ".")
+                true
+            )
+            else
+            (
+                setStatus #failed "STL CHECK: modifier could not be applied to the selected geometry."
+                false
+            )
+        )
+        -- return
+    )
+
+
+    /*
+    Tests HELPERS STL CHECK by applying it to a temporary box and reading the modifier state.
+    The temporary node is deleted and the previous object selection is restored.
+    */
+    function testHelpersStlCheck =
+    (
+        original_selection = selection as array
+        test_node = undefined
+        operation_success = false
+        modifier_class_ok = false
+        check_on = false
+
+
+        try
+        (
+            test_node = box name:(uniqueName "WF_STL_CHECK_TEST")
+            select test_node
+
+
+            operation_success = runApplyStlCheck()
+
+
+            if test_node.modifiers.count > 0 then
+            (
+                test_modifier = test_node.modifiers[1]
+                modifier_class_ok = classOf test_modifier == STL_Check
+
+
+                if modifier_class_ok then
+                (
+                    try
+                    (
+                        check_on = test_modifier.Check_Now == 1
+                    )
+                    catch
+                    (
+                        check_on = false
+                    )
+                )
+            )
+        )
+        catch
+        (
+            operation_success = false
+            modifier_class_ok = false
+            check_on = false
+        )
+
+
+        if test_node != undefined and isValidNode test_node then delete test_node
+
+
+        restored_selection = for object_node in original_selection where object_node != undefined and isValidNode object_node collect object_node
+
+
+        if restored_selection.count > 0 then
+        (
+            select restored_selection
+        )
+        else
+        (
+            clearSelection()
+        )
+
+
+        test_passed = operation_success and modifier_class_ok and check_on
+        format "HELPERS STL CHECK test | applied:% | class:% | check_on:% | result:%\n" operation_success modifier_class_ok check_on test_passed
+
+
+        test_passed
+        -- return
+    )
+
+
+
+    /*
+    Applies a native Vertex Weld modifier to selected geometry using the requested threshold.
+    Each supported selected object receives a new Vertex Weld modifier.
+    */
+    function runApplyVertexWeld weld_threshold:0.0 =
+    (
+        selected_nodes = for object_node in (selection as array) where object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #warning "VertexWeld: select one or more geometry objects."
+            false
+        )
+        else
+        (
+            added_count = 0
+            failed_names = #()
+
+
+            undo "Wall-Fixer - Vertex Weld" on
+            (
+                for object_node in selected_nodes do
+                (
+                    modifier_supported = false
+
+
+                    try
+                    (
+                        modifier_supported = validModifier object_node Vertex_Weld
+                    )
+                    catch
+                    (
+                        modifier_supported = false
+                    )
+
+
+                    if modifier_supported then
+                    (
+                        vertex_weld_modifier = Vertex_Weld()
+
+
+                        try
+                        (
+                            vertex_weld_modifier.threshold = weld_threshold
+                            addModifier object_node vertex_weld_modifier
+                            added_count += 1
+                        )
+                        catch
+                        (
+                            append failed_names object_node.name
+                        )
+                    )
+                    else
+                    (
+                        append failed_names object_node.name
+                    )
+                )
+            )
+
+
+            redrawViews()
+
+
+            if added_count == selected_nodes.count then
+            (
+                setStatus #success (
+                    "VertexWeld: applied threshold " +
+                    (weld_threshold as string) +
+                    " to " +
+                    (added_count as string) +
+                    " object(s)."
+                )
+                true
+            )
+            else if added_count > 0 then
+            (
+                setStatus #warning (
+                    "VertexWeld: applied threshold " +
+                    (weld_threshold as string) +
+                    " to " +
+                    (added_count as string) +
+                    " object(s); skipped " +
+                    (failed_names.count as string) +
+                    "."
+                )
+                true
+            )
+            else
+            (
+                setStatus #failed "VertexWeld: modifier could not be applied to the selected geometry."
+                false
+            )
+        )
+        -- return
+    )
+
+
+    /*
+    Tests HELPERS VertexWeld with both requested mouse thresholds.
+    The temporary node is deleted and the previous object selection is restored.
+    */
+    function testHelpersVertexWeld =
+    (
+        original_selection = selection as array
+        test_node = undefined
+        lmb_ok = false
+        rmb_ok = false
+
+
+        try
+        (
+            test_node = box name:(uniqueName "WF_VERTEX_WELD_TEST")
+            select test_node
+
+
+            lmb_applied = runApplyVertexWeld weld_threshold:0.0
+
+
+            if lmb_applied and test_node.modifiers.count > 0 then
+            (
+                lmb_modifier = test_node.modifiers[1]
+                lmb_ok = classOf lmb_modifier == Vertex_Weld and abs(lmb_modifier.threshold - 0.0) <= 0.0000001
+            )
+
+
+            rmb_applied = runApplyVertexWeld weld_threshold:0.001
+
+
+            if rmb_applied and test_node.modifiers.count > 1 then
+            (
+                rmb_modifier = test_node.modifiers[1]
+                rmb_ok = classOf rmb_modifier == Vertex_Weld and abs(rmb_modifier.threshold - 0.001) <= 0.0000001
+            )
+        )
+        catch
+        (
+            lmb_ok = false
+            rmb_ok = false
+        )
+
+
+        if test_node != undefined and isValidNode test_node then delete test_node
+
+
+        restored_selection = for object_node in original_selection where object_node != undefined and isValidNode object_node collect object_node
+
+
+        if restored_selection.count > 0 then
+        (
+            select restored_selection
+        )
+        else
+        (
+            clearSelection()
+        )
+
+
+        test_passed = lmb_ok and rmb_ok
+        format "HELPERS VertexWeld test | LMB 0.0:% | RMB 0.001:% | result:%\n" lmb_ok rmb_ok test_passed
+
+
+        test_passed
+        -- return
+    )
+
+
+    /*
+    Returns the topmost native Vertex Weld modifier and its modifier-stack index.
+    The index is counted from the top of the stack.
+    */
+    function getTopVertexWeldModifierData object_node =
+    (
+        if object_node == undefined or not isValidNode object_node then return undefined
+
+
+        for modifier_index = 1 to object_node.modifiers.count do
+        (
+            stack_modifier = object_node.modifiers[modifier_index]
+
+
+            if classOf stack_modifier == Vertex_Weld then
+            (
+                return #(stack_modifier, modifier_index)
+            )
+        )
+
+
+        undefined
+        -- return
+    )
+
+
+    /*
+    Finds all open-border vertices in the evaluated stack immediately below one modifier.
+    The target modifier and modifiers above it are disabled only while a disposable snapshot is evaluated.
+    */
+    function getWorldBorderVerticesBelowModifier object_node modifier_index =
+    (
+        border_vertices = #{}
+        disabled_states = #()
+        snapshot_node = undefined
+
+
+        if object_node == undefined or not isValidNode object_node then return border_vertices
+        if modifier_index < 1 or modifier_index > object_node.modifiers.count then return border_vertices
+
+
+        for stack_index = 1 to modifier_index do
+        (
+            stack_modifier = object_node.modifiers[stack_index]
+            modifier_enabled = true
+
+
+            try(modifier_enabled = stack_modifier.enabled)catch(modifier_enabled = true)
+            append disabled_states #(stack_modifier, modifier_enabled)
+
+
+            try(stack_modifier.enabled = false)catch()
+        )
+
+
+        try
+        (
+            snapshot_node = snapshot object_node
+
+
+            if snapshot_node != undefined and isValidNode snapshot_node then
+            (
+                convertToPoly snapshot_node
+                open_edges = polyop.getOpenEdges snapshot_node.baseObject
+
+
+                if open_edges != undefined and open_edges.numberSet > 0 then
+                (
+                    border_vertices = polyop.getVertsUsingEdge snapshot_node.baseObject open_edges
+                )
+            )
+        )
+        catch
+        (
+            border_vertices = #{}
+        )
+
+
+        if snapshot_node != undefined and isValidNode snapshot_node then
+        (
+            delete snapshot_node
+        )
+
+
+        for state_data in disabled_states do
+        (
+            try(state_data[1].enabled = state_data[2])catch()
+        )
+
+
+        border_vertices
+        -- return
+    )
+
+
+    /*
+    Prepend/reuse WELD BORDERS Poly Select directly below one Vertex Weld modifier.
+    The supplied border vertices are stored at Vertex level and passed upward to Vertex Weld.
+    */
+    function setWorldBordersPolySelect object_node vertex_weld_index border_vertices =
+    (
+        if object_node == undefined or not isValidNode object_node then return undefined
+        if border_vertices == undefined or border_vertices.numberSet == 0 then return undefined
+
+
+        poly_select_modifier = undefined
+        next_modifier_index = vertex_weld_index + 1
+
+
+        if next_modifier_index <= object_node.modifiers.count then
+        (
+            next_modifier = object_node.modifiers[next_modifier_index]
+
+
+            if classOf next_modifier == Poly_Select and (
+                toUpper(next_modifier.name as string) == "WELD BORDERS" or
+                toUpper(next_modifier.name as string) == "WORLD BORDERS"
+            ) then
+            (
+                poly_select_modifier = next_modifier
+                try(poly_select_modifier.name = "WELD BORDERS")catch()
+            )
+        )
+
+
+        if poly_select_modifier == undefined then
+        (
+            if not validModifier object_node Poly_Select then return undefined
+
+
+            poly_select_modifier = Poly_Select name:"WELD BORDERS"
+            addModifier object_node poly_select_modifier before:next_modifier_index
+        )
+
+
+        selection_written = false
+
+
+        try
+        (
+            setVertSelection object_node poly_select_modifier border_vertices
+            update object_node
+            selection_written = (getVertSelection object_node poly_select_modifier) == border_vertices
+        )
+        catch
+        (
+            selection_written = false
+        )
+
+
+        if selection_written then poly_select_modifier else undefined
+        -- return
+    )
+
+
+    /*
+    Limits the topmost Vertex Weld modifier to all current open-border vertices.
+    WELD BORDERS Poly Select is inserted directly below Vertex Weld and left active at Vertex level.
+    */
+    function runApplyWorldBorders =
+    (
+        selected_nodes = for object_node in (selection as array) where object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #warning "Weld Borders: select one or more geometry objects."
+            false
+        )
+        else
+        (
+            applied_count = 0
+            total_border_vertices = 0
+            failed_names = #()
+            last_active_node = undefined
+            last_poly_select = undefined
+
+
+            undo "Wall-Fixer - Weld Borders" on
+            (
+                for object_node in selected_nodes do
+                (
+                    vertex_weld_data = getTopVertexWeldModifierData object_node
+
+
+                    if vertex_weld_data == undefined then
+                    (
+                        append failed_names object_node.name
+                    )
+                    else
+                    (
+                        vertex_weld_index = vertex_weld_data[2]
+                        border_vertices = getWorldBorderVerticesBelowModifier object_node vertex_weld_index
+
+
+                        if border_vertices.numberSet == 0 then
+                        (
+                            append failed_names object_node.name
+                        )
+                        else
+                        (
+                            poly_select_modifier = setWorldBordersPolySelect object_node vertex_weld_index border_vertices
+
+
+                            if poly_select_modifier != undefined then
+                            (
+                                applied_count += 1
+                                total_border_vertices += border_vertices.numberSet
+                                last_active_node = object_node
+                                last_poly_select = poly_select_modifier
+                            )
+                            else
+                            (
+                                append failed_names object_node.name
+                            )
+                        )
+                    )
+                )
+            )
+
+
+            if last_active_node != undefined and last_poly_select != undefined then
+            (
+                try
+                (
+                    select last_active_node
+                    max modify mode
+                    modPanel.setCurrentObject last_poly_select
+                    subObjectLevel = 1
+                )
+                catch()
+            )
+
+
+            redrawViews()
+
+
+            if applied_count == selected_nodes.count then
+            (
+                setStatus #success (
+                    "Weld Borders: selected " +
+                    (total_border_vertices as string) +
+                    " open-border vertex/vertices on " +
+                    (applied_count as string) +
+                    " object(s); Vertex sub-object left active for VertexWeld."
+                )
+                true
+            )
+            else if applied_count > 0 then
+            (
+                setStatus #warning (
+                    "Weld Borders: configured " +
+                    (applied_count as string) +
+                    " object(s); skipped " +
+                    (failed_names.count as string) +
+                    " without VertexWeld or open borders."
+                )
+                true
+            )
+            else
+            (
+                setStatus #failed "Weld Borders: no selected object had both a VertexWeld modifier and open-border vertices."
+                false
+            )
+        )
+        -- return
+    )
+
+
+    /*
+    Tests HELPERS Weld Borders on an open Editable Poly box with Vertex Weld above WELD BORDERS.
+    Verifies stack order, border-vertex selection, and active Vertex sub-object state.
+    */
+    function testHelpersWorldBorders =
+    (
+        original_selection = selection as array
+        test_node = undefined
+        stack_ok = false
+        selection_ok = false
+        active_ok = false
+
+
+        try
+        (
+            test_node = box name:(uniqueName "WF_WORLD_BORDERS_TEST")
+            convertToPoly test_node
+            polyop.deleteFaces test_node.baseObject #{1}
+            update test_node
+
+
+            expected_border_edges = polyop.getOpenEdges test_node.baseObject
+            expected_border_vertices = polyop.getVertsUsingEdge test_node.baseObject expected_border_edges
+
+
+            vertex_weld_modifier = Vertex_Weld threshold:0.001
+            addModifier test_node vertex_weld_modifier
+            select test_node
+
+
+            operation_ok = runApplyWorldBorders()
+
+
+            if operation_ok and test_node.modifiers.count >= 2 then
+            (
+                poly_select_modifier = test_node.modifiers[2]
+
+
+                stack_ok = (
+                    test_node.modifiers[1] == vertex_weld_modifier and
+                    classOf poly_select_modifier == Poly_Select and
+                    toUpper(poly_select_modifier.name as string) == "WELD BORDERS"
+                )
+
+
+                if stack_ok then
+                (
+                    try(selection_ok = (getVertSelection test_node poly_select_modifier) == expected_border_vertices)catch(selection_ok = false)
+                    try(active_ok = modPanel.getCurrentObject() == poly_select_modifier and subObjectLevel == 1)catch(active_ok = false)
+                )
+            )
+        )
+        catch
+        (
+            stack_ok = false
+            selection_ok = false
+            active_ok = false
+        )
+
+
+        if test_node != undefined and isValidNode test_node then delete test_node
+
+
+        restored_selection = for object_node in original_selection where object_node != undefined and isValidNode object_node collect object_node
+
+
+        if restored_selection.count > 0 then
+        (
+            select restored_selection
+        )
+        else
+        (
+            clearSelection()
+        )
+
+
+        test_passed = stack_ok and selection_ok and active_ok
+        format "HELPERS Weld Borders test | stack:% | selection:% | active vertex:% | result:%\n" stack_ok selection_ok active_ok test_passed
+
+
+        test_passed
         -- return
     )
 
@@ -13420,12 +14352,12 @@ result_groups
 
 
     /*
-    Deletes one exact directional Slice Walls modifier type from all selected objects.
+    Removes one directional Slice namespace from all selected objects for RESET SLICE.
     */
     function deleteSliceWallModifiers modifier_name =
     (
         setProgress 0
-        setStatus #message ("Deleting " + modifier_name + " modifiers...")
+        setStatus #message ("RESET SLICE: removing " + modifier_name + " modifiers...")
 
         local delete_result = WallFixer.deleteSelectedDirectionalSliceModifiers modifier_name
 
@@ -13653,7 +14585,8 @@ result_groups
             cleanup_edges:(not WallFixerSliceWallsRollout.no_edge_cleanup_checkbox.checked) \
             display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
             double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
-            include_t_junctions:WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.checked \
+            include_t_junctions:(if t_junction_only then false else WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.checked) \
+            t_junction_only:t_junction_only \
             progress_callback:updateSliceProgress \
             quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
 
@@ -13711,7 +14644,7 @@ result_groups
     Runs Slice Force with the same directional anchor detection as normal Slice Walls.
     One temporary modifier is used per unique plane and the object is collapsed after every plane completes.
     */
-    function runSliceForce cut_mode =
+    function runSliceForce cut_mode t_junction_only:false =
     (
         if cut_mode != #horizontal and cut_mode != #vertical then
         (
@@ -13721,7 +14654,7 @@ result_groups
 
         saveUiSettings()
         setProgress 0
-        setStatus #message ("Slice Force: " + (cut_mode as string) + "...")
+        setStatus #message (if t_junction_only then ("Slice Force: " + (toUpper (cut_mode as string)) + " T-JUNCTION VERTS ONLY...") else ("Slice Force: " + (cut_mode as string) + "..."))
 
         local completed = WallFixer.debugSliceSelectedWallsForce \
             cut_mode:cut_mode \
@@ -13733,6 +14666,7 @@ result_groups
             display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
             double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
             include_t_junctions:WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.checked \
+            t_junction_only:t_junction_only \
             progress_callback:updateSliceProgress \
             quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
 
@@ -13741,13 +14675,14 @@ result_groups
         The viewport result is the last processing stage; SUCCESS/FAILED is shown only afterward.
         */
         try(completeRedraw())catch(try(redrawViews())catch())
+        try((dotNetClass "System.Windows.Forms.Application").DoEvents())catch()
 
         setProgress 100
 
         if completed then
         (
             local elapsed_seconds = (WallFixer.last_slice_elapsed_ms as float) / 1000.0
-            local completion_message = "Slice Force completed and collapsed in " + (elapsed_seconds as string) + " s."
+            local completion_message = (if t_junction_only then ("Slice Force T-junction-only " + (cut_mode as string) + " completed and collapsed in ") else "Slice Force completed and collapsed in ") + (elapsed_seconds as string) + " s."
             if WallFixer.last_slice_report != "" then completion_message += " " + WallFixer.last_slice_report
             setStatus #success completion_message
         )

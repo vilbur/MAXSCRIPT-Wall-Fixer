@@ -1,6 +1,6 @@
 ﻿/*
-Wall-Fixer Bundled Loader 1.036
-Project version 1.0449.
+Wall-Fixer Bundled Loader 1.049
+Project version 1.0649.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "1.036"
-global wall_fixer_loader_tool_version = 1.0449
+global wall_fixer_loader_file_version = "1.049"
+global wall_fixer_loader_tool_version = 1.0649
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -2191,7 +2191,7 @@ struct WMCWallSlicePipeline
 
 
 /*
-Wall-Fixer Core 0.82
+Wall-Fixer Core 0.85
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -2200,8 +2200,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.82"
-global wall_fixer_core_tool_version = 1.0449
+global wall_fixer_core_file_version = "0.85"
+global wall_fixer_core_tool_version = 1.0639
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -4566,42 +4566,59 @@ struct WallFixer_v
     ),
 
     /*
-    Returns true only when one modifier is the exact requested directional Slice Walls modifier.
+    Resolves one Reset Slice direction to its supported modifier-name namespace.
+    Vertical uses SLICE V and Horizontal uses SLICE H, including longer names such as SLICE VERTICAL or SLICE HORIZONTAL.
     */
-    function isDirectionalSliceModifier stack_modifier modifier_name =
+    function getDirectionalSliceNamespace modifier_name =
     (
-        if stack_modifier == undefined then return false
-        if classOf stack_modifier != Edit_Poly then return false
-
         local normalized_target = toUpper (modifier_name as string)
-        if normalized_target != "SLICE VERTICAL" and normalized_target != "SLICE HORIZONTAL" then return false
 
-        (toUpper (stack_modifier.name as string)) == normalized_target
+        if findString normalized_target "SLICE V" == 1 then return "SLICE V"
+        if findString normalized_target "SLICE H" == 1 then return "SLICE H"
+
+        undefined
         -- return
     ),
 
 
     /*
-    Deletes every exact directional Slice Walls modifier from the selected objects.
-    Other Slice Walls and user modifiers are preserved.
+    Returns true when one modifier belongs to the requested directional Slice namespace.
+    Modifier class is intentionally ignored so RESET SLICE supports Edit Poly, real Slice, and other compatible modifier types.
+    */
+    function isDirectionalSliceModifier stack_modifier modifier_name =
+    (
+        if stack_modifier == undefined then return false
+
+        local slice_namespace = getDirectionalSliceNamespace modifier_name
+        if slice_namespace == undefined then return false
+
+        local normalized_name = toUpper (stack_modifier.name as string)
+        findString normalized_name slice_namespace == 1
+        -- return
+    ),
+
+
+    /*
+    Deletes every modifier in the requested SLICE V or SLICE H namespace from selected objects.
+    SLICE ALL and unrelated user modifiers are preserved.
     */
     function deleteSelectedDirectionalSliceModifiers modifier_name =
     (
-        local normalized_target = toUpper (modifier_name as string)
+        local slice_namespace = getDirectionalSliceNamespace modifier_name
         local selected_nodes = selection as array
         local deleted_count = 0
         local changed_objects = 0
         last_slice_report = ""
 
-        if normalized_target != "SLICE VERTICAL" and normalized_target != "SLICE HORIZONTAL" then
+        if slice_namespace == undefined then
         (
-            last_slice_report = "Delete Slice: unsupported modifier type."
+            last_slice_report = "Reset Slice: unsupported modifier namespace."
             return #(false, 0, 0)
         )
 
         if selected_nodes.count == 0 then
         (
-            last_slice_report = "Delete Slice: select one or more objects."
+            last_slice_report = "Reset Slice: select one or more objects."
             return #(false, 0, 0)
         )
 
@@ -4616,7 +4633,7 @@ struct WallFixer_v
                 (
                     local stack_modifier = node.modifiers[modifier_index]
 
-                    if isDirectionalSliceModifier stack_modifier normalized_target then
+                    if isDirectionalSliceModifier stack_modifier slice_namespace then
                     (
                         deleteModifier node stack_modifier
                         deleted_count += 1
@@ -4634,31 +4651,40 @@ struct WallFixer_v
             )
         )
 
-        last_slice_report = "Delete Slice: removed " + (deleted_count as string) + " " + normalized_target + " modifier(s) from " + (changed_objects as string) + " object(s)."
+        completeRedraw()
+        last_slice_report = "Reset Slice: removed " + (deleted_count as string) + " " + slice_namespace + " modifier(s) from " + (changed_objects as string) + " object(s)."
         #(true, deleted_count, changed_objects)
         -- return
     ),
 
 
     /*
-    Tests exact-name directional Slice Walls modifier deletion policy.
+    Tests namespace-based RESET SLICE matching without changing scene geometry.
+    SLICE V and SLICE H accept exact and extended names while SLICE ALL remains protected.
     */
     function testDirectionalSliceDeletePolicy =
     (
         local vertical_modifier = Edit_Poly()
+        local vertical_short_modifier = Edit_Poly()
         local horizontal_modifier = Edit_Poly()
+        local horizontal_short_modifier = Edit_Poly()
         local all_modifier = Edit_Poly()
 
         vertical_modifier.name = "SLICE VERTICAL"
+        vertical_short_modifier.name = "SLICE V 01"
         horizontal_modifier.name = "SLICE HORIZONTAL"
+        horizontal_short_modifier.name = "SLICE H 01"
         all_modifier.name = "SLICE ALL"
 
         local test_passed = true
-        test_passed = test_passed and isDirectionalSliceModifier vertical_modifier "SLICE VERTICAL"
-        test_passed = test_passed and not(isDirectionalSliceModifier vertical_modifier "SLICE HORIZONTAL")
-        test_passed = test_passed and isDirectionalSliceModifier horizontal_modifier "SLICE HORIZONTAL"
-        test_passed = test_passed and not(isDirectionalSliceModifier all_modifier "SLICE VERTICAL")
-        test_passed = test_passed and not(isDirectionalSliceModifier all_modifier "SLICE HORIZONTAL")
+        test_passed = test_passed and isDirectionalSliceModifier vertical_modifier "SLICE V"
+        test_passed = test_passed and isDirectionalSliceModifier vertical_short_modifier "SLICE V"
+        test_passed = test_passed and not(isDirectionalSliceModifier vertical_modifier "SLICE H")
+        test_passed = test_passed and isDirectionalSliceModifier horizontal_modifier "SLICE H"
+        test_passed = test_passed and isDirectionalSliceModifier horizontal_short_modifier "SLICE H"
+        test_passed = test_passed and not(isDirectionalSliceModifier horizontal_modifier "SLICE V")
+        test_passed = test_passed and not(isDirectionalSliceModifier all_modifier "SLICE V")
+        test_passed = test_passed and not(isDirectionalSliceModifier all_modifier "SLICE H")
 
         test_passed
         -- return
@@ -11867,7 +11893,8 @@ struct WallFixer_v
     */
     function doesSliceForcePlaneSplitPoints world_points world_anchor world_axis match_tolerance:0.001 =
     (
-        if world_points == undefined or world_anchor == undefined or world_axis == undefined then return false
+        if classOf world_points != Array then return false
+        if world_anchor == undefined or world_axis == undefined then return false
         if length world_axis <= epsilon then return false
 
         local normalized_axis = normalize world_axis
@@ -12365,7 +12392,8 @@ struct WallFixer_v
     */
     function findSliceForcePlaneCacheIndex cached_tasks slice_task match_tolerance:0.001 =
     (
-        if slice_task == undefined or slice_task.count < 5 then return 0
+        if classOf cached_tasks != Array then return 0
+        if classOf slice_task != Array or slice_task.count < 5 then return 0
 
         local slice_kind = slice_task[2]
         local world_anchor = slice_task[4]
@@ -12412,7 +12440,7 @@ struct WallFixer_v
     */
     function getSliceForceTJunctionStraightPair edge_directions angle_threshold:5.0 =
     (
-        if edge_directions == undefined or edge_directions.count != 3 then return undefined
+        if classOf edge_directions != Array or edge_directions.count != 3 then return undefined
 
         local straight_limit = -(cos (amin 45.0 (amax 0.0 angle_threshold)))
         local best_pair = undefined
@@ -12452,7 +12480,7 @@ struct WallFixer_v
 
     /*
     Finds true T-junction vertices from visible Editable Poly edges on the baked Slice Force object.
-    Each record stores the local wall frame plus usable vertical/horizontal incident edges for Force plane creation.
+    Every polyop result is type-checked so status values such as OK or dead-edge results are skipped safely.
     */
     function getSliceForceTJunctionData node angle_threshold:5.0 =
     (
@@ -12463,98 +12491,109 @@ struct WallFixer_v
         if classOf base_obj != Editable_Poly then return result
 
         local surface_data = getSliceForceSurfaceData node
-        if surface_data == undefined then return result
+        if classOf surface_data != Array or surface_data.count < 1 then return result
 
         local world_points = surface_data[1]
+        if classOf world_points != Array then return result
+
         local vert_count = polyop.getNumVerts base_obj
+        if world_points.count < vert_count then return result
+
         local direction_cos = cos (amin 45.0 (amax 0.0 angle_threshold))
         local world_up = [0.0,0.0,1.0]
 
         for vertex_index = 1 to vert_count do
         (
-            local incident_edges = polyop.getEdgesUsingVert base_obj #{vertex_index}
-            local visible_edges = #()
-            local visible_directions = #()
+            local incident_edges = undefined
+            try(incident_edges = polyop.getEdgesUsingVert base_obj #{vertex_index})catch(incident_edges = undefined)
 
-            for edge_index in incident_edges do
+            if classOf incident_edges == BitArray then
             (
-                local edge_visible = false
-                try(edge_visible = polyop.getEdgeVis base_obj edge_index)catch(edge_visible = false)
+                local visible_edges = #()
+                local visible_directions = #()
 
-                if edge_visible then
+                for edge_index in incident_edges do
                 (
-                    local edge_verts = polyop.getEdgeVerts base_obj edge_index
+                    local edge_visibility_value = undefined
+                    try(edge_visibility_value = polyop.getEdgeVis base_obj edge_index)catch(edge_visibility_value = undefined)
+                    local edge_visible = (edge_visibility_value == true)
 
-                    if edge_verts != undefined and edge_verts.count == 2 then
+                    if edge_visible then
                     (
-                        local other_vertex = if edge_verts[1] == vertex_index then edge_verts[2] else edge_verts[1]
+                        local edge_verts = undefined
+                        try(edge_verts = polyop.getEdgeVerts base_obj edge_index)catch(edge_verts = undefined)
 
-                        if other_vertex >= 1 and other_vertex <= world_points.count then
+                        if classOf edge_verts == Array and edge_verts.count == 2 then
                         (
-                            local edge_direction = world_points[other_vertex] - world_points[vertex_index]
+                            local other_vertex = if edge_verts[1] == vertex_index then edge_verts[2] else edge_verts[1]
 
-                            if length edge_direction > epsilon then
+                            if other_vertex >= 1 and other_vertex <= world_points.count then
                             (
-                                append visible_edges edge_index
-                                append visible_directions (normalize edge_direction)
+                                local edge_direction = world_points[other_vertex] - world_points[vertex_index]
+
+                                if length edge_direction > epsilon then
+                                (
+                                    append visible_edges edge_index
+                                    append visible_directions (normalize edge_direction)
+                                )
                             )
                         )
                     )
                 )
-            )
 
-            if visible_edges.count == 3 then
-            (
-                local straight_pair = getSliceForceTJunctionStraightPair visible_directions angle_threshold:angle_threshold
-
-                if straight_pair != undefined then
+                if visible_edges.count == 3 then
                 (
-                    local straight_direction = visible_directions[straight_pair[1]]
-                    local branch_direction = visible_directions[straight_pair[3]]
-                    local wall_normal = cross straight_direction branch_direction
+                    local straight_pair = getSliceForceTJunctionStraightPair visible_directions angle_threshold:angle_threshold
 
-                    if length wall_normal > epsilon then
+                    if classOf straight_pair == Array and straight_pair.count == 3 then
                     (
-                        wall_normal = normalize wall_normal
-                        local wall_vertical = world_up - wall_normal * (dot wall_normal world_up)
+                        local straight_direction = visible_directions[straight_pair[1]]
+                        local branch_direction = visible_directions[straight_pair[3]]
+                        local wall_normal = cross straight_direction branch_direction
 
-                        if length wall_vertical > epsilon then
+                        if length wall_normal > epsilon then
                         (
-                            wall_vertical = normalize wall_vertical
-                            local wall_horizontal = cross wall_vertical wall_normal
+                            wall_normal = normalize wall_normal
+                            local wall_vertical = world_up - wall_normal * (dot wall_normal world_up)
 
-                            if length wall_horizontal > epsilon then
+                            if length wall_vertical > epsilon then
                             (
-                                wall_horizontal = normalize wall_horizontal
-                                local vertical_edge = 0
-                                local vertical_direction = undefined
-                                local vertical_score = -1.0
-                                local horizontal_edge = 0
-                                local horizontal_direction = undefined
-                                local horizontal_score = -1.0
+                                wall_vertical = normalize wall_vertical
+                                local wall_horizontal = cross wall_vertical wall_normal
 
-                                for direction_index = 1 to visible_directions.count do
+                                if length wall_horizontal > epsilon then
                                 (
-                                    local edge_direction = visible_directions[direction_index]
-                                    local vertical_dot = abs(dot edge_direction wall_vertical)
-                                    local horizontal_dot = abs(dot edge_direction wall_horizontal)
+                                    wall_horizontal = normalize wall_horizontal
+                                    local vertical_edge = 0
+                                    local vertical_direction = undefined
+                                    local vertical_score = -1.0
+                                    local horizontal_edge = 0
+                                    local horizontal_direction = undefined
+                                    local horizontal_score = -1.0
 
-                                    if vertical_dot >= direction_cos and vertical_dot > vertical_score then
+                                    for direction_index = 1 to visible_directions.count do
                                     (
-                                        vertical_score = vertical_dot
-                                        vertical_edge = visible_edges[direction_index]
-                                        vertical_direction = edge_direction
+                                        local edge_direction = visible_directions[direction_index]
+                                        local vertical_dot = abs(dot edge_direction wall_vertical)
+                                        local horizontal_dot = abs(dot edge_direction wall_horizontal)
+
+                                        if vertical_dot >= direction_cos and vertical_dot > vertical_score then
+                                        (
+                                            vertical_score = vertical_dot
+                                            vertical_edge = visible_edges[direction_index]
+                                            vertical_direction = edge_direction
+                                        )
+
+                                        if horizontal_dot >= direction_cos and horizontal_dot > horizontal_score then
+                                        (
+                                            horizontal_score = horizontal_dot
+                                            horizontal_edge = visible_edges[direction_index]
+                                            horizontal_direction = edge_direction
+                                        )
                                     )
 
-                                    if horizontal_dot >= direction_cos and horizontal_dot > horizontal_score then
-                                    (
-                                        horizontal_score = horizontal_dot
-                                        horizontal_edge = visible_edges[direction_index]
-                                        horizontal_direction = edge_direction
-                                    )
+                                    append result #(vertex_index, world_points[vertex_index], wall_normal, visible_edges, vertical_edge, vertical_direction, horizontal_edge, horizontal_direction)
                                 )
-
-                                append result #(vertex_index, world_points[vertex_index], wall_normal, visible_edges, vertical_edge, vertical_direction, horizontal_edge, horizontal_direction)
                             )
                         )
                     )
@@ -12568,77 +12607,87 @@ struct WallFixer_v
 
 
     /*
-    Merges optional true T-junction vertex planes into the existing Slice Force physical-plane cache.
-    The stable Force detector remains unchanged when the option is disabled by the caller.
+    Merges true T-junction vertex planes into the Slice Force physical-plane cache.
+    Non-array analyzer/status values are normalized to empty data instead of throwing on .count or indexing.
     */
     function mergeSliceForceTJunctionTasks node cached_tasks cut_mode:#all angle_threshold:5.0 match_tolerance:0.001 =
     (
-        local result = if cached_tasks == undefined then #() else copy cached_tasks
+        local result = if classOf cached_tasks == Array then copy cached_tasks else #()
         if node == undefined or not(isValidNode node) then return result
         if classOf node.baseObject != Editable_Poly then return result
 
         local surface_data = getSliceForceSurfaceData node
-        if surface_data == undefined then return result
+        if classOf surface_data != Array or surface_data.count < 1 then return result
 
         local world_points = surface_data[1]
+        if classOf world_points != Array then return result
+
         local junction_data = getSliceForceTJunctionData node angle_threshold:angle_threshold
+        if classOf junction_data != Array then junction_data = #()
+
         local added_count = 0
 
         for junction in junction_data do
         (
-            local vertex_index = junction[1]
-            local world_anchor = junction[2]
-            local wall_normal = junction[3]
-            local incident_edge_ids = junction[4]
-            local source_edges = #{}
-            local source_vertices = #{vertex_index}
-
-            for edge_index in incident_edge_ids do source_edges[edge_index] = true
-
-            if cut_mode == #all or cut_mode == #vertical then
+            if classOf junction == Array and junction.count >= 8 then
             (
-                local vertical_edge = junction[5]
-                local vertical_line = junction[6]
+                local vertex_index = junction[1]
+                local world_anchor = junction[2]
+                local wall_normal = junction[3]
+                local incident_edge_ids = junction[4]
+                local source_edges = #{}
+                local source_vertices = #{vertex_index}
 
-                if vertical_edge > 0 and vertical_line != undefined and length vertical_line > epsilon then
+                if classOf incident_edge_ids == Array then
                 (
-                    local vertical_axis = cross vertical_line wall_normal
+                    for edge_index in incident_edge_ids do source_edges[edge_index] = true
+                )
 
-                    if length vertical_axis > epsilon then
+                if cut_mode == #all or cut_mode == #vertical then
+                (
+                    local vertical_edge = junction[5]
+                    local vertical_line = junction[6]
+
+                    if vertical_edge > 0 and vertical_line != undefined and length vertical_line > epsilon then
                     (
-                        vertical_axis = normalize vertical_axis
+                        local vertical_axis = cross vertical_line wall_normal
 
-                        if doesSliceForcePlaneSplitPoints world_points world_anchor vertical_axis match_tolerance:match_tolerance then
+                        if length vertical_axis > epsilon then
                         (
-                            local vertical_task = #(vertex_index, #vertical, vertical_edge, world_anchor, vertical_axis, copy source_edges, copy source_vertices, world_anchor.z, wall_normal, world_anchor, 0)
+                            vertical_axis = normalize vertical_axis
 
-                            if findSliceForcePlaneCacheIndex result vertical_task match_tolerance:match_tolerance == 0 then
+                            if doesSliceForcePlaneSplitPoints world_points world_anchor vertical_axis match_tolerance:match_tolerance then
                             (
-                                append result vertical_task
-                                added_count += 1
+                                local vertical_task = #(vertex_index, #vertical, vertical_edge, world_anchor, vertical_axis, copy source_edges, copy source_vertices, world_anchor.z, wall_normal, world_anchor, 0)
+
+                                if findSliceForcePlaneCacheIndex result vertical_task match_tolerance:match_tolerance == 0 then
+                                (
+                                    append result vertical_task
+                                    added_count += 1
+                                )
                             )
                         )
                     )
                 )
-            )
 
-            if cut_mode == #all or cut_mode == #horizontal then
-            (
-                local horizontal_edge = junction[7]
-                local horizontal_line = junction[8]
-
-                if horizontal_edge > 0 and horizontal_line != undefined and length horizontal_line > epsilon then
+                if cut_mode == #all or cut_mode == #horizontal then
                 (
-                    local horizontal_axis = [0.0,0.0,1.0]
+                    local horizontal_edge = junction[7]
+                    local horizontal_line = junction[8]
 
-                    if doesSliceForcePlaneSplitPoints world_points world_anchor horizontal_axis match_tolerance:match_tolerance then
+                    if horizontal_edge > 0 and horizontal_line != undefined and length horizontal_line > epsilon then
                     (
-                        local horizontal_task = #(vertex_index, #horizontal, horizontal_edge, world_anchor, horizontal_axis, copy source_edges, copy source_vertices, world_anchor.z, wall_normal, world_anchor, 0)
+                        local horizontal_axis = [0.0,0.0,1.0]
 
-                        if findSliceForcePlaneCacheIndex result horizontal_task match_tolerance:match_tolerance == 0 then
+                        if doesSliceForcePlaneSplitPoints world_points world_anchor horizontal_axis match_tolerance:match_tolerance then
                         (
-                            append result horizontal_task
-                            added_count += 1
+                            local horizontal_task = #(vertex_index, #horizontal, horizontal_edge, world_anchor, horizontal_axis, copy source_edges, copy source_vertices, world_anchor.z, wall_normal, world_anchor, 0)
+
+                            if findSliceForcePlaneCacheIndex result horizontal_task match_tolerance:match_tolerance == 0 then
+                            (
+                                append result horizontal_task
+                                added_count += 1
+                            )
                         )
                     )
                 )
@@ -12775,6 +12824,13 @@ struct WallFixer_v
             select node
             try(subObjectLevel = 0)catch()
             convertToPoly node
+
+            if classOf node.baseObject == Editable_Poly then
+            (
+                /* Rebuild Editable Poly adjacency before Force analysis. */
+                try(polyop.fillInMesh node.baseObject)catch()
+            )
+
             update node
 
             if classOf node.baseObject == Editable_Poly and node.modifiers.count == 0 then
@@ -14294,10 +14350,349 @@ struct WallFixer_v
 
 
     /*
+    Captures selected Slice Force vertex positions before the incoming stack is baked.
+    Only Vertex sub-object mode is considered; positions are stored in world space so the later Editable Poly conversion cannot erase the requested slice location.
+    */
+    function captureSliceForceSelectedVertexPositions node match_tolerance:0.001 =
+    (
+        local world_positions = #()
+        if node == undefined or not(isValidNode node) then return world_positions
+        if subObjectLevel != 1 then return world_positions
+
+        local source_positions = #()
+        local current_object = undefined
+
+        try(current_object = modPanel.getCurrentObject())catch(current_object = undefined)
+
+        if current_object != undefined and classOf current_object == Edit_Poly then
+        (
+            local belongs_to_node = false
+
+            for modifier in node.modifiers while not belongs_to_node do
+            (
+                if modifier == current_object then belongs_to_node = true
+            )
+
+            if belongs_to_node then
+            (
+                local selected_vertices = #{}
+                try(selected_vertices = current_object.GetSelection #Vertex node:node)catch(selected_vertices = #{})
+
+                for vertex_index in selected_vertices do
+                (
+                    local object_position = undefined
+                    try(object_position = current_object.GetVertex vertex_index node:node)catch(object_position = undefined)
+
+                    if object_position != undefined then
+                    (
+                        append source_positions (object_position * node.objectTransform)
+                    )
+                )
+            )
+        )
+
+        if source_positions.count == 0 and classOf node.baseObject == Editable_Poly then
+        (
+            local selected_vertices = #{}
+            try(selected_vertices = polyop.getVertSelection node.baseObject)catch(selected_vertices = #{})
+
+            for vertex_index in selected_vertices do
+            (
+                local world_position = undefined
+
+                try
+                (
+                    in coordsys world
+                    (
+                        world_position = polyop.getVert node.baseObject vertex_index node:node
+                    )
+                )
+                catch
+                (
+                    world_position = undefined
+                )
+
+                if world_position != undefined then append source_positions world_position
+            )
+        )
+
+        local point_tolerance = amax epsilon match_tolerance
+
+        for source_position in source_positions do
+        (
+            local duplicate_point = false
+
+            for cached_position in world_positions while not duplicate_point do
+            (
+                if distance source_position cached_position <= point_tolerance then duplicate_point = true
+            )
+
+            if not duplicate_point then append world_positions source_position
+        )
+
+        world_positions
+        -- return
+    ),
+
+
+    /*
+    Chooses a local wall-face normal for one baked Editable Poly vertex.
+    Adjacent mostly-vertical faces are ranked by how strongly their orientation repeats on the object, which favors the wall skin over small reveal/cap faces.
+    */
+    function getSliceForceSelectedVertexWallNormal topology_data vertex_index angle_threshold:5.0 =
+    (
+        if classOf topology_data != Array or topology_data.count < 12 then return undefined
+        if vertex_index < 1 or vertex_index > topology_data[1] then return undefined
+
+        local vertex_faces = topology_data[6]
+        local face_normals = topology_data[11]
+        local incident_faces = vertex_faces[vertex_index]
+        local normal_limit = cos (amin 45.0 (amax 0.1 angle_threshold))
+        local best_normal = undefined
+        local best_count = -1
+
+        for face_index in incident_faces do
+        (
+            local candidate_normal = if face_index >= 1 and face_index <= face_normals.count then face_normals[face_index] else undefined
+
+            if candidate_normal != undefined and length candidate_normal > epsilon and abs(candidate_normal.z) < 0.95 then
+            (
+                candidate_normal = normalize candidate_normal
+                local parallel_count = 0
+
+                for other_normal in face_normals do
+                (
+                    if other_normal != undefined and length other_normal > epsilon and abs(other_normal.z) < 0.95 then
+                    (
+                        if abs(dot candidate_normal (normalize other_normal)) >= normal_limit then parallel_count += 1
+                    )
+                )
+
+                if parallel_count > best_count then
+                (
+                    best_count = parallel_count
+                    best_normal = candidate_normal
+                )
+            )
+        )
+
+        best_normal
+        -- return
+    ),
+
+
+    /*
+    Builds the complete Slice Force task cache from explicitly selected vertex positions.
+    Selected positions replace automatic hole/T-junction anchor locations; existing automatic tasks are consulted only for local orientation.
+    */
+    function buildSliceForceSelectedVertexTaskCache node selected_positions orientation_tasks cut_mode:#all angle_threshold:5.0 match_tolerance:0.001 =
+    (
+        local cached_tasks = #()
+        if node == undefined or not(isValidNode node) then return cached_tasks
+        if classOf node.baseObject != Editable_Poly then return cached_tasks
+        if classOf selected_positions != Array or selected_positions.count == 0 then return cached_tasks
+
+        local topology_data = buildPolyTopology node node.baseObject
+        if classOf topology_data != Array or topology_data.count < 12 then return cached_tasks
+
+        local world_points = topology_data[4]
+        if classOf world_points != Array then return cached_tasks
+        local vertex_count = topology_data[1]
+        local plane_tolerance = amax epsilon match_tolerance
+
+        for selected_position in selected_positions do
+        (
+            local nearest_vertex = 0
+            local nearest_distance = 1e30
+
+            for vertex_index = 1 to vertex_count do
+            (
+                local world_point = world_points[vertex_index]
+
+                if world_point != undefined then
+                (
+                    local current_distance = distance selected_position world_point
+
+                    if current_distance < nearest_distance then
+                    (
+                        nearest_distance = current_distance
+                        nearest_vertex = vertex_index
+                    )
+                )
+            )
+
+            if nearest_vertex > 0 then
+            (
+                local world_anchor = selected_position
+                local selected_wall_normal = getSliceForceSelectedVertexWallNormal \
+                    topology_data \
+                    nearest_vertex \
+                    angle_threshold:angle_threshold
+
+                local requested_kinds = case cut_mode of
+                (
+                    #vertical: #(#vertical)
+                    #horizontal: #(#horizontal)
+                    default: #(#vertical, #horizontal)
+                )
+
+                for slice_kind in requested_kinds do
+                (
+                    local orientation_task = undefined
+                    local orientation_distance = 1e30
+
+                    if orientation_tasks != undefined then
+                    (
+                        for candidate_task in orientation_tasks do
+                        (
+                            if candidate_task != undefined and candidate_task.count >= 9 and candidate_task[2] == slice_kind then
+                            (
+                                local candidate_anchor = candidate_task[4]
+
+                                if candidate_anchor != undefined then
+                                (
+                                    local current_distance = distance world_anchor candidate_anchor
+
+                                    if current_distance < orientation_distance then
+                                    (
+                                        orientation_distance = current_distance
+                                        orientation_task = candidate_task
+                                    )
+                                )
+                            )
+                        )
+                    )
+
+                    local wall_normal = selected_wall_normal
+                    local world_axis = undefined
+
+                    if orientation_task != undefined then
+                    (
+                        if orientation_task.count >= 9 and orientation_task[9] != undefined then wall_normal = orientation_task[9]
+                        if slice_kind == #vertical then world_axis = orientation_task[5]
+                    )
+
+                    if slice_kind == #horizontal then
+                    (
+                        world_axis = [0.0,0.0,1.0]
+                    )
+                    else if world_axis == undefined or length world_axis <= epsilon then
+                    (
+                        if wall_normal != undefined and length wall_normal > epsilon then
+                        (
+                            world_axis = cross [0.0,0.0,1.0] wall_normal
+                        )
+                    )
+
+                    if world_axis != undefined and length world_axis > epsilon then
+                    (
+                        world_axis = normalize world_axis
+
+                        if doesSliceForcePlaneSplitPoints world_points world_anchor world_axis match_tolerance:plane_tolerance then
+                        (
+                            local selected_task = #(
+                                nearest_vertex,
+                                slice_kind,
+                                0,
+                                world_anchor,
+                                world_axis,
+                                #{},
+                                #{nearest_vertex},
+                                world_anchor.z,
+                                wall_normal,
+                                world_anchor,
+                                0
+                            )
+
+                            if findSliceForcePlaneCacheIndex cached_tasks selected_task match_tolerance:plane_tolerance == 0 then
+                            (
+                                append cached_tasks selected_task
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        if not batch_quiet then
+        (
+            format "Wall-Fixer Slice Force Selected Vertex Override: node:% selectedPositions:% direction:% planes:%\n" node.name selected_positions.count cut_mode cached_tasks.count
+        )
+
+        cached_tasks
+        -- return
+    ),
+
+
+    /*
+    Returns whether Slice Force should replace automatic anchor locations with selected vertex positions.
+    The override is intentionally limited to one selected wall in Vertex sub-object mode.
+    */
+    function shouldUseSliceForceSelectedVertexOverride object_count subobject_level selected_position_count =
+    (
+        object_count == 1 and subobject_level == 1 and selected_position_count > 0
+        -- return
+    ),
+
+
+    /*
+    Tests selected-vertex Slice Force override gating without changing scene geometry.
+    */
+    function testSliceForceSelectedVertexOverridePolicy =
+    (
+        shouldUseSliceForceSelectedVertexOverride 1 1 1 and
+        shouldUseSliceForceSelectedVertexOverride 1 1 3 and
+        not(shouldUseSliceForceSelectedVertexOverride 2 1 1) and
+        not(shouldUseSliceForceSelectedVertexOverride 1 0 1) and
+        not(shouldUseSliceForceSelectedVertexOverride 1 1 0)
+        -- return
+    ),
+
+
+    /*
+    Tests the dedicated CTRL+RMB T-junction-only Force policy.
+    This mode suppresses automatic and selected-vertex anchor sources and starts from an empty plane cache.
+    */
+    function testSliceForceTJunctionOnlyPolicy =
+    (
+        local t_junction_only = true
+        local automatic_anchors_enabled = not t_junction_only
+        local selected_vertex_override_enabled = not t_junction_only
+        local initial_plane_count = 0
+
+        t_junction_only and not automatic_anchors_enabled and not selected_vertex_override_enabled and initial_plane_count == 0
+        -- return
+    ),
+
+
+    /*
+    Tests Slice Force analysis result normalization.
+    Non-array status values such as OK must never be treated as task arrays.
+    */
+    function testSliceForceAnalysisResultSafety =
+    (
+        local task_array = #()
+        local status_value = OK
+
+        local result_value = (
+            classOf task_array == Array and
+            classOf status_value != Array and
+            (getSliceForceTJunctionStraightPair status_value == undefined) and
+            (findSliceForcePlaneCacheIndex status_value status_value == 0) and
+            (not (doesSliceForcePlaneSplitPoints status_value [0,0,0] [0,0,1]))
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
     Runs optimized Slice Force as an analyze-once, prebuilt-modifier-stack workflow.
     Incoming modifiers are baked first; proven planar Slice Walls analysis has priority, with Force-only non-planar analysis used only as fallback.
+    A selected Vertex sub-object position overrides automatic anchor locations for a single selected wall.
     */
-    function debugSliceSelectedWallsForceInternal cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 include_t_junctions:false progress_callback:undefined =
+    function debugSliceSelectedWallsForceInternal cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 include_t_junctions:false t_junction_only:false progress_callback:undefined =
     (
         local all_selected_nodes = selection as array
         local selected_nodes = getBatchSliceProcessNodes all_selected_nodes
@@ -14306,6 +14701,15 @@ struct WallFixer_v
         local total_task_count = 0
         local processed_vertex_count = 0
         local report = ""
+        local original_subobject_level = subObjectLevel
+        local selected_vertex_positions = #()
+        local use_selected_vertex_override = false
+
+        if not t_junction_only and selected_nodes.count == 1 and original_subobject_level == 1 then
+        (
+            selected_vertex_positions = captureSliceForceSelectedVertexPositions selected_nodes[1] match_tolerance:0.001
+            use_selected_vertex_override = shouldUseSliceForceSelectedVertexOverride selected_nodes.count original_subobject_level selected_vertex_positions.count
+        )
 
         last_slice_report = ""
         last_slice_error = undefined
@@ -14323,6 +14727,7 @@ struct WallFixer_v
         (
             last_slice_report = "Slice Force: all selected walls have only four vertices; nothing to cut."
             select all_selected_nodes
+            try(completeRedraw())catch(try(redrawViews())catch())
             return true
         )
 
@@ -14360,42 +14765,164 @@ struct WallFixer_v
                     clearResetInnerVertSelection node
                     clearLastDebugSliceContext node:node
 
+                    local orientation_tasks = #()
+                    local planar_analysis_error = undefined
+                    local nonplanar_analysis_error = undefined
+                    local selected_analysis_error = undefined
+                    local t_junction_analysis_error = undefined
+
                     /*
-                    Preserve the known-good flat-wall behavior first: use the exact normal Slice Walls planar task builder.
-                    Only when that produces no planes does Force fall back to its non-planar/local-surface analyzer.
-                    Component selections are already cleared by prepareSliceForceBaseObject, so both paths analyze the whole baked object.
+                    CTRL+RMB T-junction-only mode bypasses every automatic/selected anchor source.
+                    It starts from an empty physical-plane cache so only true T-junction vertices may contribute planes.
                     */
-                    force_tasks = buildSliceForcePlanarTaskCache \
-                        node \
-                        cut_mode:cut_mode \
-                        slice_plane_mode:slice_plane_mode \
-                        angle_threshold:angle_threshold \
-                        planar_tolerance:planar_tolerance \
-                        match_tolerance:0.001
+                    if t_junction_only then
+                    (
+                        try
+                        (
+                            force_tasks = mergeSliceForceTJunctionTasks \
+                                node \
+                                #() \
+                                cut_mode:cut_mode \
+                                angle_threshold:angle_threshold \
+                                match_tolerance:0.001
+
+                            if classOf force_tasks != Array then
+                            (
+                                t_junction_analysis_error = "T-junction-only analyzer returned " + (force_tasks as string)
+                                force_tasks = #()
+                            )
+                        )
+                        catch
+                        (
+                            t_junction_analysis_error = (getCurrentException()) as string
+                            force_tasks = #()
+                        )
+                    )
+                    else
+                    (
+                        /*
+                        Force treats analyzer failures as local fallbacks instead of aborting the object.
+                        Non-array status values such as OK are normalized to an empty task array.
+                        */
+                        try
+                        (
+                            orientation_tasks = buildSliceForcePlanarTaskCache \
+                                node \
+                                cut_mode:cut_mode \
+                                slice_plane_mode:slice_plane_mode \
+                                angle_threshold:angle_threshold \
+                                planar_tolerance:planar_tolerance \
+                                match_tolerance:0.001
+
+                            if classOf orientation_tasks != Array then
+                            (
+                                planar_analysis_error = "planar analyzer returned " + (orientation_tasks as string)
+                                orientation_tasks = #()
+                            )
+                        )
+                        catch
+                        (
+                            planar_analysis_error = (getCurrentException()) as string
+                            orientation_tasks = #()
+                        )
+
+                        if orientation_tasks.count == 0 then
+                        (
+                            try
+                            (
+                                orientation_tasks = buildSliceForceNonPlanarTaskCache \
+                                    node \
+                                    cut_mode:cut_mode \
+                                    angle_threshold:angle_threshold \
+                                    planar_tolerance:planar_tolerance \
+                                    match_tolerance:0.001
+
+                                if classOf orientation_tasks != Array then
+                                (
+                                    nonplanar_analysis_error = "non-planar analyzer returned " + (orientation_tasks as string)
+                                    orientation_tasks = #()
+                                )
+                            )
+                            catch
+                            (
+                                nonplanar_analysis_error = (getCurrentException()) as string
+                                orientation_tasks = #()
+                            )
+                        )
+
+                        if use_selected_vertex_override and node == selected_nodes[1] then
+                        (
+                            try
+                            (
+                                force_tasks = buildSliceForceSelectedVertexTaskCache \
+                                    node \
+                                    selected_vertex_positions \
+                                    orientation_tasks \
+                                    cut_mode:cut_mode \
+                                    angle_threshold:angle_threshold \
+                                    match_tolerance:0.001
+
+                                if classOf force_tasks != Array then
+                                (
+                                    selected_analysis_error = "selected-vertex analyzer returned " + (force_tasks as string)
+                                    force_tasks = #()
+                                )
+                            )
+                            catch
+                            (
+                                selected_analysis_error = (getCurrentException()) as string
+                                force_tasks = #()
+                            )
+                        )
+                        else
+                        (
+                            force_tasks = orientation_tasks
+
+                            if include_t_junctions then
+                            (
+                                try
+                                (
+                                    force_tasks = mergeSliceForceTJunctionTasks \
+                                        node \
+                                        force_tasks \
+                                        cut_mode:cut_mode \
+                                        angle_threshold:angle_threshold \
+                                        match_tolerance:0.001
+
+                                    if classOf force_tasks != Array then
+                                    (
+                                        t_junction_analysis_error = "T-junction analyzer returned " + (force_tasks as string)
+                                        force_tasks = #()
+                                    )
+                                )
+                                catch
+                                (
+                                    t_junction_analysis_error = (getCurrentException()) as string
+                                )
+                            )
+                        )
+                    )
 
                     if force_tasks.count == 0 then
                     (
-                        force_tasks = buildSliceForceNonPlanarTaskCache \
-                            node \
-                            cut_mode:cut_mode \
-                            angle_threshold:angle_threshold \
-                            planar_tolerance:planar_tolerance \
-                            match_tolerance:0.001
-                    )
+                        if t_junction_only then
+                        (
+                            node_error = node.name + ": Slice Force found no interior horizontal slice plane at any true T-junction vertex."
+                            if t_junction_analysis_error != undefined then node_error += " T-junction: " + t_junction_analysis_error
+                        )
+                        else if use_selected_vertex_override and node == selected_nodes[1] then
+                        (
+                            node_error = node.name + ": selected vertex position does not define an interior Slice Force plane for the requested direction."
+                            if selected_analysis_error != undefined then node_error += " Selected vertex: " + selected_analysis_error
+                        )
+                        else
+                        (
+                            node_error = node.name + ": Slice Force found no interior slice planes after stable planar analysis and non-planar fallbacks."
+                            if t_junction_analysis_error != undefined then node_error += " T-junction: " + t_junction_analysis_error
+                        )
 
-                    if include_t_junctions then
-                    (
-                        force_tasks = mergeSliceForceTJunctionTasks \
-                            node \
-                            force_tasks \
-                            cut_mode:cut_mode \
-                            angle_threshold:angle_threshold \
-                            match_tolerance:0.001
-                    )
-
-                    if force_tasks.count == 0 then
-                    (
-                        node_error = node.name + ": Slice Force found no interior slice planes after stable planar analysis and non-planar fallbacks."
+                        if planar_analysis_error != undefined then node_error += " Planar: " + planar_analysis_error
+                        if nonplanar_analysis_error != undefined then node_error += " Non-planar: " + nonplanar_analysis_error
                         node_ok = false
                     )
                 )
@@ -14429,6 +14956,9 @@ struct WallFixer_v
             last_slice_report = report
 
             if failed_nodes.count > 0 then select failed_nodes
+            try(subObjectLevel = 0)catch()
+            try(setSliceForceCreateMode())catch()
+            try(completeRedraw())catch(try(redrawViews())catch())
             return false
         )
 
@@ -14492,7 +15022,9 @@ struct WallFixer_v
             (
                 append successful_nodes node
                 if report != "" then report += "\n"
-                report += node.name + ": Slice Force cached " + (force_tasks.count as string) + " unique plane(s), prebuilt the full modifier stack, and collapsed to Editable Poly."
+                report += node.name + ": Slice Force " + \
+                    (if t_junction_only then "used T-junction-only anchors with " else if use_selected_vertex_override and node == selected_nodes[1] then "used selected vertex position override with " else "cached ") + \
+                    (force_tasks.count as string) + " unique plane(s), prebuilt the full modifier stack, and collapsed to Editable Poly."
             )
             else
             (
@@ -14507,20 +15039,35 @@ struct WallFixer_v
         last_slice_failed_nodes = failed_nodes
         last_slice_report = report
 
-        try(setSliceForceCreateMode())catch()
+        local force_completed = failed_nodes.count == 0
 
-        if failed_nodes.count > 0 then
+        if force_completed then
         (
-            select failed_nodes
-            try(completeRedraw())catch(try(redrawViews())catch())
-            false
+            if successful_nodes.count > 0 then select successful_nodes
         )
         else
         (
-            if successful_nodes.count > 0 then select successful_nodes
-            try(completeRedraw())catch(try(redrawViews())catch())
-            true
+            select failed_nodes
         )
+
+        /*
+        Finalize the actual viewport before the UI exposes SUCCESS/FAILED.
+        Result selection, Editable Poly evaluation and Create-mode state are committed first.
+        */
+        try(subObjectLevel = 0)catch()
+        try(setSliceForceCreateMode())catch()
+
+        for viewport_node in (selection as array) do
+        (
+            if viewport_node != undefined and isValidNode viewport_node then
+            (
+                try(update viewport_node)catch()
+            )
+        )
+
+        try(completeRedraw())catch(try(redrawViews())catch())
+
+        force_completed
         -- return
     ),
 
@@ -14582,7 +15129,7 @@ struct WallFixer_v
     Runs optimized Slice Force.
     Anchor analysis happens once on the baked Editable Poly; all unique-plane modifiers are created before any slice is committed.
     */
-    function debugSliceSelectedWallsForce cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 cleanup_edges:true display_hidden_edges:undefined double_side:undefined include_t_junctions:false progress_callback:undefined quiet:false =
+    function debugSliceSelectedWallsForce cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 cleanup_edges:true display_hidden_edges:undefined double_side:undefined include_t_junctions:false t_junction_only:false progress_callback:undefined quiet:false =
     (
         local previous_batch_quiet = batch_quiet
         local completed = false
@@ -14599,6 +15146,7 @@ struct WallFixer_v
                 angle_threshold:angle_threshold \
                 planar_tolerance:planar_tolerance \
                 include_t_junctions:include_t_junctions \
+                t_junction_only:t_junction_only \
                 progress_callback:progress_callback
         )
         catch
@@ -20134,16 +20682,18 @@ WallFixer = WallFixer_v()
 
 
 /*
-Straight Edge Fixer 0.48
+Straight Edge Fixer 0.54
 Detects repeated horizontal edge rows and aligns nearby horizontal edges to them.
 */
 
 global WallFixerVersion
 global WallFixerRollout
+global wall_fixer_runtime_mode
+global straight_edge_fixer_auto_open_dialog
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.48"
-global straight_edge_fixer_tool_version = 1.0269
+global straight_edge_fixer_file_version = "0.54"
+global straight_edge_fixer_tool_version = 1.0649
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -20876,6 +21426,205 @@ struct StraightEdgeFixer_v
 
 
     /*
+    Resolves the geometry source used only by Border Check.
+    Active Edit Poly wins, then top Edit Poly, then a bare Editable Poly base; a new Edit Poly is added only above a non-EPoly top modifier.
+    */
+    function getBorderCheckAdapter node =
+    (
+        adapter = undefined
+        active_edit_poly = getActiveEditPoly node
+
+        if active_edit_poly != undefined then
+        (
+            ensureEditPolyPrimaryNode node active_edit_poly
+            active_edit_poly.useStackSelection = false
+            active_edit_poly.showCage = off
+            adapter = #(#edit_poly, active_edit_poly, false)
+        )
+        else
+        (
+            top_edit_poly = getTopEditPoly node
+
+            if top_edit_poly != undefined then
+            (
+                ensureEditPolyPrimaryNode node top_edit_poly
+                top_edit_poly.useStackSelection = false
+                top_edit_poly.showCage = off
+                adapter = #(#edit_poly, top_edit_poly, false)
+            )
+            else if ((node.modifiers.count == 0) and (classOf node.baseObject == Editable_Poly)) then
+            (
+                try(node.baseObject.showCage = off)catch()
+                adapter = #(#editable_poly, node.baseObject, false)
+            )
+            else
+            (
+                new_edit_poly = Edit_Poly()
+                new_edit_poly.showCage = off
+                addModifier node new_edit_poly
+                ensureEditPolyPrimaryNode node new_edit_poly
+                new_edit_poly.useStackSelection = false
+                adapter = #(#edit_poly, new_edit_poly, true)
+            )
+        )
+
+        adapter
+        -- return
+    ),
+
+
+    /*
+    Activates an existing Border Check EPoly source at Edge or Border sub-object level.
+    Edge uses level 2; all-borders mode uses Border level 3.
+    */
+    function activateBorderCheckAdapter node adapter subobject_level:2 =
+    (
+        activated = false
+
+        if ((node != undefined) and (adapter != undefined)) then
+        (
+            try
+            (
+                select node
+                setCommandPanelTaskMode mode:#modify
+
+                if (adapter[1] == #edit_poly) then
+                (
+                    geometry_source = adapter[2]
+                    ensureEditPolyPrimaryNode node geometry_source
+                    geometry_source.useStackSelection = false
+                    geometry_source.showCage = off
+                    modPanel.setCurrentObject geometry_source
+
+                    if subobject_level == 3 then
+                    (
+                        EditPolyMod.SetEPolySelLevel geometry_source #Border
+                    )
+                    else
+                    (
+                        EditPolyMod.SetEPolySelLevel geometry_source #Edge
+                    )
+
+                    subObjectLevel = subobject_level
+                    activated = true
+                )
+                else if (adapter[1] == #editable_poly) then
+                (
+                    node.baseObject.showCage = off
+                    modPanel.setCurrentObject node.baseObject
+                    subObjectLevel = subobject_level
+                    activated = true
+                )
+            )
+            catch
+            (
+                activated = false
+            )
+        )
+
+        activated
+        -- return
+    ),
+
+
+    /*
+    Stores one temporary Edit Poly Border Check result in a Poly Select above it.
+    The temporary Edit Poly is always removed after the Poly Select has captured the edge IDs.
+    */
+    function moveTemporaryBorderSelectionToPolySelect node adapter edge_selection =
+    (
+        poly_select_modifier = undefined
+        selection_written = false
+
+        if ((node == undefined) or (adapter == undefined)) then return undefined
+        if ((adapter[1] != #edit_poly) or (adapter[3] != true)) then return undefined
+
+        temporary_edit_poly = adapter[2]
+
+        try
+        (
+            if validModifier node Poly_Select then
+            (
+                poly_select_modifier = Poly_Select()
+                addModifier node poly_select_modifier
+                setEdgeSelection node poly_select_modifier edge_selection
+                update node
+                selection_written = ((getEdgeSelection node poly_select_modifier) == edge_selection)
+            )
+        )
+        catch
+        (
+            selection_written = false
+        )
+
+        /*
+        The temporary Edit Poly exists only to expose live poly topology above a non-EPoly modifier.
+        Remove it whether or not the Poly Select write succeeded.
+        */
+        if modifierBelongsToNode node temporary_edit_poly then
+        (
+            try(deleteModifier node temporary_edit_poly)catch()
+            update node
+        )
+
+        if selection_written then
+        (
+            try
+            (
+                selection_written = ((getEdgeSelection node poly_select_modifier) == edge_selection)
+            )
+            catch
+            (
+                selection_written = false
+            )
+        )
+
+        if not selection_written then
+        (
+            if ((poly_select_modifier != undefined) and (modifierBelongsToNode node poly_select_modifier)) then
+            (
+                try(deleteModifier node poly_select_modifier)catch()
+                update node
+            )
+
+            poly_select_modifier = undefined
+        )
+
+        poly_select_modifier
+        -- return
+    ),
+
+
+    /*
+    Activates one Poly Select Border Check result.
+    Edge mode uses sub-object level 2; all-borders mode uses Border level 3.
+    */
+    function activateBorderPolySelect node poly_select_modifier subobject_level:2 =
+    (
+        activated = false
+
+        if ((node != undefined) and (poly_select_modifier != undefined)) then
+        (
+            try
+            (
+                select node
+                setCommandPanelTaskMode mode:#modify
+                modPanel.setCurrentObject poly_select_modifier
+                subObjectLevel = subobject_level
+                activated = true
+            )
+            catch
+            (
+                activated = false
+            )
+        )
+
+        activated
+        -- return
+    ),
+
+
+    /*
     Resolves a live dedicated STRAIGHT EDGE FIXER Edit Poly for this object.
     Stale zero-topology copies are rebuilt once before any EDGE FIXER caller receives the adapter.
     */
@@ -21226,32 +21975,34 @@ struct StraightEdgeFixer_v
 
 
     /*
-    Returns true when one visible poly edge is an open border edge.
-    Border topology is read from the current Editable Poly or evaluated Edit Poly result.
+    Returns true when one edge is an open border on the chosen Border Check source.
+    Edit Poly topology is queried directly from that modifier so lower active modifiers are not replaced by the evaluated top stack.
     */
     function isBorderEdge node adapter edge_id =
     (
         result_value = false
 
-        if (isEdgeVisible node adapter edge_id) then
+        try
         (
-            try
+            if (adapter[1] == #editable_poly) then
             (
-                if (adapter[1] == #editable_poly) then
+                if (isEdgeVisible node adapter edge_id) then
                 (
                     edge_faces = polyop.getFacesUsingEdge (adapter[2]) edge_id
+                    result_value = (edge_faces.numberSet == 1)
                 )
-                else
-                (
-                    edge_faces = polyop.getFacesUsingEdge node edge_id
-                )
-
-                result_value = (edge_faces.numberSet == 1)
             )
-            catch
+            else if (adapter[1] == #edit_poly) then
             (
-                result_value = false
+                geometry_source = adapter[2]
+                face_a = EditPolyMod.GetEdgeFace geometry_source edge_id 1 node:node
+                face_b = EditPolyMod.GetEdgeFace geometry_source edge_id 2 node:node
+                result_value = (((face_a > 0) and (face_b == 0)) or ((face_b > 0) and (face_a == 0)))
             )
+        )
+        catch
+        (
+            result_value = false
         )
 
         result_value
@@ -21259,8 +22010,8 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Collects all visible open border edges.
-    Invisible triangulation edges never participate in Border Check.
+    Collects open border edges from the exact Border Check topology source.
+    Editable Poly still respects edge visibility; Edit Poly uses modifier-local open-edge topology.
     */
     function getVisibleBorderEdges node adapter =
     (
@@ -21656,8 +22407,8 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Checks visible open borders for unwelded local-Z seams and reflex corners.
-    Results are stored in STRAIGHT EDGE FIXER while the command panel stays in Create mode.
+    Checks open borders on the current EPoly source for unwelded local-Z seams and reflex corners.
+    A temporary Edit Poly above a non-EPoly top is replaced by a persistent Poly Select carrying the Edge selection.
     */
     function checkBorders tolerance =
     (
@@ -21666,6 +22417,10 @@ struct StraightEdgeFixer_v
         total_unwelded_edges = 0
         total_reflex_edges = 0
         processed_count = 0
+        selection_failed = false
+        last_adapter = undefined
+        last_poly_select = undefined
+        last_node = undefined
 
         if (selected_nodes.count == 0) then
         (
@@ -21673,101 +22428,297 @@ struct StraightEdgeFixer_v
         )
         else
         (
-            ensureCreatePanelMode()
-
             for node in selected_nodes do
             (
                 if (isValidNode node and (superClassOf node == GeometryClass)) then
                 (
-                    processed_count += 1
-                    adapter = getGeometryAdapter node
-                    border_edges = getVisibleBorderEdges node adapter
-                    unwelded_edges = findUnweldedBorderEdges node adapter border_edges tolerance
-                    reflex_edges = findReflexBorderEdges node adapter border_edges
-                    invalid_edges = copy unwelded_edges
-                    invalid_edges += reflex_edges
+                    adapter = getBorderCheckAdapter node
 
-                    if (adapter[1] == #editable_poly) then
+                    if adapter != undefined then
                     (
-                        polyop.setEdgeSelection (adapter[2]) invalid_edges
-                    )
-                    else if (adapter[1] == #edit_poly) then
-                    (
-                        geometry_source = adapter[2]
-                        ensureEditPolyPrimaryNode node geometry_source
-                        geometry_source.useStackSelection = false
+                        processed_count += 1
+                        border_edges = getVisibleBorderEdges node adapter
+                        unwelded_edges = findUnweldedBorderEdges node adapter border_edges tolerance
+                        reflex_edges = findReflexBorderEdges node adapter border_edges
+                        invalid_edges = copy unwelded_edges
+                        invalid_edges += reflex_edges
+                        selection_written = false
 
-                        if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
+                        if adapter[3] == true then
                         (
-                            EditPolyMod.SetEPolySelLevel geometry_source #Edge
+                            poly_select_modifier = moveTemporaryBorderSelectionToPolySelect node adapter invalid_edges
+
+                            if poly_select_modifier != undefined then
+                            (
+                                selection_written = true
+                                last_poly_select = poly_select_modifier
+                                last_adapter = undefined
+                                last_node = node
+                            )
+                        )
+                        else if (adapter[1] == #editable_poly) then
+                        (
+                            try
+                            (
+                                polyop.setEdgeSelection (adapter[2]) invalid_edges
+                                selection_written = ((polyop.getEdgeSelection (adapter[2])) == invalid_edges)
+                            )
+                            catch
+                            (
+                                selection_written = false
+                            )
+
+                            if selection_written then
+                            (
+                                last_adapter = adapter
+                                last_poly_select = undefined
+                                last_node = node
+                            )
+                        )
+                        else if (adapter[1] == #edit_poly) then
+                        (
+                            geometry_source = adapter[2]
+
+                            try
+                            (
+                                ensureEditPolyPrimaryNode node geometry_source
+                                geometry_source.useStackSelection = false
+                                geometry_source.showCage = off
+                                EditPolyMod.SetEPolySelLevel geometry_source #Edge
+                                EditPolyMod.SetSelection geometry_source #Edge invalid_edges node:node
+                                selection_written = ((EditPolyMod.GetSelection geometry_source #Edge node:node) == invalid_edges)
+                            )
+                            catch
+                            (
+                                selection_written = false
+                            )
+
+                            if selection_written then
+                            (
+                                last_adapter = adapter
+                                last_poly_select = undefined
+                                last_node = node
+                            )
                         )
 
-                        EditPolyMod.SetSelection geometry_source #Edge invalid_edges node:node
-                    )
+                        if not selection_written then
+                        (
+                            selection_failed = true
+                            format "Border Check: failed to store selection on %.\n" node.name
+                        )
 
-                    total_unwelded_edges += countBits unwelded_edges
-                    total_reflex_edges += countBits reflex_edges
-                    total_invalid_edges += countBits invalid_edges
+                        total_unwelded_edges += countBits unwelded_edges
+                        total_reflex_edges += countBits reflex_edges
+                        total_invalid_edges += countBits invalid_edges
+                    )
                 )
             )
 
-            if (processed_count > 0) then
+            if ((processed_count > 0) and (last_node != undefined)) then
             (
+                if last_poly_select != undefined then
+                (
+                    activateBorderPolySelect last_node last_poly_select subobject_level:2
+                )
+                else if last_adapter != undefined then
+                (
+                    activateBorderCheckAdapter last_node last_adapter subobject_level:2
+                )
+
                 completeRedraw()
-                format "Border Check: stored % invalid border edge(s). Unwelded/overlapping: %, reflex >180 deg: %. Create panel kept active.\n" total_invalid_edges total_unwelded_edges total_reflex_edges
+                format "Border Check: selected % invalid border edge(s). Unwelded/overlapping: %, reflex >180 deg: %.\n" total_invalid_edges total_unwelded_edges total_reflex_edges
             )
         )
 
-        total_invalid_edges
+        if selection_failed then undefined else total_invalid_edges
         -- return
     ),
 
+
     /*
-    Stores every visible open-border edge in the one STRAIGHT EDGE FIXER modifier.
-    The command panel remains in Create mode; topology is unchanged.
+    Verifies Border Check source reuse plus temporary Edit Poly promotion to Poly Select.
+    Above Vertex Weld the temporary Edit Poly must disappear, leaving Poly Select above Vertex Weld.
+    */
+    function testBorderCheckAdapterPolicy =
+    (
+        test_passed = true
+        test_node = undefined
+        fallback_node = undefined
+        original_selection = selection as array
+        original_panel_mode = undefined
+        original_current_object = undefined
+        original_subobject_level = subObjectLevel
+
+        try(original_panel_mode = getCommandPanelTaskMode())catch()
+        try(original_current_object = modPanel.getCurrentObject())catch()
+
+        try
+        (
+            test_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly test_node
+
+            base_adapter = getBorderCheckAdapter test_node
+            test_passed = test_passed and (base_adapter[1] == #editable_poly)
+            test_passed = test_passed and (test_node.modifiers.count == 0)
+
+            edit_poly = Edit_Poly()
+            addModifier test_node edit_poly
+            top_adapter = getBorderCheckAdapter test_node
+            test_passed = test_passed and (top_adapter[1] == #edit_poly)
+            test_passed = test_passed and (top_adapter[2] == edit_poly)
+            test_passed = test_passed and (top_adapter[3] == false)
+            test_passed = test_passed and (test_node.modifiers.count == 1)
+
+            fallback_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly fallback_node
+            vertex_weld = Vertex_Weld()
+            addModifier fallback_node vertex_weld
+
+            fallback_adapter = getBorderCheckAdapter fallback_node
+            test_passed = test_passed and (fallback_adapter[1] == #edit_poly)
+            test_passed = test_passed and (fallback_adapter[3] == true)
+            test_passed = test_passed and (classOf fallback_node.modifiers[1] == Edit_Poly)
+            test_passed = test_passed and (classOf fallback_node.modifiers[2] == Vertex_Weld)
+
+            border_edges = getVisibleBorderEdges fallback_node fallback_adapter
+            poly_select_modifier = moveTemporaryBorderSelectionToPolySelect fallback_node fallback_adapter border_edges
+
+            test_passed = test_passed and (poly_select_modifier != undefined)
+            test_passed = test_passed and (fallback_node.modifiers.count == 2)
+            test_passed = test_passed and (classOf fallback_node.modifiers[1] == Poly_Select)
+            test_passed = test_passed and (fallback_node.modifiers[1] == poly_select_modifier)
+            test_passed = test_passed and (classOf fallback_node.modifiers[2] == Vertex_Weld)
+            test_passed = test_passed and ((getEdgeSelection fallback_node poly_select_modifier) == border_edges)
+            test_passed = test_passed and (not (modifierBelongsToNode fallback_node fallback_adapter[2]))
+
+            activateBorderPolySelect fallback_node poly_select_modifier subobject_level:3
+            test_passed = test_passed and (modPanel.getCurrentObject() == poly_select_modifier)
+            test_passed = test_passed and (subObjectLevel == 3)
+        )
+        catch
+        (
+            test_passed = false
+        )
+
+        if ((test_node != undefined) and (isValidNode test_node)) then
+        (
+            delete test_node
+        )
+
+        if ((fallback_node != undefined) and (isValidNode fallback_node)) then
+        (
+            delete fallback_node
+        )
+
+        if original_selection.count > 0 then
+        (
+            select original_selection
+        )
+        else
+        (
+            clearSelection()
+        )
+
+        try
+        (
+            if original_panel_mode != undefined then
+            (
+                setCommandPanelTaskMode mode:original_panel_mode
+            )
+
+            if ((original_panel_mode == #modify) and (original_current_object != undefined)) then
+            (
+                modPanel.setCurrentObject original_current_object
+                subObjectLevel = original_subobject_level
+            )
+        )
+        catch
+        (
+        )
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Selects every open border on the current Border Check source.
+    Temporary Edit Poly fallback is converted into Poly Select and removed; final display is Border level 3.
     */
     function selectAllBorders =
     (
-        selected_nodes = selection as array
-        processed_count = 0
-        total_border_edges = 0
+        selected_nodes = for node in (selection as array) where isValidNode node and superClassOf node == GeometryClass collect node
 
         if selected_nodes.count == 0 then return undefined
 
-        ensureCreatePanelMode()
+        node = selected_nodes[1]
+        adapter = getBorderCheckAdapter node
 
-        for node in selected_nodes do
+        if adapter == undefined then return undefined
+
+        border_edges = getVisibleBorderEdges node adapter
+        selection_written = false
+
+        if adapter[3] == true then
         (
-            if isValidNode node and superClassOf node == GeometryClass then
+            poly_select_modifier = moveTemporaryBorderSelectionToPolySelect node adapter border_edges
+
+            if poly_select_modifier != undefined then
             (
-                adapter = getGeometryAdapter node
-                border_edges = getVisibleBorderEdges node adapter
+                selection_written = activateBorderPolySelect node poly_select_modifier subobject_level:3
+            )
+        )
+        else if adapter[1] == #editable_poly then
+        (
+            try
+            (
+                polyop.setEdgeSelection (adapter[2]) border_edges
+                selection_written = ((polyop.getEdgeSelection (adapter[2])) == border_edges)
 
-                if adapter != undefined and adapter.count >= 2 and adapter[1] == #edit_poly and adapter[2] != undefined then
+                if selection_written then
                 (
-                    geometry_source = adapter[2]
-                    ensureEditPolyPrimaryNode node geometry_source
-                    geometry_source.useStackSelection = false
-
-                    if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
-                    (
-                        EditPolyMod.SetEPolySelLevel geometry_source #Edge
-                    )
-
-                    EditPolyMod.SetSelection geometry_source #Edge border_edges node:node
-                    processed_count += 1
-                    total_border_edges += border_edges.numberSet
+                    selection_written = activateBorderCheckAdapter node adapter subobject_level:3
                 )
+            )
+            catch
+            (
+                selection_written = false
+            )
+        )
+        else if adapter[1] == #edit_poly then
+        (
+            geometry_source = adapter[2]
+
+            try
+            (
+                ensureEditPolyPrimaryNode node geometry_source
+                geometry_source.useStackSelection = false
+                geometry_source.showCage = off
+                EditPolyMod.SetEPolySelLevel geometry_source #Border
+                EditPolyMod.SetSelection geometry_source #Edge border_edges node:node
+                selection_written = ((EditPolyMod.GetSelection geometry_source #Edge node:node) == border_edges)
+
+                if selection_written then
+                (
+                    selection_written = activateBorderCheckAdapter node adapter subobject_level:3
+                )
+            )
+            catch
+            (
+                selection_written = false
             )
         )
 
-        if processed_count == 0 then return undefined
-
-        ensureCreatePanelMode()
-        completeRedraw()
-        format "Border Select All: stored % open-border edge(s) on % object(s); Create panel kept active.\n" total_border_edges processed_count
-
-        total_border_edges
+        if selection_written then
+        (
+            completeRedraw()
+            format "Border Select All: selected % open-border edge(s) on %.\n" border_edges.numberSet node.name
+            border_edges.numberSet
+        )
+        else
+        (
+            undefined
+        )
         -- return
     ),
 
@@ -23065,8 +24016,27 @@ struct StraightEdgeFixer_v
     ),
 
     /*
+    Returns true when two world-Z centers belong to the same horizontal row.
+    Rows distance is the maximum allowed world-space Z separation.
+    */
+    function isWithinRowDistance target_z reference_z rows_distance =
+    (
+        result_value = false
+
+        if (rows_distance > 0.0) then
+        (
+            result_value = (abs(target_z - reference_z) <= rows_distance)
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
     Finds the nearest visible straight reference whose direction is within Angle.
-    No Z-position cutoff is used; horizontal and vertical fallback use the same angle rule.
+    Horizontal fallback also requires the reference center to be inside Rows distance in world Z.
+    Vertical fallback keeps the existing angle-only behavior.
     */
     function findAngleReference node adapter target_edge check_type tolerance angle_threshold =
     (
@@ -23083,8 +24053,14 @@ struct StraightEdgeFixer_v
                 (
                     reference_center = getEdgeCenterWorld node adapter reference_edge
                     parallel_angle = getParallelAngle node adapter target_edge reference_edge
+                    row_distance_ok = true
 
-                    if ((reference_center != undefined) and (parallel_angle <= angle_threshold)) then
+                    if ((check_type == #horizontal) and (reference_center != undefined)) then
+                    (
+                        row_distance_ok = isWithinRowDistance target_center.z reference_center.z tolerance
+                    )
+
+                    if ((reference_center != undefined) and (parallel_angle <= angle_threshold) and row_distance_ok) then
                     (
                         spatial_distance = distance target_center reference_center
 
@@ -23430,10 +24406,906 @@ struct StraightEdgeFixer_v
 
 
     /*
-    Fixes every currently selected edge for the requested direction.
-    In Vertex sub-object mode, Vertical moves selected vertices to the unselected endpoint XY.
+    Returns true when one visible edge belongs to the requested directional loop family.
+    Exact target edges and skewed/sloped edges inside Angle are both included for cluster discovery.
     */
-    function fixSelectedDirectionEdges check_type tolerance:0.01 angle_threshold:45.0 =
+    function isDirectionLoopEdge node adapter edge_id check_type angle_threshold =
+    (
+        result_value = false
+        deviations = getEdgeAxisDeviation node adapter edge_id
+
+        if ((deviations != undefined) and (isEdgeVisible node adapter edge_id)) then
+        (
+            if check_type == #vertical then
+            (
+                result_value = (deviations[2] <= angle_threshold)
+            )
+            else if check_type == #horizontal then
+            (
+                result_value = (deviations[1] <= angle_threshold)
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Collects every visible edge in the requested direction family before any geometry is moved.
+    This frozen edge set lets selected skewed/sloped edges discover exact reference segments on the same loop.
+    */
+    function getDirectionLoopEdges node adapter check_type angle_threshold =
+    (
+        loop_edges = #{}
+        edge_count = getEdgeCount node adapter
+
+        for edge_id = 1 to edge_count do
+        (
+            if isDirectionLoopEdge node adapter edge_id check_type angle_threshold then
+            (
+                loop_edges[edge_id] = true
+            )
+        )
+
+        loop_edges
+        -- return
+    ),
+
+
+    /*
+    Returns loop-family edges incident to one vertex.
+    Only edges from the frozen loop-family set are returned.
+    */
+    function getLoopEdgesAtVertex node adapter loop_edges vertex_id =
+    (
+        result_edges = #{}
+        incident_edges = getVertexIncidentEdges node adapter vertex_id
+
+        for edge_id in incident_edges do
+        (
+            if loop_edges[edge_id] then
+            (
+                result_edges[edge_id] = true
+            )
+        )
+
+        result_edges
+        -- return
+    ),
+
+
+    /*
+    Builds one logical direction-loop chain from a seed edge.
+    Traversal continues through degree-two vertices and stops at borders/endpoints or direction-family junctions.
+    */
+    function buildDirectionLoopCluster node adapter seed_edge loop_edges =
+    (
+        cluster_edges = #{}
+
+        if not loop_edges[seed_edge] then return cluster_edges
+
+        pending_edges = #(seed_edge)
+
+        while pending_edges.count > 0 do
+        (
+            edge_id = pending_edges[1]
+            deleteItem pending_edges 1
+
+            if not cluster_edges[edge_id] then
+            (
+                cluster_edges[edge_id] = true
+                edge_verts = getEdgeVertIds node adapter edge_id
+
+                if edge_verts.count == 2 then
+                (
+                    for vertex_id in edge_verts do
+                    (
+                        vertex_loop_edges = getLoopEdgesAtVertex node adapter loop_edges vertex_id
+
+                        /*
+                        A T-junction is an effective border when three or more
+                        direction-family branches meet. A two-edge continuation
+                        passes through real borders and wall corners.
+                        */
+                        if vertex_loop_edges.numberSet <= 2 then
+                        (
+                            for next_edge in vertex_loop_edges do
+                            (
+                                if (not cluster_edges[next_edge]) and ((findItem pending_edges next_edge) == 0) then
+                                (
+                                    append pending_edges next_edge
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        cluster_edges
+        -- return
+    ),
+
+
+    /*
+    Returns all unique vertices used by one edge set.
+    The result is a BitArray so cluster membership stays stable during later movement.
+    */
+    function getEdgeSetVertices node adapter edge_set =
+    (
+        vertex_set = #{}
+
+        for edge_id in edge_set do
+        (
+            edge_verts = getEdgeVertIds node adapter edge_id
+
+            if edge_verts.count == 2 then
+            (
+                vertex_set[edge_verts[1]] = true
+                vertex_set[edge_verts[2]] = true
+            )
+        )
+
+        vertex_set
+        -- return
+    ),
+
+
+    /*
+    Intersects one full logical loop with the user's original selected-edge set.
+    Only these selected edges are allowed to change geometry.
+    */
+    function getSelectedClusterEdges cluster_edges selected_edges =
+    (
+        selected_cluster_edges = #{}
+
+        for edge_id in cluster_edges do
+        (
+            if selected_edges[edge_id] then
+            (
+                selected_cluster_edges[edge_id] = true
+            )
+        )
+
+        selected_cluster_edges
+        -- return
+    ),
+
+
+    /*
+    Finds endpoint vertices of one logical loop chain.
+    Degree-one vertices include normal borders and junctions where traversal intentionally stopped.
+    */
+    function getLoopEndpointVertices node adapter cluster_edges =
+    (
+        endpoint_vertices = #{}
+        cluster_vertices = getEdgeSetVertices node adapter cluster_edges
+
+        for vertex_id in cluster_vertices do
+        (
+            incident_count = 0
+            incident_edges = getVertexIncidentEdges node adapter vertex_id
+
+            for edge_id in incident_edges do
+            (
+                if cluster_edges[edge_id] then
+                (
+                    incident_count += 1
+                )
+            )
+
+            if incident_count == 1 then
+            (
+                endpoint_vertices[vertex_id] = true
+            )
+        )
+
+        endpoint_vertices
+        -- return
+    ),
+
+
+    /*
+    Finds wall-corner vertices on a closed direction loop.
+    A corner is a degree-two loop vertex whose two loop edges do not continue on one straight line.
+    */
+    function getLoopCornerVertices node adapter cluster_edges corner_angle:1.0 =
+    (
+        corner_vertices = #{}
+        cluster_vertices = getEdgeSetVertices node adapter cluster_edges
+
+        for vertex_id in cluster_vertices do
+        (
+            incident_cluster_edges = #()
+            incident_edges = getVertexIncidentEdges node adapter vertex_id
+
+            for edge_id in incident_edges do
+            (
+                if cluster_edges[edge_id] then
+                (
+                    append incident_cluster_edges edge_id
+                )
+            )
+
+            if incident_cluster_edges.count == 2 then
+            (
+                parallel_angle = getParallelAngle node adapter incident_cluster_edges[1] incident_cluster_edges[2]
+
+                if parallel_angle > corner_angle then
+                (
+                    corner_vertices[vertex_id] = true
+                )
+            )
+        )
+
+        corner_vertices
+        -- return
+    ),
+
+
+    /*
+    Returns the lowest world-Z vertex from a BitArray.
+    Vertex ID breaks equal-Z ties so anchor choice stays deterministic.
+    */
+    function getLowestClusterVertex node adapter vertex_set =
+    (
+        best_vertex = 0
+        best_position = undefined
+
+        for vertex_id in vertex_set do
+        (
+            vertex_position = getVertexWorldPosition node adapter vertex_id
+
+            if vertex_position != undefined then
+            (
+                if ((best_position == undefined) or
+                    (vertex_position.z < best_position.z) or
+                    ((abs(vertex_position.z - best_position.z) <= 0.000001) and (vertex_id < best_vertex))) then
+                (
+                    best_vertex = vertex_id
+                    best_position = vertex_position
+                )
+            )
+        )
+
+        #(best_vertex, best_position)
+        -- return
+    ),
+
+
+    /*
+    Returns the highest world-Z vertex from a BitArray.
+    Vertex ID breaks equal-Z ties so the opposite endpoint is deterministic.
+    */
+    function getHighestClusterVertex node adapter vertex_set =
+    (
+        best_vertex = 0
+        best_position = undefined
+
+        for vertex_id in vertex_set do
+        (
+            vertex_position = getVertexWorldPosition node adapter vertex_id
+
+            if vertex_position != undefined then
+            (
+                if ((best_position == undefined) or
+                    (vertex_position.z > best_position.z) or
+                    ((abs(vertex_position.z - best_position.z) <= 0.000001) and (vertex_id > best_vertex))) then
+                (
+                    best_vertex = vertex_id
+                    best_position = vertex_position
+                )
+            )
+        )
+
+        #(best_vertex, best_position)
+        -- return
+    ),
+
+
+    /*
+    Returns the lowest preserved manually selected vertex belonging to one logical loop.
+    Multiple selected vertices on the same loop therefore resolve to the bottom selected vertex.
+    */
+    function getManualLoopAnchor node adapter cluster_vertices preserved_vertex_selection =
+    (
+        manual_vertices = #{}
+
+        for vertex_id in cluster_vertices do
+        (
+            if preserved_vertex_selection[vertex_id] then
+            (
+                manual_vertices[vertex_id] = true
+            )
+        )
+
+        getLowestClusterVertex node adapter manual_vertices
+        -- return
+    ),
+
+
+    /*
+    Returns true when one edge is truly horizontal or vertical at zero angular tolerance.
+    Exact segments are automatic alignment references and never need to be selected.
+    */
+    function isExactDirectionEdge node adapter edge_id check_type exact_epsilon:0.000001 =
+    (
+        result_value = false
+        deviations = getEdgeAxisDeviation node adapter edge_id
+
+        if deviations != undefined then
+        (
+            if check_type == #vertical then
+            (
+                result_value = (deviations[2] <= exact_epsilon)
+            )
+            else if check_type == #horizontal then
+            (
+                result_value = (deviations[1] <= exact_epsilon)
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Returns true when one effective loop endpoint touches a truly aligned loop edge.
+    Real borders, virtual corner endpoints and junction endpoints use the same test.
+    */
+    function endpointHasExactDirectionEdge node adapter cluster_edges vertex_id check_type exact_epsilon:0.000001 =
+    (
+        result_value = false
+        incident_edges = getVertexIncidentEdges node adapter vertex_id
+
+        for edge_id in incident_edges while (not result_value) do
+        (
+            if cluster_edges[edge_id] then
+            (
+                result_value = isExactDirectionEdge node adapter edge_id check_type exact_epsilon:exact_epsilon
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Compares two candidate loop-origin positions on the controlled alignment coordinate.
+    Vertical compares XY; Horizontal compares Z.
+    */
+    function loopTargetPositionsMatch point_a point_b check_type match_tolerance:0.0001 =
+    (
+        if point_a == undefined or point_b == undefined then return false
+
+        if check_type == #vertical then
+        (
+            ((abs(point_a.x - point_b.x)) <= match_tolerance) and
+            ((abs(point_a.y - point_b.y)) <= match_tolerance)
+        )
+        else if check_type == #horizontal then
+        (
+            (abs(point_a.z - point_b.z)) <= match_tolerance
+        )
+        else
+        (
+            false
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns the controlled coordinate represented by one truly aligned edge.
+    The Point3 stores XY for Vertical and Z for Horizontal so one target type serves both modes.
+    */
+    function getExactDirectionEdgeTarget node adapter edge_id check_type exact_epsilon:0.000001 =
+    (
+        target_position = undefined
+
+        if isExactDirectionEdge node adapter edge_id check_type exact_epsilon:exact_epsilon then
+        (
+            edge_verts = getEdgeVertIds node adapter edge_id
+
+            if edge_verts.count == 2 then
+            (
+                point_a = getVertexWorldPosition node adapter edge_verts[1]
+                point_b = getVertexWorldPosition node adapter edge_verts[2]
+
+                if point_a != undefined and point_b != undefined then
+                (
+                    if check_type == #vertical then
+                    (
+                        target_position = [
+                            (point_a.x + point_b.x) * 0.5,
+                            (point_a.y + point_b.y) * 0.5,
+                            amin point_a.z point_b.z
+                        ]
+                    )
+                    else if check_type == #horizontal then
+                    (
+                        target_position = [
+                            0.0,
+                            0.0,
+                            (point_a.z + point_b.z) * 0.5
+                        ]
+                    )
+                )
+            )
+        )
+
+        target_position
+        -- return
+    ),
+
+
+    /*
+    Finds the most-used truly aligned coordinate anywhere on one logical loop.
+    Equal-count ties use the lower world-Z occurrence and then the smaller edge ID.
+    */
+    function getDominantExactLoopTarget node adapter cluster_edges check_type exact_epsilon:0.000001 match_tolerance:0.0001 =
+    (
+        groups = #()
+
+        for edge_id in cluster_edges do
+        (
+            edge_target = getExactDirectionEdgeTarget node adapter edge_id check_type exact_epsilon:exact_epsilon
+
+            if edge_target != undefined then
+            (
+                group_index = 0
+
+                for candidate_index = 1 to groups.count while group_index == 0 do
+                (
+                    if loopTargetPositionsMatch groups[candidate_index][1] edge_target check_type match_tolerance:match_tolerance then
+                    (
+                        group_index = candidate_index
+                    )
+                )
+
+                if group_index == 0 then
+                (
+                    append groups #(edge_target, 1, edge_target.z, edge_id)
+                )
+                else
+                (
+                    group_record = groups[group_index]
+                    group_record[2] = group_record[2] + 1
+                    group_record[3] = amin group_record[3] edge_target.z
+                    group_record[4] = amin group_record[4] edge_id
+                    groups[group_index] = group_record
+                )
+            )
+        )
+
+        best_target = undefined
+        best_count = 0
+        best_z = 1.0e30
+        best_edge = 2147483647
+
+        for group_record in groups do
+        (
+            if ((group_record[2] > best_count) or
+                ((group_record[2] == best_count) and (group_record[3] < best_z)) or
+                ((group_record[2] == best_count) and (abs(group_record[3] - best_z) <= 0.000001) and (group_record[4] < best_edge))) then
+            (
+                best_target = group_record[1]
+                best_count = group_record[2]
+                best_z = group_record[3]
+                best_edge = group_record[4]
+            )
+        )
+
+        #(best_target, best_count)
+        -- return
+    ),
+
+
+    /*
+    Chooses one hard alignment origin for a logical loop using the redesigned priority rules.
+    Priority is manual vertex, bottom clean end, top clean end, matching ends, dominant exact segments, then bottom vertex.
+    */
+    function getDirectionLoopTarget node adapter cluster_edges preserved_vertex_selection check_type exact_epsilon:0.000001 match_tolerance:0.0001 =
+    (
+        cluster_vertices = getEdgeSetVertices node adapter cluster_edges
+        manual_anchor = getManualLoopAnchor node adapter cluster_vertices preserved_vertex_selection
+
+        if manual_anchor[1] > 0 and manual_anchor[2] != undefined then
+        (
+            return #(manual_anchor[2], #manualVertex, manual_anchor[1])
+        )
+
+        effective_endpoints = getLoopEndpointVertices node adapter cluster_edges
+
+        /*
+        A closed loop has no true border endpoint.
+        Wall corners become virtual borders without splitting the logical loop.
+        */
+        if effective_endpoints.numberSet == 0 then
+        (
+            effective_endpoints = getLoopCornerVertices node adapter cluster_edges
+        )
+
+        if effective_endpoints.numberSet == 0 then
+        (
+            effective_endpoints = copy cluster_vertices
+        )
+
+        bottom_end = getLowestClusterVertex node adapter effective_endpoints
+        top_end = getHighestClusterVertex node adapter effective_endpoints
+
+        if bottom_end[1] > 0 and endpointHasExactDirectionEdge node adapter cluster_edges bottom_end[1] check_type exact_epsilon:exact_epsilon then
+        (
+            return #(bottom_end[2], #bottomExactEnd, bottom_end[1])
+        )
+
+        if top_end[1] > 0 and top_end[1] != bottom_end[1] and
+            endpointHasExactDirectionEdge node adapter cluster_edges top_end[1] check_type exact_epsilon:exact_epsilon then
+        (
+            return #(top_end[2], #topExactEnd, top_end[1])
+        )
+
+        if bottom_end[2] != undefined and top_end[2] != undefined and
+            loopTargetPositionsMatch bottom_end[2] top_end[2] check_type match_tolerance:match_tolerance then
+        (
+            return #(bottom_end[2], #matchingEnds, bottom_end[1])
+        )
+
+        dominant_target = getDominantExactLoopTarget node adapter cluster_edges check_type exact_epsilon:exact_epsilon match_tolerance:match_tolerance
+
+        if dominant_target[1] != undefined then
+        (
+            return #(dominant_target[1], #dominantExact, 0)
+        )
+
+        bottom_vertex = getLowestClusterVertex node adapter cluster_vertices
+
+        if bottom_vertex[1] > 0 and bottom_vertex[2] != undefined then
+        (
+            return #(bottom_vertex[2], #bottomFallback, bottom_vertex[1])
+        )
+
+        undefined
+        -- return
+    ),
+
+
+    /*
+    Builds independent logical loop clusters from the user's selected edges.
+    Junctions split direction-family branches; corners and ordinary borders remain part of the same continuous loop.
+    */
+    function buildSelectedDirectionLoopClusters node adapter selected_edges check_type angle_threshold =
+    (
+        clusters = #()
+        assigned_selected_edges = #{}
+        loop_edges = getDirectionLoopEdges node adapter check_type angle_threshold
+
+        for seed_edge in selected_edges do
+        (
+            if (not assigned_selected_edges[seed_edge]) and loop_edges[seed_edge] then
+            (
+                cluster_edges = buildDirectionLoopCluster node adapter seed_edge loop_edges
+                selected_cluster_edges = getSelectedClusterEdges cluster_edges selected_edges
+
+                if selected_cluster_edges.numberSet > 0 then
+                (
+                    for edge_id in selected_cluster_edges do
+                    (
+                        assigned_selected_edges[edge_id] = true
+                    )
+
+                    append clusters #(cluster_edges, selected_cluster_edges)
+                )
+            )
+        )
+
+        #(clusters, assigned_selected_edges, loop_edges)
+        -- return
+    ),
+
+
+    /*
+    Realigns selected vertices from one logical loop to one frozen target line or plane.
+    Vertical changes XY only; Horizontal changes Z only; all selected-edge targets are computed before any move.
+    */
+    function alignSelectedDirectionLoopCluster node adapter cluster_edges selected_cluster_edges preserved_vertex_selection check_type exact_epsilon:0.000001 =
+    (
+        failed_vertices = #{}
+        fixed_edges = 0
+        cluster_target = getDirectionLoopTarget node adapter cluster_edges preserved_vertex_selection check_type exact_epsilon:exact_epsilon
+
+        if cluster_target == undefined then
+        (
+            failed_vertices = getEdgeSetVertices node adapter selected_cluster_edges
+            return #(fixed_edges, failed_vertices, #noTarget)
+        )
+
+        target_position = cluster_target[1]
+        target_source = cluster_target[2]
+        move_vertices = getEdgeSetVertices node adapter selected_cluster_edges
+        move_records = #()
+
+        /*
+        Freeze every requested target before changing the first vertex.
+        This prevents earlier moves from influencing later decisions in the same loop.
+        */
+        for vertex_id in move_vertices do
+        (
+            original_position = getVertexWorldPosition node adapter vertex_id
+
+            if original_position != undefined then
+            (
+                if check_type == #vertical then
+                (
+                    final_position = [target_position.x, target_position.y, original_position.z]
+                )
+                else
+                (
+                    final_position = [original_position.x, original_position.y, target_position.z]
+                )
+
+                append move_records #(vertex_id, final_position)
+            )
+            else
+            (
+                failed_vertices[vertex_id] = true
+            )
+        )
+
+        if failed_vertices.numberSet == 0 then
+        (
+            for move_record in move_records do
+            (
+                if not (setVertexWorldPosition node adapter move_record[1] move_record[2]) then
+                (
+                    failed_vertices[move_record[1]] = true
+                )
+            )
+        )
+
+        if failed_vertices.numberSet == 0 then
+        (
+            for edge_id in selected_cluster_edges do
+            (
+                deviations = getEdgeAxisDeviation node adapter edge_id
+                edge_valid = false
+
+                if deviations != undefined then
+                (
+                    if check_type == #vertical then
+                    (
+                        edge_valid = (deviations[2] <= exact_epsilon)
+                    )
+                    else if check_type == #horizontal then
+                    (
+                        edge_valid = (deviations[1] <= exact_epsilon)
+                    )
+                )
+
+                if edge_valid then
+                (
+                    fixed_edges += 1
+                )
+                else
+                (
+                    edge_verts = getEdgeVertIds node adapter edge_id
+
+                    if edge_verts.count == 2 then
+                    (
+                        failed_vertices[edge_verts[1]] = true
+                        failed_vertices[edge_verts[2]] = true
+                    )
+                )
+            )
+        )
+
+        #(fixed_edges, failed_vertices, target_source)
+        -- return
+    ),
+
+
+    /*
+    Tests anchor priority and logical-loop clustering on simple Editable Poly boxes.
+    It verifies lowest manual anchor priority plus closed horizontal traversal around wall corners.
+    */
+    function testDirectionLoopClusterRealignment =
+    (
+        test_passed = true
+        vertical_node = undefined
+        horizontal_node = undefined
+
+        try
+        (
+            vertical_node = box length:10.0 width:10.0 height:30.0 heightsegs:3
+            convertToPoly vertical_node
+            vertical_adapter = #(#editable_poly, vertical_node.baseObject, false)
+            vertical_loop_edges = getDirectionLoopEdges vertical_node vertical_adapter #vertical 10.0
+            vertical_seed = 0
+
+            for edge_id in vertical_loop_edges do
+            (
+                if vertical_seed == 0 then
+                (
+                    vertical_seed = edge_id
+                )
+            )
+
+            vertical_cluster = buildDirectionLoopCluster vertical_node vertical_adapter vertical_seed vertical_loop_edges
+            vertical_vertices = getEdgeSetVertices vertical_node vertical_adapter vertical_cluster
+            low_vertex = getLowestClusterVertex vertical_node vertical_adapter vertical_vertices
+            high_vertex = getHighestClusterVertex vertical_node vertical_adapter vertical_vertices
+            manual_selection = #{}
+
+            if low_vertex[1] > 0 and high_vertex[1] > 0 then
+            (
+                manual_selection[low_vertex[1]] = true
+                manual_selection[high_vertex[1]] = true
+                manual_anchor = getManualLoopAnchor vertical_node vertical_adapter vertical_vertices manual_selection
+                test_passed = test_passed and (manual_anchor[1] == low_vertex[1])
+            )
+            else
+            (
+                test_passed = false
+            )
+
+            horizontal_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly horizontal_node
+            horizontal_adapter = #(#editable_poly, horizontal_node.baseObject, false)
+            horizontal_loop_edges = getDirectionLoopEdges horizontal_node horizontal_adapter #horizontal 5.0
+            horizontal_seed = 0
+
+            for edge_id in horizontal_loop_edges do
+            (
+                if horizontal_seed == 0 then
+                (
+                    horizontal_seed = edge_id
+                )
+            )
+
+            horizontal_cluster = buildDirectionLoopCluster horizontal_node horizontal_adapter horizontal_seed horizontal_loop_edges
+            horizontal_endpoints = getLoopEndpointVertices horizontal_node horizontal_adapter horizontal_cluster
+            horizontal_corners = getLoopCornerVertices horizontal_node horizontal_adapter horizontal_cluster
+
+            test_passed = test_passed and (horizontal_cluster.numberSet >= 4)
+            test_passed = test_passed and (horizontal_endpoints.numberSet == 0)
+            test_passed = test_passed and (horizontal_corners.numberSet >= 4)
+        )
+        catch
+        (
+            test_passed = false
+        )
+
+        if ((vertical_node != undefined) and (isValidNode vertical_node)) then delete vertical_node
+        if ((horizontal_node != undefined) and (isValidNode horizontal_node)) then delete horizontal_node
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Realigns only currently selected edges after grouping them into logical vertical/horizontal loop clusters.
+    Hidden vertex selection is preserved as manual hard anchors; the lowest selected vertex wins on each loop.
+    */
+    function fixSelectedDirectionEdges check_type tolerance:0.01 angle_threshold:undefined =
+    (
+        selected_nodes = selection as array
+        object_results = #()
+        total_fixed_edges = 0
+        has_failed_edges = false
+        failure_report = ""
+        settings_data = loadSettings()
+        resolved_angle_threshold = if angle_threshold == undefined then settings_data[3] else angle_threshold
+        exact_epsilon = 0.000001
+
+        if selected_nodes.count == 0 then
+        (
+            messageBox "Select at least one geometry object." title:"Straight Edge Fixer"
+        )
+        else
+        (
+            undo "Fix Selected Direction Loops" on
+            (
+                for node in selected_nodes do
+                (
+                    if isValidNode node and (superClassOf node == GeometryClass) then
+                    (
+                        adapter = getGeometryAdapter node
+                        original_edge_selection = getEdgeSelection node adapter
+                        original_vertex_selection = getVertexSelection node adapter
+                        failed_vertices = #{}
+                        cluster_result = buildSelectedDirectionLoopClusters \
+                            node adapter original_edge_selection check_type resolved_angle_threshold
+                        clusters = cluster_result[1]
+                        assigned_selected_edges = cluster_result[2]
+
+                        /*
+                        Selected edges outside the requested Angle family cannot belong to a valid loop cluster.
+                        Keep them selected and report their vertices as failed without moving them.
+                        */
+                        for edge_id in original_edge_selection do
+                        (
+                            if not assigned_selected_edges[edge_id] then
+                            (
+                                edge_verts = getEdgeVertIds node adapter edge_id
+
+                                if edge_verts.count == 2 then
+                                (
+                                    failed_vertices[edge_verts[1]] = true
+                                    failed_vertices[edge_verts[2]] = true
+                                )
+                            )
+                        )
+
+                        for cluster_record in clusters do
+                        (
+                            cluster_edges = cluster_record[1]
+                            selected_cluster_edges = cluster_record[2]
+                            alignment_result = alignSelectedDirectionLoopCluster \
+                                node \
+                                adapter \
+                                cluster_edges \
+                                selected_cluster_edges \
+                                original_vertex_selection \
+                                check_type \
+                                exact_epsilon:exact_epsilon
+
+                            total_fixed_edges += alignment_result[1]
+
+                            for failed_vertex in alignment_result[2] do
+                            (
+                                failed_vertices[failed_vertex] = true
+                            )
+
+                            if not batch_quiet then
+                            (
+                                format "Straight Edge Fixer loop: node:% mode:% selectedEdges:% loopEdges:% target:%\n" \
+                                    node.name \
+                                    check_type \
+                                    selected_cluster_edges.numberSet \
+                                    cluster_edges.numberSet \
+                                    alignment_result[3]
+                            )
+                        )
+
+                        /*
+                        setVertexWorldPosition temporarily changes Edit Poly Vertex selection.
+                        Restore the user's preserved manual anchor selection before restoring Edge mode.
+                        */
+                        setVertexSelection node adapter original_vertex_selection
+                        set_selection_result = setCheckerEdgeSelection node adapter original_edge_selection
+
+                        if failed_vertices.numberSet > 0 then
+                        (
+                            has_failed_edges = true
+                            failure_report += node.name + ": " + (bitIdsToString failed_vertices) + "\n"
+                        )
+
+                        append object_results #(node, adapter, original_edge_selection, original_vertex_selection, failed_vertices, set_selection_result)
+                    )
+                )
+            )
+
+            completeRedraw()
+
+            if has_failed_edges then
+            (
+                messageBox ("Unable to realign selected loop edges with vertices:\n\n" + failure_report) title:"Straight Edge Fixer"
+            )
+            else
+            (
+                format "Straight Edge Fixer: realigned % selected % edge(s) by logical loop cluster.\n" total_fixed_edges check_type
+            )
+        )
+
+        #(total_fixed_edges, has_failed_edges)
+        -- return
+    ),
+
+
     (
         selected_nodes = selection as array
         object_results = #()
@@ -24095,6 +25967,50 @@ struct StraightEdgeFixer_v
     ),
 
     /*
+    Returns whether the standalone Straight Edge Fixer dialog should open for this load context.
+    Bundled Wall-Fixer loads stay headless, while directly running Straight-Edge-Fixer.ms still opens the dialog.
+    */
+    function shouldAutoOpenDialog runtime_mode source_file_name =
+    (
+        normalized_source_name = ""
+
+        if source_file_name != undefined then
+        (
+            try
+            (
+                normalized_source_name = toLower (filenameFromPath source_file_name)
+            )
+            catch
+            (
+                normalized_source_name = ""
+            )
+        )
+
+        (runtime_mode != #bundled) or (normalized_source_name == "straight-edge-fixer.ms")
+        -- return
+    ),
+
+
+    /*
+    Verifies bundled Wall-Fixer loading stays headless while direct standalone loading still opens the dialog.
+    Covers the case where Wall-Fixer was already loaded before the standalone file is run.
+    */
+    function testAutoOpenDialogPolicy =
+    (
+        bundled_ok = not (shouldAutoOpenDialog #bundled "C:\\Tools\\Wall-Fixer.ms")
+        standalone_ok = shouldAutoOpenDialog undefined "C:\\Tools\\Straight-Edge-Fixer.ms"
+        standalone_after_bundle_ok = shouldAutoOpenDialog #bundled "C:\\Tools\\Straight-Edge-Fixer.ms"
+        test_passed = bundled_ok and standalone_ok and standalone_after_bundle_ok
+
+        format "Straight Edge Fixer dialog auto-open policy: bundled:% standalone:% standalone-after-bundle:% => %\n" \
+            bundled_ok standalone_ok standalone_after_bundle_ok test_passed
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
     Verifies undefined component-selection reads are normalized to empty BitArrays.
     Prevents mapped-iteration crashes when an Edit Poly component-selection read is unavailable.
     */
@@ -24111,6 +26027,23 @@ struct StraightEdgeFixer_v
 
         format "EDGE FIXER undefined selection safety: count:% edges:% verts:% => %\n" \
             empty_count empty_adapter_selection empty_vertex_selection test_passed
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Tests Rows distance as the horizontal same-row cutoff.
+    Inside and boundary values qualify; values above the option do not.
+    */
+    function testHorizontalReferenceRowDistance =
+    (
+        test_passed = true
+        test_passed = test_passed and (isWithinRowDistance 10.0 10.005 0.01)
+        test_passed = test_passed and (isWithinRowDistance 10.0 10.01 0.01)
+        test_passed = test_passed and (not (isWithinRowDistance 10.0 10.0101 0.01))
+        test_passed = test_passed and (not (isWithinRowDistance 10.0 10.0 0.0))
 
         test_passed
         -- return
@@ -24166,6 +26099,7 @@ struct StraightEdgeFixer_v
         single_modifier_ok = testSingleStraightEdgeFixerModifier()
         live_topology_ok = testStraightEdgeFixerLiveTopology()
         undefined_selection_ok = testUndefinedSelectionSafety()
+        row_distance_ok = testHorizontalReferenceRowDistance()
         test_passed = stable_modes_ok and
             exact_vertical_ok and
             skewed_vertical_ok and
@@ -24176,10 +26110,11 @@ struct StraightEdgeFixer_v
             persistence_ok and
             single_modifier_ok and
             live_topology_ok and
-            undefined_selection_ok
+            undefined_selection_ok and
+            row_distance_ok
 
-        format "EDGE FIXER Checkers regression: stableModes:% exactV:% skewV:% tinyV:% exactH:% skewH:% tinyAngle:% persistence:% singleModifier:% liveTopology:% undefinedSelection:% => %\n" \
-            stable_modes_ok exact_vertical_ok skewed_vertical_ok tiny_vertical_ok exact_horizontal_ok skewed_horizontal_ok tiny_angle_ok persistence_ok single_modifier_ok live_topology_ok undefined_selection_ok test_passed
+        format "EDGE FIXER Checkers regression: stableModes:% exactV:% skewV:% tinyV:% exactH:% skewH:% tinyAngle:% persistence:% singleModifier:% liveTopology:% undefinedSelection:% rowDistance:% => %\n" \
+            stable_modes_ok exact_vertical_ok skewed_vertical_ok tiny_vertical_ok exact_horizontal_ok skewed_horizontal_ok tiny_angle_ok persistence_ok single_modifier_ok live_topology_ok undefined_selection_ok row_distance_ok test_passed
 
         if original_selection.count > 0 then
         (
@@ -24731,12 +26666,17 @@ struct StraightEdgeFixer_v
 
 StraightEdgeFixer = StraightEdgeFixer_v()
 
-try
+straight_edge_fixer_auto_open_dialog = StraightEdgeFixer.shouldAutoOpenDialog wall_fixer_runtime_mode (getSourceFileName())
+
+if straight_edge_fixer_auto_open_dialog then
 (
-    destroyDialog straightEdgeFixer_ui
-)
-catch
-(
+    try
+    (
+        destroyDialog straightEdgeFixer_ui
+    )
+    catch
+    (
+    )
 )
 
 rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
@@ -24759,10 +26699,10 @@ rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
     spinner spn_angle_threshold "" pos:[64,170] width:58 height:18 range:[0.0,45.0,45.0] type:#float scale:1.0 tooltip:"Maximum direction deviation in degrees."
     label lbl_angle_units "°" pos:[124,172] width:16 height:18
 
-    button btn_check_horizontal "CHECK HORIZONTAL" pos:[18,198] width:127 height:42 tooltip:"LMB: select visible edges whose deviation from horizontal is greater than Angle.\n\nRMB: straighten currently selected horizontal-direction error edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
+    button btn_check_horizontal "CHECK HORIZONTAL" pos:[18,198] width:127 height:42 tooltip:"LMB: select visible edges whose deviation from horizontal is greater than Angle.\n\nRMB: straighten currently selected horizontal-direction error edges. Reference priority: straight neighbor, then nearest straight edge inside Rows distance on the same level. Failed vertices are selected automatically."
     button btn_check_vertical "CHECK VERTICAL" pos:[155,198] width:127 height:42 tooltip:"LMB: select visible edges whose deviation from vertical is greater than Angle.\n\nRMB: straighten currently selected vertical-direction error edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
 
-    button btn_border_check "BORDER CHECK" pos:[18,248] width:264 height:28 tooltip:"Select visible border edges with an unwelded/overlapping local-Z seam, a reflex corner above 180 degrees, or a 360-degree backtracking border. Backtracking does not require the remote vertices to share position."
+    button btn_border_check "BORDER CHECK" pos:[18,248] width:264 height:28 tooltip:"Select invalid border edges on the active/top Edit Poly. A new Edit Poly is added only when the top modifier is not Edit Poly."
 
     button btn_align "STRAIGHT EDGE FIXER" pos:[8,302] width:284 height:38 tooltip:"Detect repeated horizontal edge rows and align nearby horizontal edges to TOP, BOTTOM, or CENTER target Z."
 
@@ -24849,13 +26789,15 @@ rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
     )
 )
 
-dialog_position = StraightEdgeFixer.loadDialogPosition()
-createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #style_sysmenu, #style_toolwindow)
-
+if straight_edge_fixer_auto_open_dialog then
+(
+    dialog_position = StraightEdgeFixer.loadDialogPosition()
+    createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #style_sysmenu, #style_toolwindow)
+)
 
 
 /*
-Wall-Fixer UI 0.977
+Wall-Fixer UI 0.991
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -24865,8 +26807,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.977"
-global wall_fixer_ui_tool_version = 1.0449
+global wall_fixer_ui_file_version = "0.991"
+global wall_fixer_ui_tool_version = 1.0609
 
 
 /*
@@ -25039,6 +26981,32 @@ This keeps LMB/RMB routing explicit without relying on the native rollout button
 function wallFixerGetDotNetMouseButton event_args =
 (
     ((event_args.Button.ToString()) as string) -- return
+)
+
+
+/*
+Returns the Slice Walls cut mode for the main action mouse button.
+*/
+function wallFixerGetSliceActionMode mouse_button =
+(
+    case mouse_button of
+    (
+        "Left": #vertical
+        "Right": #horizontal
+        default: undefined
+    )
+    -- return
+)
+
+
+/*
+Returns true for Slice Force CTRL+LMB/CTRL+RMB T-junction-only modes.
+The mouse button keeps its normal Vertical/Horizontal direction while CTRL restricts anchors to true T-junction vertices.
+*/
+function wallFixerIsSliceForceTJunctionOnly mouse_button control_pressed =
+(
+    control_pressed and (mouse_button == "Left" or mouse_button == "Right")
+    -- return
 )
 
 
@@ -26233,20 +28201,20 @@ The controls are separated from the main EDGE FIXER workflow without changing ge
 */
 rollout WallFixerEdgeFixerOptionsRollout "OPTIONS" width:286 height:82
 (
-    label level_tolerance_label "Rows distance:" pos:[8,32] width:80 height:18
-    spinner level_tolerance_spinner "" pos:[90,29] width:40 height:20 \
+    label level_tolerance_label "Rows distance:" pos:[8,8] width:80 height:18
+    spinner level_tolerance_spinner "" pos:[90,5] width:96 height:20 \
         range:[0.000001,1000000.0,0.01] type:#worldUnits scale:0.001 \
         tooltip:"Maximum world-space distance used to detect and group horizontal edge rows."
-    label rows_distance_units_label "unit" pos:[132,32] width:30 height:18
+    label rows_distance_units_label "unit" pos:[190,8] width:70 height:18
 
 
-    label min_edges_label "Min Edges:" pos:[164,32] width:54 height:18
-    spinner min_level_edges_spinner "" pos:[220,29] width:30 height:20 \
+    label min_edges_label "Min Edges:" pos:[8,32] width:80 height:18
+    spinner min_level_edges_spinner "" pos:[90,29] width:96 height:20 \
         range:[1,100000,3] type:#integer scale:1 \
         tooltip:"Minimum horizontal edge count needed to define a valid edge row."
 
 
-    checkbox straight_quiet_checkbox "Quiet" pos:[8,57] width:58 height:18 checked:false \
+    checkbox straight_quiet_checkbox "Quiet" pos:[8,56] width:80 height:18 checked:false \
         tooltip:"Suppress the Straight Edge Fixer final report dialog."
 
 
@@ -26490,7 +28458,7 @@ rollout WallFixerEdgeFixerRollout "3 EDGE FIXER" width:310 height:140
 SLICE WALLS routes direction directly from the main action mouse event.
 Advanced slicer values continue to come from the existing Wall-Fixer INI settings.
 */
-rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
+rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:172
 (
     local numbered_button_tooltip
     local slice_action_running = false
@@ -26511,22 +28479,22 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
         tooltip:"Include true three-edge T-junction vertices as additional Slice Force planes."
 
 
-    dotNetControl slice_selected_walls_button "System.Windows.Forms.Button" pos:[4,42] width:128 height:38
+    dotNetControl slice_selected_walls_button "System.Windows.Forms.Button" pos:[4,42] width:148 height:38
 
 
-    button slice_modifier_button "H \\ V" pos:[136,42] width:54 height:38 \
+    button reset_slice_button "RESET SLICE" pos:[156,42] width:150 height:38 \
+        tooltip:"LMB: Remove all vertical Slice modifiers using the SLICE V namespace.\n\nRMB: Remove all horizontal Slice modifiers using the SLICE H namespace."
+
+
+    button slice_modifier_button "H \\ V" pos:[4,84] width:149 height:38 \
         tooltip:"LMB: Activate SLICE HORIZONTAL.\n\nRMB: Activate SLICE VERTICAL.\n\nCTRL+LMB: Activate SLICE HORIZONTAL and enter Edge level 2.\n\nCTRL+RMB: Activate SLICE VERTICAL and enter Edge level 2."
 
 
-    button select_slice_state_button "Select" pos:[194,42] width:54 height:38 \
+    button select_slice_state_button "Select" pos:[157,84] width:149 height:38 \
         tooltip:"LMB: Filter objects with SLICE VERTICAL. If nothing is selected, use all visible geometry.\n\nRMB: Filter objects with SLICE HORIZONTAL. If nothing is selected, use all visible geometry."
 
 
-    button delete_slice_modifier_button "Delete" pos:[252,42] width:54 height:38 \
-        tooltip:"LMB: Delete all SLICE VERTICAL modifiers from selected objects.\n\nRMB: Delete all SLICE HORIZONTAL modifiers from selected objects."
-
-
-    dotNetControl slice_force_button "System.Windows.Forms.Button" pos:[4,84] width:302 height:38
+    dotNetControl slice_force_button "System.Windows.Forms.Button" pos:[4,126] width:302 height:38
 
 
     on WallFixerSliceWallsRollout open do
@@ -26552,7 +28520,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
             slice_force_button \
             "SLICE FORCE" \
             numbered_button_tooltip \
-            "LMB: FORCE SLICE VERTICAL.\n\nRMB: FORCE SLICE HORIZONTAL.\n\nUses one real Slice modifier per unique plane, then collapses once. Enable T junction verts to include true three-edge T-junction anchors."
+            "LMB: FORCE SLICE VERTICAL.\n\nRMB: FORCE SLICE HORIZONTAL.\n\nCTRL+LMB: FORCE SLICE VERTICAL only at true T-junction vertices.\n\nCTRL+RMB: FORCE SLICE HORIZONTAL only at true T-junction vertices.\n\nUses one real Slice modifier per unique plane, then collapses once. Enable T junction verts to include T-junction anchors in ordinary Force runs."
 
         slice_force_button.ForeColor = (dotNetClass "System.Drawing.Color").Orange
     )
@@ -26604,6 +28572,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
     (
         local mouse_button = wallFixerGetDotNetMouseButton event_args
         local slice_mode = wallFixerGetSliceActionMode mouse_button
+        local t_junction_only = wallFixerIsSliceForceTJunctionOnly mouse_button keyboard.controlPressed
 
         if slice_mode != undefined and not slice_force_action_running then
         (
@@ -26611,7 +28580,7 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
 
             try
             (
-                ::WallFixerRollout.runSliceForce slice_mode
+                ::WallFixerRollout.runSliceForce slice_mode t_junction_only:t_junction_only
             )
             catch
             (
@@ -26648,15 +28617,15 @@ rollout WallFixerSliceWallsRollout "4 SLICE WALLS" width:310 height:130
     )
 
 
-    on delete_slice_modifier_button pressed do
+    on reset_slice_button pressed do
     (
-        ::WallFixerRollout.deleteSliceWallModifiers "SLICE VERTICAL"
+        ::WallFixerRollout.deleteSliceWallModifiers "SLICE V"
     )
 
 
-    on delete_slice_modifier_button rightclick do
+    on reset_slice_button rightclick do
     (
-        ::WallFixerRollout.deleteSliceWallModifiers "SLICE HORIZONTAL"
+        ::WallFixerRollout.deleteSliceWallModifiers "SLICE H"
     )
 )
 
@@ -26812,7 +28781,7 @@ rollout WallFixerPostProcessRollout "5 POST-PROCESS" width:310 height:348
 HELPERS contains utility actions that are useful outside the numbered wall-fixing workflow.
 These actions operate on the current scene selection.
 */
-rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
+rollout WallFixerHelpersRollout "HELPERS" width:310 height:332
 (
     button attach_button "Attach" pos:[8,8] width:143 height:30 \
         tooltip:"LMB: Attach all selected geometry into the first selected object.\n\nRMB: Attach selection, center the merged pivot, weld all vertices using Wall-Fixer > Options > Weld Threshold, then quadrify when the merged object has at most 12 triangular faces."
@@ -26830,14 +28799,18 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
         tooltip:"LMB: Select true 90° open-border corner vertices on the current Edit Poly modifier or Editable Poly base. Straight 180° border vertices are excluded."
 
 
-    button split_button "Split" pos:[8,80] width:294 height:30 \
+    button split_button "Split" pos:[8,80] width:143 height:30 \
         tooltip:"LMB: Apply Editable Poly, split all selected edges, then explode the resulting elements into separate objects."
+
+
+    button quadrify_button "Quadrify" pos:[159,80] width:143 height:30 \
+        tooltip:"LMB: Run Ribbon Tools Quadrify All.\n\nRMB: Run Ribbon Tools Triangulate All."
 
 
     groupBox material_group "MATERIAL" pos:[4,116] width:302 height:66
 
 
-    button material_button "Material" pos:[8,140] width:143 height:30 \
+    button material_button "Multi ID" pos:[8,140] width:143 height:30 \
         tooltip:"LMB: Assign the same WALL FACE CLASSIFIER material used by INNER / OUTTER to selected geometry.\n\nRMB: Remove the material from selected geometry."
 
 
@@ -26847,6 +28820,21 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
 
     button select_degenerated_objects_button "Select Degenerated Objects" pos:[8,188] width:294 height:30 \
         tooltip:"Select visible geometry collapsed to an edge when all evaluated vertex normals match."
+
+
+    groupBox modifiers_group "MODIFIERS" pos:[4,224] width:302 height:102
+
+
+    button stl_check_button "STL CHECK" pos:[8,248] width:143 height:30 \
+        tooltip:"LMB: Apply an STL Check modifier to selected geometry and turn Check on."
+
+
+    button vertex_weld_button "VertexWeld" pos:[159,248] width:143 height:30 \
+        tooltip:"LMB: Apply Vertex Weld with Threshold 0.0.\n\nRMB: Apply Vertex Weld with Threshold 0.001."
+
+
+    button world_borders_button "Weld Borders" pos:[8,284] width:294 height:30 \
+        tooltip:"LMB: Prepend WELD BORDERS Poly Select below the topmost VertexWeld, select all open-border vertices, and leave Vertex sub-object active so VertexWeld uses only those vertices."
 
 
     on attach_button pressed do
@@ -26891,6 +28879,18 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
     )
 
 
+    on quadrify_button pressed do
+    (
+        ::WallFixerRollout.runQuadrifyAll()
+    )
+
+
+    on quadrify_button rightclick do
+    (
+        ::WallFixerRollout.runTriangulateAll()
+    )
+
+
     on material_button pressed do
     (
         ::WallFixerRollout.runAssignMultiMaterial()
@@ -26913,6 +28913,30 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
     (
         ::WallFixerRollout.runSelectDegeneratedObjects()
     )
+
+
+    on stl_check_button pressed do
+    (
+        ::WallFixerRollout.runApplyStlCheck()
+    )
+
+
+    on vertex_weld_button pressed do
+    (
+        ::WallFixerRollout.runApplyVertexWeld weld_threshold:0.0
+    )
+
+
+    on vertex_weld_button rightclick do
+    (
+        ::WallFixerRollout.runApplyVertexWeld weld_threshold:0.001
+    )
+
+
+    on world_borders_button pressed do
+    (
+        ::WallFixerRollout.runApplyWorldBorders()
+    )
 )
 
 
@@ -26921,7 +28945,7 @@ rollout WallFixerHelpersRollout "HELPERS" width:310 height:224
 DEBUG contains optional tracing and Listener diagnostics outside the main workflow.
 These controls do not change the numbered pipeline order.
 */
-rollout WallFixerDebugRollout "DEBUG" width:310 height:152
+rollout WallFixerDebugRollout "DEBUG" width:310 height:116
 (
     checkbutton debug_trace_checkbutton "DEBUG TRACE" pos:[8,8] width:143 height:30 \
         tooltip:"Record classifier inputs, per-face scores, resolution reasons, and class snapshots in object user properties."
@@ -26929,13 +28953,13 @@ rollout WallFixerDebugRollout "DEBUG" width:310 height:152
     button btn_print_debug "PRINT DEBUG" pos:[159,8] width:143 height:30 \
         tooltip:"Print selected or last analyzed wall geometry, trace properties, vertices, faces, normals, Material IDs, scores, and resolution reasons to the MAXScript Listener."
 
-    button print_objs_button "Print Objs" pos:[8,44] width:294 height:30 \
+    button print_objs_button "Print Objs" pos:[8,44] width:143 height:30 \
         tooltip:"Clear the Listener and print detailed diagnostics for the selected objects."
 
-    button angle_of_edges_button "Angle of Edges" pos:[8,80] width:294 height:30 \
+    button angle_of_edges_button "Angle of Edges" pos:[159,44] width:143 height:30 \
         tooltip:"Print horizontal and vertical deviation angles for the selected edges."
 
-    button dialog_info_button "Dialog Info" pos:[8,116] width:294 height:30 \
+    button dialog_info_button "Dialog Info" pos:[8,80] width:143 height:30 \
         tooltip:"Print the current Wall-Fixer dialog size, position, registration state, and dock state."
 
     on WallFixerDebugRollout open do
@@ -33085,21 +35109,6 @@ Verifies full-row parent controls and parent group boxes use 4px side padding.
 The test checks width equals parent rollout width minus 8 and left position equals 4.
 */
 /*
-Returns the Slice Walls cut mode for the main action mouse button.
-*/
-function wallFixerGetSliceActionMode mouse_button =
-(
-    case mouse_button of
-    (
-        "Left": #vertical
-        "Right": #horizontal
-        default: undefined
-    )
-    -- return
-)
-
-
-/*
 Tests Slice Walls Select CTRL+LMB routing intent.
 */
 function testSliceCornerHelperRouting =
@@ -33127,13 +35136,18 @@ function testSliceSelectDirectionalRouting =
 
 
 /*
-Tests Slice Force mouse routing; it intentionally matches the main Slice Walls mapping.
+Tests Slice Force mouse routing including CTRL T-junction-only modes for both directions.
 */
 function testSliceForceMouseRouting =
 (
     wallFixerGetSliceActionMode "Left" == #vertical and
     wallFixerGetSliceActionMode "Right" == #horizontal and
-    wallFixerGetSliceActionMode "Middle" == undefined
+    wallFixerGetSliceActionMode "Middle" == undefined and
+    wallFixerIsSliceForceTJunctionOnly "Left" true and
+    wallFixerIsSliceForceTJunctionOnly "Right" true and
+    not(wallFixerIsSliceForceTJunctionOnly "Left" false) and
+    not(wallFixerIsSliceForceTJunctionOnly "Right" false) and
+    not(wallFixerIsSliceForceTJunctionOnly "Middle" true)
     -- return
 )
 
@@ -33189,14 +35203,31 @@ function testSliceWallMouseRouting =
 
 
 /*
-Tests Slice Walls Delete LMB/RMB modifier-name routing.
+Tests RESET SLICE LMB/RMB namespace routing.
 */
 function testSliceDeleteRouting =
 (
-    local lmb_modifier = "SLICE VERTICAL"
-    local rmb_modifier = "SLICE HORIZONTAL"
+    local lmb_modifier = "SLICE V"
+    local rmb_modifier = "SLICE H"
 
-    lmb_modifier == "SLICE VERTICAL" and rmb_modifier == "SLICE HORIZONTAL"
+    lmb_modifier == "SLICE V" and rmb_modifier == "SLICE H"
+    -- return
+)
+
+
+/*
+Tests RESET SLICE placement beside the main Slice Walls control.
+The Reset button shares the first action row and Slice Force remains on the final row.
+*/
+function testResetSliceLayout =
+(
+    local slice_x = 4
+    local slice_width = 148
+    local reset_x = 156
+    local reset_width = 150
+    local force_y = 126
+
+    slice_x + slice_width <= reset_x and reset_x + reset_width <= 310 and force_y > 84
     -- return
 )
 
@@ -34044,11 +36075,11 @@ rollout wallFaceClassifierRollout "2 GET OUTER WALLS" width:310 height:110
 
 rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 (
-    progressbar workflow_progress "" pos:[0,0] width:344 height:4 value:0 color:(color 0 180 0) orient:#horizontal
-    dotNetControl progress_count_label "System.Windows.Forms.Label" pos:[8,6] width:328 height:40
-    dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,6] width:76 height:40
-    dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,6] width:248 height:40
-    subRollout workflow_subrollout "" pos:[0,54] width:344 height:686
+    progressbar workflow_progress "" pos:[0,0] width:344 height:8 value:0 color:(color 0 180 0) orient:#horizontal
+    dotNetControl progress_count_label "System.Windows.Forms.Label" pos:[8,10] width:328 height:40
+    dotNetControl process_status_label "System.Windows.Forms.Label" pos:[8,10] width:76 height:40
+    dotNetControl status_line_top "System.Windows.Forms.RichTextBox" pos:[88,10] width:248 height:40
+    subRollout workflow_subrollout "" pos:[0,58] width:344 height:682
 
 
     local status_texts = #("Ready.")
@@ -34466,6 +36497,169 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
 
 
     /*
+    Runs Ribbon Tools Quadrify All on the current modeling context.
+    Uses the same PolyToolsModeling call already used by the Attach RMB workflow.
+    */
+    function runQuadrifyAll =
+    (
+        setProgress 0
+        setStatus #message "Running Quadrify All..."
+        operation_success = false
+
+
+        undo "Wall-Fixer - Quadrify All" on
+        (
+            try
+            (
+                max modify mode
+                operation_success = PolyToolsModeling.Quadrify false false
+            )
+            catch
+            (
+                operation_success = false
+            )
+        )
+
+
+        setProgress 100
+
+
+        if operation_success then
+        (
+            completeRedraw()
+            setStatus #success "Quadrify All completed."
+        )
+        else
+        (
+            setStatus #failed "Quadrify All failed."
+        )
+
+
+        operation_success
+        -- return
+    )
+
+
+    /*
+    Executes a registered 3ds Max action whose visible text exactly matches the requested command.
+    Button, menu and description text are checked so Ribbon actions can be resolved without guessing macro names.
+    */
+    function runRegisteredActionByText action_text =
+    (
+        requested_text = toLower action_text
+        operation_success = false
+
+
+        for table_index = 1 to actionMan.numActionTables while not operation_success do
+        (
+            action_table = actionMan.getActionTable table_index
+
+
+            for item_index = 1 to action_table.numActionItems while not operation_success do
+            (
+                action_item = action_table.getActionItem item_index
+                button_text = ""
+                menu_text = ""
+                description_text = ""
+
+
+                try (action_item.getButtonText &button_text) catch (button_text = "")
+                try (action_item.getMenuText &menu_text) catch (menu_text = "")
+                try (action_item.getDescription &description_text) catch (description_text = "")
+
+
+                if (toLower button_text) == requested_text or (toLower menu_text) == requested_text or (toLower description_text) == requested_text then
+                (
+                    persistent_id = undefined
+
+
+                    try
+                    (
+                        persistent_id = action_item.persistentActionId
+                    )
+                    catch
+                    (
+                        persistent_id = undefined
+                    )
+
+
+                    if persistent_id != undefined then
+                    (
+                        try
+                        (
+                            operation_success = actionMan.executeAction action_table.id persistent_id
+                        )
+                        catch
+                        (
+                            operation_success = false
+                        )
+                    )
+                    else
+                    (
+                        try
+                        (
+                            operation_success = actionMan.executeAction action_table.id (action_item.id as string)
+                        )
+                        catch
+                        (
+                            operation_success = false
+                        )
+                    )
+                )
+            )
+        )
+
+
+        operation_success
+        -- return
+    )
+
+
+    /*
+    Runs the registered Ribbon Tools Triangulate All action.
+    The action is resolved by its visible command text so no unverified macro name is hardcoded.
+    */
+    function runTriangulateAll =
+    (
+        setProgress 0
+        setStatus #message "Running Triangulate All..."
+        operation_success = false
+
+
+        undo "Wall-Fixer - Triangulate All" on
+        (
+            try
+            (
+                max modify mode
+                operation_success = runRegisteredActionByText "Triangulate All"
+            )
+            catch
+            (
+                operation_success = false
+            )
+        )
+
+
+        setProgress 100
+
+
+        if operation_success then
+        (
+            completeRedraw()
+            setStatus #success "Triangulate All completed."
+        )
+        else
+        (
+            setStatus #failed "Triangulate All action was not available."
+        )
+
+
+        operation_success
+        -- return
+    )
+
+
+    /*
     Aligns the active viewport perpendicular to selected wall faces and frames the selection.
     A temporary orthographic camera transfers the face orientation into the final User view.
     */
@@ -34676,6 +36870,686 @@ rollout WallFixerRollout "Wall-Fixer" width:344 height:748
             setStatus #success ("Material: removed from " + (selected_nodes.count as string) + " object(s).")
             true
         )
+        -- return
+    )
+
+
+    /*
+    Applies STL Check to selected geometry and enables its Check toggle.
+    Unsupported selected geometry is skipped and reported without changing other STL Check defaults.
+    */
+    function runApplyStlCheck =
+    (
+        selected_nodes = for object_node in (selection as array) where object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #warning "STL CHECK: select one or more geometry objects."
+            false
+        )
+        else
+        (
+            added_count = 0
+            failed_names = #()
+
+
+            undo "Wall-Fixer - STL Check" on
+            (
+                for object_node in selected_nodes do
+                (
+                    modifier_supported = false
+
+
+                    try
+                    (
+                        modifier_supported = validModifier object_node STL_Check
+                    )
+                    catch
+                    (
+                        modifier_supported = false
+                    )
+
+
+                    if modifier_supported then
+                    (
+                        stl_check_modifier = STL_Check()
+
+
+                        try
+                        (
+                            addModifier object_node stl_check_modifier
+                            stl_check_modifier.Check_Now = 1
+                            added_count += 1
+                        )
+                        catch
+                        (
+                            append failed_names object_node.name
+                        )
+                    )
+                    else
+                    (
+                        append failed_names object_node.name
+                    )
+                )
+            )
+
+
+            redrawViews()
+
+
+            if added_count == selected_nodes.count then
+            (
+                setStatus #success ("STL CHECK: applied with Check on to " + (added_count as string) + " object(s).")
+                true
+            )
+            else if added_count > 0 then
+            (
+                setStatus #warning ("STL CHECK: applied to " + (added_count as string) + " object(s); skipped " + (failed_names.count as string) + ".")
+                true
+            )
+            else
+            (
+                setStatus #failed "STL CHECK: modifier could not be applied to the selected geometry."
+                false
+            )
+        )
+        -- return
+    )
+
+
+    /*
+    Tests HELPERS STL CHECK by applying it to a temporary box and reading the modifier state.
+    The temporary node is deleted and the previous object selection is restored.
+    */
+    function testHelpersStlCheck =
+    (
+        original_selection = selection as array
+        test_node = undefined
+        operation_success = false
+        modifier_class_ok = false
+        check_on = false
+
+
+        try
+        (
+            test_node = box name:(uniqueName "WF_STL_CHECK_TEST")
+            select test_node
+
+
+            operation_success = runApplyStlCheck()
+
+
+            if test_node.modifiers.count > 0 then
+            (
+                test_modifier = test_node.modifiers[1]
+                modifier_class_ok = classOf test_modifier == STL_Check
+
+
+                if modifier_class_ok then
+                (
+                    try
+                    (
+                        check_on = test_modifier.Check_Now == 1
+                    )
+                    catch
+                    (
+                        check_on = false
+                    )
+                )
+            )
+        )
+        catch
+        (
+            operation_success = false
+            modifier_class_ok = false
+            check_on = false
+        )
+
+
+        if test_node != undefined and isValidNode test_node then delete test_node
+
+
+        restored_selection = for object_node in original_selection where object_node != undefined and isValidNode object_node collect object_node
+
+
+        if restored_selection.count > 0 then
+        (
+            select restored_selection
+        )
+        else
+        (
+            clearSelection()
+        )
+
+
+        test_passed = operation_success and modifier_class_ok and check_on
+        format "HELPERS STL CHECK test | applied:% | class:% | check_on:% | result:%\n" operation_success modifier_class_ok check_on test_passed
+
+
+        test_passed
+        -- return
+    )
+
+
+
+    /*
+    Applies a native Vertex Weld modifier to selected geometry using the requested threshold.
+    Each supported selected object receives a new Vertex Weld modifier.
+    */
+    function runApplyVertexWeld weld_threshold:0.0 =
+    (
+        selected_nodes = for object_node in (selection as array) where object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #warning "VertexWeld: select one or more geometry objects."
+            false
+        )
+        else
+        (
+            added_count = 0
+            failed_names = #()
+
+
+            undo "Wall-Fixer - Vertex Weld" on
+            (
+                for object_node in selected_nodes do
+                (
+                    modifier_supported = false
+
+
+                    try
+                    (
+                        modifier_supported = validModifier object_node Vertex_Weld
+                    )
+                    catch
+                    (
+                        modifier_supported = false
+                    )
+
+
+                    if modifier_supported then
+                    (
+                        vertex_weld_modifier = Vertex_Weld()
+
+
+                        try
+                        (
+                            vertex_weld_modifier.threshold = weld_threshold
+                            addModifier object_node vertex_weld_modifier
+                            added_count += 1
+                        )
+                        catch
+                        (
+                            append failed_names object_node.name
+                        )
+                    )
+                    else
+                    (
+                        append failed_names object_node.name
+                    )
+                )
+            )
+
+
+            redrawViews()
+
+
+            if added_count == selected_nodes.count then
+            (
+                setStatus #success (
+                    "VertexWeld: applied threshold " +
+                    (weld_threshold as string) +
+                    " to " +
+                    (added_count as string) +
+                    " object(s)."
+                )
+                true
+            )
+            else if added_count > 0 then
+            (
+                setStatus #warning (
+                    "VertexWeld: applied threshold " +
+                    (weld_threshold as string) +
+                    " to " +
+                    (added_count as string) +
+                    " object(s); skipped " +
+                    (failed_names.count as string) +
+                    "."
+                )
+                true
+            )
+            else
+            (
+                setStatus #failed "VertexWeld: modifier could not be applied to the selected geometry."
+                false
+            )
+        )
+        -- return
+    )
+
+
+    /*
+    Tests HELPERS VertexWeld with both requested mouse thresholds.
+    The temporary node is deleted and the previous object selection is restored.
+    */
+    function testHelpersVertexWeld =
+    (
+        original_selection = selection as array
+        test_node = undefined
+        lmb_ok = false
+        rmb_ok = false
+
+
+        try
+        (
+            test_node = box name:(uniqueName "WF_VERTEX_WELD_TEST")
+            select test_node
+
+
+            lmb_applied = runApplyVertexWeld weld_threshold:0.0
+
+
+            if lmb_applied and test_node.modifiers.count > 0 then
+            (
+                lmb_modifier = test_node.modifiers[1]
+                lmb_ok = classOf lmb_modifier == Vertex_Weld and abs(lmb_modifier.threshold - 0.0) <= 0.0000001
+            )
+
+
+            rmb_applied = runApplyVertexWeld weld_threshold:0.001
+
+
+            if rmb_applied and test_node.modifiers.count > 1 then
+            (
+                rmb_modifier = test_node.modifiers[1]
+                rmb_ok = classOf rmb_modifier == Vertex_Weld and abs(rmb_modifier.threshold - 0.001) <= 0.0000001
+            )
+        )
+        catch
+        (
+            lmb_ok = false
+            rmb_ok = false
+        )
+
+
+        if test_node != undefined and isValidNode test_node then delete test_node
+
+
+        restored_selection = for object_node in original_selection where object_node != undefined and isValidNode object_node collect object_node
+
+
+        if restored_selection.count > 0 then
+        (
+            select restored_selection
+        )
+        else
+        (
+            clearSelection()
+        )
+
+
+        test_passed = lmb_ok and rmb_ok
+        format "HELPERS VertexWeld test | LMB 0.0:% | RMB 0.001:% | result:%\n" lmb_ok rmb_ok test_passed
+
+
+        test_passed
+        -- return
+    )
+
+
+    /*
+    Returns the topmost native Vertex Weld modifier and its modifier-stack index.
+    The index is counted from the top of the stack.
+    */
+    function getTopVertexWeldModifierData object_node =
+    (
+        if object_node == undefined or not isValidNode object_node then return undefined
+
+
+        for modifier_index = 1 to object_node.modifiers.count do
+        (
+            stack_modifier = object_node.modifiers[modifier_index]
+
+
+            if classOf stack_modifier == Vertex_Weld then
+            (
+                return #(stack_modifier, modifier_index)
+            )
+        )
+
+
+        undefined
+        -- return
+    )
+
+
+    /*
+    Finds all open-border vertices in the evaluated stack immediately below one modifier.
+    The target modifier and modifiers above it are disabled only while a disposable snapshot is evaluated.
+    */
+    function getWorldBorderVerticesBelowModifier object_node modifier_index =
+    (
+        border_vertices = #{}
+        disabled_states = #()
+        snapshot_node = undefined
+
+
+        if object_node == undefined or not isValidNode object_node then return border_vertices
+        if modifier_index < 1 or modifier_index > object_node.modifiers.count then return border_vertices
+
+
+        for stack_index = 1 to modifier_index do
+        (
+            stack_modifier = object_node.modifiers[stack_index]
+            modifier_enabled = true
+
+
+            try(modifier_enabled = stack_modifier.enabled)catch(modifier_enabled = true)
+            append disabled_states #(stack_modifier, modifier_enabled)
+
+
+            try(stack_modifier.enabled = false)catch()
+        )
+
+
+        try
+        (
+            snapshot_node = snapshot object_node
+
+
+            if snapshot_node != undefined and isValidNode snapshot_node then
+            (
+                convertToPoly snapshot_node
+                open_edges = polyop.getOpenEdges snapshot_node.baseObject
+
+
+                if open_edges != undefined and open_edges.numberSet > 0 then
+                (
+                    border_vertices = polyop.getVertsUsingEdge snapshot_node.baseObject open_edges
+                )
+            )
+        )
+        catch
+        (
+            border_vertices = #{}
+        )
+
+
+        if snapshot_node != undefined and isValidNode snapshot_node then
+        (
+            delete snapshot_node
+        )
+
+
+        for state_data in disabled_states do
+        (
+            try(state_data[1].enabled = state_data[2])catch()
+        )
+
+
+        border_vertices
+        -- return
+    )
+
+
+    /*
+    Prepend/reuse WELD BORDERS Poly Select directly below one Vertex Weld modifier.
+    The supplied border vertices are stored at Vertex level and passed upward to Vertex Weld.
+    */
+    function setWorldBordersPolySelect object_node vertex_weld_index border_vertices =
+    (
+        if object_node == undefined or not isValidNode object_node then return undefined
+        if border_vertices == undefined or border_vertices.numberSet == 0 then return undefined
+
+
+        poly_select_modifier = undefined
+        next_modifier_index = vertex_weld_index + 1
+
+
+        if next_modifier_index <= object_node.modifiers.count then
+        (
+            next_modifier = object_node.modifiers[next_modifier_index]
+
+
+            if classOf next_modifier == Poly_Select and (
+                toUpper(next_modifier.name as string) == "WELD BORDERS" or
+                toUpper(next_modifier.name as string) == "WORLD BORDERS"
+            ) then
+            (
+                poly_select_modifier = next_modifier
+                try(poly_select_modifier.name = "WELD BORDERS")catch()
+            )
+        )
+
+
+        if poly_select_modifier == undefined then
+        (
+            if not validModifier object_node Poly_Select then return undefined
+
+
+            poly_select_modifier = Poly_Select name:"WELD BORDERS"
+            addModifier object_node poly_select_modifier before:next_modifier_index
+        )
+
+
+        selection_written = false
+
+
+        try
+        (
+            setVertSelection object_node poly_select_modifier border_vertices
+            update object_node
+            selection_written = (getVertSelection object_node poly_select_modifier) == border_vertices
+        )
+        catch
+        (
+            selection_written = false
+        )
+
+
+        if selection_written then poly_select_modifier else undefined
+        -- return
+    )
+
+
+    /*
+    Limits the topmost Vertex Weld modifier to all current open-border vertices.
+    WELD BORDERS Poly Select is inserted directly below Vertex Weld and left active at Vertex level.
+    */
+    function runApplyWorldBorders =
+    (
+        selected_nodes = for object_node in (selection as array) where object_node != undefined and isValidNode object_node and superclassof object_node == GeometryClass collect object_node
+
+
+        if selected_nodes.count == 0 then
+        (
+            setStatus #warning "Weld Borders: select one or more geometry objects."
+            false
+        )
+        else
+        (
+            applied_count = 0
+            total_border_vertices = 0
+            failed_names = #()
+            last_active_node = undefined
+            last_poly_select = undefined
+
+
+            undo "Wall-Fixer - Weld Borders" on
+            (
+                for object_node in selected_nodes do
+                (
+                    vertex_weld_data = getTopVertexWeldModifierData object_node
+
+
+                    if vertex_weld_data == undefined then
+                    (
+                        append failed_names object_node.name
+                    )
+                    else
+                    (
+                        vertex_weld_index = vertex_weld_data[2]
+                        border_vertices = getWorldBorderVerticesBelowModifier object_node vertex_weld_index
+
+
+                        if border_vertices.numberSet == 0 then
+                        (
+                            append failed_names object_node.name
+                        )
+                        else
+                        (
+                            poly_select_modifier = setWorldBordersPolySelect object_node vertex_weld_index border_vertices
+
+
+                            if poly_select_modifier != undefined then
+                            (
+                                applied_count += 1
+                                total_border_vertices += border_vertices.numberSet
+                                last_active_node = object_node
+                                last_poly_select = poly_select_modifier
+                            )
+                            else
+                            (
+                                append failed_names object_node.name
+                            )
+                        )
+                    )
+                )
+            )
+
+
+            if last_active_node != undefined and last_poly_select != undefined then
+            (
+                try
+                (
+                    select last_active_node
+                    max modify mode
+                    modPanel.setCurrentObject last_poly_select
+                    subObjectLevel = 1
+                )
+                catch()
+            )
+
+
+            redrawViews()
+
+
+            if applied_count == selected_nodes.count then
+            (
+                setStatus #success (
+                    "Weld Borders: selected " +
+                    (total_border_vertices as string) +
+                    " open-border vertex/vertices on " +
+                    (applied_count as string) +
+                    " object(s); Vertex sub-object left active for VertexWeld."
+                )
+                true
+            )
+            else if applied_count > 0 then
+            (
+                setStatus #warning (
+                    "Weld Borders: configured " +
+                    (applied_count as string) +
+                    " object(s); skipped " +
+                    (failed_names.count as string) +
+                    " without VertexWeld or open borders."
+                )
+                true
+            )
+            else
+            (
+                setStatus #failed "Weld Borders: no selected object had both a VertexWeld modifier and open-border vertices."
+                false
+            )
+        )
+        -- return
+    )
+
+
+    /*
+    Tests HELPERS Weld Borders on an open Editable Poly box with Vertex Weld above WELD BORDERS.
+    Verifies stack order, border-vertex selection, and active Vertex sub-object state.
+    */
+    function testHelpersWorldBorders =
+    (
+        original_selection = selection as array
+        test_node = undefined
+        stack_ok = false
+        selection_ok = false
+        active_ok = false
+
+
+        try
+        (
+            test_node = box name:(uniqueName "WF_WORLD_BORDERS_TEST")
+            convertToPoly test_node
+            polyop.deleteFaces test_node.baseObject #{1}
+            update test_node
+
+
+            expected_border_edges = polyop.getOpenEdges test_node.baseObject
+            expected_border_vertices = polyop.getVertsUsingEdge test_node.baseObject expected_border_edges
+
+
+            vertex_weld_modifier = Vertex_Weld threshold:0.001
+            addModifier test_node vertex_weld_modifier
+            select test_node
+
+
+            operation_ok = runApplyWorldBorders()
+
+
+            if operation_ok and test_node.modifiers.count >= 2 then
+            (
+                poly_select_modifier = test_node.modifiers[2]
+
+
+                stack_ok = (
+                    test_node.modifiers[1] == vertex_weld_modifier and
+                    classOf poly_select_modifier == Poly_Select and
+                    toUpper(poly_select_modifier.name as string) == "WELD BORDERS"
+                )
+
+
+                if stack_ok then
+                (
+                    try(selection_ok = (getVertSelection test_node poly_select_modifier) == expected_border_vertices)catch(selection_ok = false)
+                    try(active_ok = modPanel.getCurrentObject() == poly_select_modifier and subObjectLevel == 1)catch(active_ok = false)
+                )
+            )
+        )
+        catch
+        (
+            stack_ok = false
+            selection_ok = false
+            active_ok = false
+        )
+
+
+        if test_node != undefined and isValidNode test_node then delete test_node
+
+
+        restored_selection = for object_node in original_selection where object_node != undefined and isValidNode object_node collect object_node
+
+
+        if restored_selection.count > 0 then
+        (
+            select restored_selection
+        )
+        else
+        (
+            clearSelection()
+        )
+
+
+        test_passed = stack_ok and selection_ok and active_ok
+        format "HELPERS Weld Borders test | stack:% | selection:% | active vertex:% | result:%\n" stack_ok selection_ok active_ok test_passed
+
+
+        test_passed
         -- return
     )
 
@@ -38276,12 +41150,12 @@ result_groups
 
 
     /*
-    Deletes one exact directional Slice Walls modifier type from all selected objects.
+    Removes one directional Slice namespace from all selected objects for RESET SLICE.
     */
     function deleteSliceWallModifiers modifier_name =
     (
         setProgress 0
-        setStatus #message ("Deleting " + modifier_name + " modifiers...")
+        setStatus #message ("RESET SLICE: removing " + modifier_name + " modifiers...")
 
         local delete_result = WallFixer.deleteSelectedDirectionalSliceModifiers modifier_name
 
@@ -38509,7 +41383,8 @@ result_groups
             cleanup_edges:(not WallFixerSliceWallsRollout.no_edge_cleanup_checkbox.checked) \
             display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
             double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
-            include_t_junctions:WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.checked \
+            include_t_junctions:(if t_junction_only then false else WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.checked) \
+            t_junction_only:t_junction_only \
             progress_callback:updateSliceProgress \
             quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
 
@@ -38567,7 +41442,7 @@ result_groups
     Runs Slice Force with the same directional anchor detection as normal Slice Walls.
     One temporary modifier is used per unique plane and the object is collapsed after every plane completes.
     */
-    function runSliceForce cut_mode =
+    function runSliceForce cut_mode t_junction_only:false =
     (
         if cut_mode != #horizontal and cut_mode != #vertical then
         (
@@ -38577,7 +41452,7 @@ result_groups
 
         saveUiSettings()
         setProgress 0
-        setStatus #message ("Slice Force: " + (cut_mode as string) + "...")
+        setStatus #message (if t_junction_only then ("Slice Force: " + (toUpper (cut_mode as string)) + " T-JUNCTION VERTS ONLY...") else ("Slice Force: " + (cut_mode as string) + "..."))
 
         local completed = WallFixer.debugSliceSelectedWallsForce \
             cut_mode:cut_mode \
@@ -38589,6 +41464,7 @@ result_groups
             display_hidden_edges:WallFixerOptionsRollout.hidden_edges_checkbutton.checked \
             double_side:WallFixerOptionsRollout.double_side_checkbutton.checked \
             include_t_junctions:WallFixerSliceWallsRollout.slice_force_t_junction_checkbox.checked \
+            t_junction_only:t_junction_only \
             progress_callback:updateSliceProgress \
             quiet:WallFixerSliceWallsRollout.quiet_checkbox.checked
 
@@ -38597,13 +41473,14 @@ result_groups
         The viewport result is the last processing stage; SUCCESS/FAILED is shown only afterward.
         */
         try(completeRedraw())catch(try(redrawViews())catch())
+        try((dotNetClass "System.Windows.Forms.Application").DoEvents())catch()
 
         setProgress 100
 
         if completed then
         (
             local elapsed_seconds = (WallFixer.last_slice_elapsed_ms as float) / 1000.0
-            local completion_message = "Slice Force completed and collapsed in " + (elapsed_seconds as string) + " s."
+            local completion_message = (if t_junction_only then ("Slice Force T-junction-only " + (cut_mode as string) + " completed and collapsed in ") else "Slice Force completed and collapsed in ") + (elapsed_seconds as string) + " s."
             if WallFixer.last_slice_report != "" then completion_message += " " + WallFixer.last_slice_report
             setStatus #success completion_message
         )

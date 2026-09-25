@@ -1,14 +1,16 @@
-/*
-Straight Edge Fixer 0.48
+﻿/*
+Straight Edge Fixer 0.54
 Detects repeated horizontal edge rows and aligns nearby horizontal edges to them.
 */
 
 global WallFixerVersion
 global WallFixerRollout
+global wall_fixer_runtime_mode
+global straight_edge_fixer_auto_open_dialog
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.48"
-global straight_edge_fixer_tool_version = 1.0269
+global straight_edge_fixer_file_version = "0.54"
+global straight_edge_fixer_tool_version = 1.0649
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -741,6 +743,205 @@ struct StraightEdgeFixer_v
 
 
     /*
+    Resolves the geometry source used only by Border Check.
+    Active Edit Poly wins, then top Edit Poly, then a bare Editable Poly base; a new Edit Poly is added only above a non-EPoly top modifier.
+    */
+    function getBorderCheckAdapter node =
+    (
+        adapter = undefined
+        active_edit_poly = getActiveEditPoly node
+
+        if active_edit_poly != undefined then
+        (
+            ensureEditPolyPrimaryNode node active_edit_poly
+            active_edit_poly.useStackSelection = false
+            active_edit_poly.showCage = off
+            adapter = #(#edit_poly, active_edit_poly, false)
+        )
+        else
+        (
+            top_edit_poly = getTopEditPoly node
+
+            if top_edit_poly != undefined then
+            (
+                ensureEditPolyPrimaryNode node top_edit_poly
+                top_edit_poly.useStackSelection = false
+                top_edit_poly.showCage = off
+                adapter = #(#edit_poly, top_edit_poly, false)
+            )
+            else if ((node.modifiers.count == 0) and (classOf node.baseObject == Editable_Poly)) then
+            (
+                try(node.baseObject.showCage = off)catch()
+                adapter = #(#editable_poly, node.baseObject, false)
+            )
+            else
+            (
+                new_edit_poly = Edit_Poly()
+                new_edit_poly.showCage = off
+                addModifier node new_edit_poly
+                ensureEditPolyPrimaryNode node new_edit_poly
+                new_edit_poly.useStackSelection = false
+                adapter = #(#edit_poly, new_edit_poly, true)
+            )
+        )
+
+        adapter
+        -- return
+    ),
+
+
+    /*
+    Activates an existing Border Check EPoly source at Edge or Border sub-object level.
+    Edge uses level 2; all-borders mode uses Border level 3.
+    */
+    function activateBorderCheckAdapter node adapter subobject_level:2 =
+    (
+        activated = false
+
+        if ((node != undefined) and (adapter != undefined)) then
+        (
+            try
+            (
+                select node
+                setCommandPanelTaskMode mode:#modify
+
+                if (adapter[1] == #edit_poly) then
+                (
+                    geometry_source = adapter[2]
+                    ensureEditPolyPrimaryNode node geometry_source
+                    geometry_source.useStackSelection = false
+                    geometry_source.showCage = off
+                    modPanel.setCurrentObject geometry_source
+
+                    if subobject_level == 3 then
+                    (
+                        EditPolyMod.SetEPolySelLevel geometry_source #Border
+                    )
+                    else
+                    (
+                        EditPolyMod.SetEPolySelLevel geometry_source #Edge
+                    )
+
+                    subObjectLevel = subobject_level
+                    activated = true
+                )
+                else if (adapter[1] == #editable_poly) then
+                (
+                    node.baseObject.showCage = off
+                    modPanel.setCurrentObject node.baseObject
+                    subObjectLevel = subobject_level
+                    activated = true
+                )
+            )
+            catch
+            (
+                activated = false
+            )
+        )
+
+        activated
+        -- return
+    ),
+
+
+    /*
+    Stores one temporary Edit Poly Border Check result in a Poly Select above it.
+    The temporary Edit Poly is always removed after the Poly Select has captured the edge IDs.
+    */
+    function moveTemporaryBorderSelectionToPolySelect node adapter edge_selection =
+    (
+        poly_select_modifier = undefined
+        selection_written = false
+
+        if ((node == undefined) or (adapter == undefined)) then return undefined
+        if ((adapter[1] != #edit_poly) or (adapter[3] != true)) then return undefined
+
+        temporary_edit_poly = adapter[2]
+
+        try
+        (
+            if validModifier node Poly_Select then
+            (
+                poly_select_modifier = Poly_Select()
+                addModifier node poly_select_modifier
+                setEdgeSelection node poly_select_modifier edge_selection
+                update node
+                selection_written = ((getEdgeSelection node poly_select_modifier) == edge_selection)
+            )
+        )
+        catch
+        (
+            selection_written = false
+        )
+
+        /*
+        The temporary Edit Poly exists only to expose live poly topology above a non-EPoly modifier.
+        Remove it whether or not the Poly Select write succeeded.
+        */
+        if modifierBelongsToNode node temporary_edit_poly then
+        (
+            try(deleteModifier node temporary_edit_poly)catch()
+            update node
+        )
+
+        if selection_written then
+        (
+            try
+            (
+                selection_written = ((getEdgeSelection node poly_select_modifier) == edge_selection)
+            )
+            catch
+            (
+                selection_written = false
+            )
+        )
+
+        if not selection_written then
+        (
+            if ((poly_select_modifier != undefined) and (modifierBelongsToNode node poly_select_modifier)) then
+            (
+                try(deleteModifier node poly_select_modifier)catch()
+                update node
+            )
+
+            poly_select_modifier = undefined
+        )
+
+        poly_select_modifier
+        -- return
+    ),
+
+
+    /*
+    Activates one Poly Select Border Check result.
+    Edge mode uses sub-object level 2; all-borders mode uses Border level 3.
+    */
+    function activateBorderPolySelect node poly_select_modifier subobject_level:2 =
+    (
+        activated = false
+
+        if ((node != undefined) and (poly_select_modifier != undefined)) then
+        (
+            try
+            (
+                select node
+                setCommandPanelTaskMode mode:#modify
+                modPanel.setCurrentObject poly_select_modifier
+                subObjectLevel = subobject_level
+                activated = true
+            )
+            catch
+            (
+                activated = false
+            )
+        )
+
+        activated
+        -- return
+    ),
+
+
+    /*
     Resolves a live dedicated STRAIGHT EDGE FIXER Edit Poly for this object.
     Stale zero-topology copies are rebuilt once before any EDGE FIXER caller receives the adapter.
     */
@@ -1091,32 +1292,34 @@ struct StraightEdgeFixer_v
 
 
     /*
-    Returns true when one visible poly edge is an open border edge.
-    Border topology is read from the current Editable Poly or evaluated Edit Poly result.
+    Returns true when one edge is an open border on the chosen Border Check source.
+    Edit Poly topology is queried directly from that modifier so lower active modifiers are not replaced by the evaluated top stack.
     */
     function isBorderEdge node adapter edge_id =
     (
         result_value = false
 
-        if (isEdgeVisible node adapter edge_id) then
+        try
         (
-            try
+            if (adapter[1] == #editable_poly) then
             (
-                if (adapter[1] == #editable_poly) then
+                if (isEdgeVisible node adapter edge_id) then
                 (
                     edge_faces = polyop.getFacesUsingEdge (adapter[2]) edge_id
+                    result_value = (edge_faces.numberSet == 1)
                 )
-                else
-                (
-                    edge_faces = polyop.getFacesUsingEdge node edge_id
-                )
-
-                result_value = (edge_faces.numberSet == 1)
             )
-            catch
+            else if (adapter[1] == #edit_poly) then
             (
-                result_value = false
+                geometry_source = adapter[2]
+                face_a = EditPolyMod.GetEdgeFace geometry_source edge_id 1 node:node
+                face_b = EditPolyMod.GetEdgeFace geometry_source edge_id 2 node:node
+                result_value = (((face_a > 0) and (face_b == 0)) or ((face_b > 0) and (face_a == 0)))
             )
+        )
+        catch
+        (
+            result_value = false
         )
 
         result_value
@@ -1124,8 +1327,8 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Collects all visible open border edges.
-    Invisible triangulation edges never participate in Border Check.
+    Collects open border edges from the exact Border Check topology source.
+    Editable Poly still respects edge visibility; Edit Poly uses modifier-local open-edge topology.
     */
     function getVisibleBorderEdges node adapter =
     (
@@ -1521,8 +1724,8 @@ struct StraightEdgeFixer_v
     ),
 
     /*
-    Checks visible open borders for unwelded local-Z seams and reflex corners.
-    Results are stored in STRAIGHT EDGE FIXER while the command panel stays in Create mode.
+    Checks open borders on the current EPoly source for unwelded local-Z seams and reflex corners.
+    A temporary Edit Poly above a non-EPoly top is replaced by a persistent Poly Select carrying the Edge selection.
     */
     function checkBorders tolerance =
     (
@@ -1531,6 +1734,10 @@ struct StraightEdgeFixer_v
         total_unwelded_edges = 0
         total_reflex_edges = 0
         processed_count = 0
+        selection_failed = false
+        last_adapter = undefined
+        last_poly_select = undefined
+        last_node = undefined
 
         if (selected_nodes.count == 0) then
         (
@@ -1538,101 +1745,297 @@ struct StraightEdgeFixer_v
         )
         else
         (
-            ensureCreatePanelMode()
-
             for node in selected_nodes do
             (
                 if (isValidNode node and (superClassOf node == GeometryClass)) then
                 (
-                    processed_count += 1
-                    adapter = getGeometryAdapter node
-                    border_edges = getVisibleBorderEdges node adapter
-                    unwelded_edges = findUnweldedBorderEdges node adapter border_edges tolerance
-                    reflex_edges = findReflexBorderEdges node adapter border_edges
-                    invalid_edges = copy unwelded_edges
-                    invalid_edges += reflex_edges
+                    adapter = getBorderCheckAdapter node
 
-                    if (adapter[1] == #editable_poly) then
+                    if adapter != undefined then
                     (
-                        polyop.setEdgeSelection (adapter[2]) invalid_edges
-                    )
-                    else if (adapter[1] == #edit_poly) then
-                    (
-                        geometry_source = adapter[2]
-                        ensureEditPolyPrimaryNode node geometry_source
-                        geometry_source.useStackSelection = false
+                        processed_count += 1
+                        border_edges = getVisibleBorderEdges node adapter
+                        unwelded_edges = findUnweldedBorderEdges node adapter border_edges tolerance
+                        reflex_edges = findReflexBorderEdges node adapter border_edges
+                        invalid_edges = copy unwelded_edges
+                        invalid_edges += reflex_edges
+                        selection_written = false
 
-                        if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
+                        if adapter[3] == true then
                         (
-                            EditPolyMod.SetEPolySelLevel geometry_source #Edge
+                            poly_select_modifier = moveTemporaryBorderSelectionToPolySelect node adapter invalid_edges
+
+                            if poly_select_modifier != undefined then
+                            (
+                                selection_written = true
+                                last_poly_select = poly_select_modifier
+                                last_adapter = undefined
+                                last_node = node
+                            )
+                        )
+                        else if (adapter[1] == #editable_poly) then
+                        (
+                            try
+                            (
+                                polyop.setEdgeSelection (adapter[2]) invalid_edges
+                                selection_written = ((polyop.getEdgeSelection (adapter[2])) == invalid_edges)
+                            )
+                            catch
+                            (
+                                selection_written = false
+                            )
+
+                            if selection_written then
+                            (
+                                last_adapter = adapter
+                                last_poly_select = undefined
+                                last_node = node
+                            )
+                        )
+                        else if (adapter[1] == #edit_poly) then
+                        (
+                            geometry_source = adapter[2]
+
+                            try
+                            (
+                                ensureEditPolyPrimaryNode node geometry_source
+                                geometry_source.useStackSelection = false
+                                geometry_source.showCage = off
+                                EditPolyMod.SetEPolySelLevel geometry_source #Edge
+                                EditPolyMod.SetSelection geometry_source #Edge invalid_edges node:node
+                                selection_written = ((EditPolyMod.GetSelection geometry_source #Edge node:node) == invalid_edges)
+                            )
+                            catch
+                            (
+                                selection_written = false
+                            )
+
+                            if selection_written then
+                            (
+                                last_adapter = adapter
+                                last_poly_select = undefined
+                                last_node = node
+                            )
                         )
 
-                        EditPolyMod.SetSelection geometry_source #Edge invalid_edges node:node
-                    )
+                        if not selection_written then
+                        (
+                            selection_failed = true
+                            format "Border Check: failed to store selection on %.\n" node.name
+                        )
 
-                    total_unwelded_edges += countBits unwelded_edges
-                    total_reflex_edges += countBits reflex_edges
-                    total_invalid_edges += countBits invalid_edges
+                        total_unwelded_edges += countBits unwelded_edges
+                        total_reflex_edges += countBits reflex_edges
+                        total_invalid_edges += countBits invalid_edges
+                    )
                 )
             )
 
-            if (processed_count > 0) then
+            if ((processed_count > 0) and (last_node != undefined)) then
             (
+                if last_poly_select != undefined then
+                (
+                    activateBorderPolySelect last_node last_poly_select subobject_level:2
+                )
+                else if last_adapter != undefined then
+                (
+                    activateBorderCheckAdapter last_node last_adapter subobject_level:2
+                )
+
                 completeRedraw()
-                format "Border Check: stored % invalid border edge(s). Unwelded/overlapping: %, reflex >180 deg: %. Create panel kept active.\n" total_invalid_edges total_unwelded_edges total_reflex_edges
+                format "Border Check: selected % invalid border edge(s). Unwelded/overlapping: %, reflex >180 deg: %.\n" total_invalid_edges total_unwelded_edges total_reflex_edges
             )
         )
 
-        total_invalid_edges
+        if selection_failed then undefined else total_invalid_edges
         -- return
     ),
 
+
     /*
-    Stores every visible open-border edge in the one STRAIGHT EDGE FIXER modifier.
-    The command panel remains in Create mode; topology is unchanged.
+    Verifies Border Check source reuse plus temporary Edit Poly promotion to Poly Select.
+    Above Vertex Weld the temporary Edit Poly must disappear, leaving Poly Select above Vertex Weld.
+    */
+    function testBorderCheckAdapterPolicy =
+    (
+        test_passed = true
+        test_node = undefined
+        fallback_node = undefined
+        original_selection = selection as array
+        original_panel_mode = undefined
+        original_current_object = undefined
+        original_subobject_level = subObjectLevel
+
+        try(original_panel_mode = getCommandPanelTaskMode())catch()
+        try(original_current_object = modPanel.getCurrentObject())catch()
+
+        try
+        (
+            test_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly test_node
+
+            base_adapter = getBorderCheckAdapter test_node
+            test_passed = test_passed and (base_adapter[1] == #editable_poly)
+            test_passed = test_passed and (test_node.modifiers.count == 0)
+
+            edit_poly = Edit_Poly()
+            addModifier test_node edit_poly
+            top_adapter = getBorderCheckAdapter test_node
+            test_passed = test_passed and (top_adapter[1] == #edit_poly)
+            test_passed = test_passed and (top_adapter[2] == edit_poly)
+            test_passed = test_passed and (top_adapter[3] == false)
+            test_passed = test_passed and (test_node.modifiers.count == 1)
+
+            fallback_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly fallback_node
+            vertex_weld = Vertex_Weld()
+            addModifier fallback_node vertex_weld
+
+            fallback_adapter = getBorderCheckAdapter fallback_node
+            test_passed = test_passed and (fallback_adapter[1] == #edit_poly)
+            test_passed = test_passed and (fallback_adapter[3] == true)
+            test_passed = test_passed and (classOf fallback_node.modifiers[1] == Edit_Poly)
+            test_passed = test_passed and (classOf fallback_node.modifiers[2] == Vertex_Weld)
+
+            border_edges = getVisibleBorderEdges fallback_node fallback_adapter
+            poly_select_modifier = moveTemporaryBorderSelectionToPolySelect fallback_node fallback_adapter border_edges
+
+            test_passed = test_passed and (poly_select_modifier != undefined)
+            test_passed = test_passed and (fallback_node.modifiers.count == 2)
+            test_passed = test_passed and (classOf fallback_node.modifiers[1] == Poly_Select)
+            test_passed = test_passed and (fallback_node.modifiers[1] == poly_select_modifier)
+            test_passed = test_passed and (classOf fallback_node.modifiers[2] == Vertex_Weld)
+            test_passed = test_passed and ((getEdgeSelection fallback_node poly_select_modifier) == border_edges)
+            test_passed = test_passed and (not (modifierBelongsToNode fallback_node fallback_adapter[2]))
+
+            activateBorderPolySelect fallback_node poly_select_modifier subobject_level:3
+            test_passed = test_passed and (modPanel.getCurrentObject() == poly_select_modifier)
+            test_passed = test_passed and (subObjectLevel == 3)
+        )
+        catch
+        (
+            test_passed = false
+        )
+
+        if ((test_node != undefined) and (isValidNode test_node)) then
+        (
+            delete test_node
+        )
+
+        if ((fallback_node != undefined) and (isValidNode fallback_node)) then
+        (
+            delete fallback_node
+        )
+
+        if original_selection.count > 0 then
+        (
+            select original_selection
+        )
+        else
+        (
+            clearSelection()
+        )
+
+        try
+        (
+            if original_panel_mode != undefined then
+            (
+                setCommandPanelTaskMode mode:original_panel_mode
+            )
+
+            if ((original_panel_mode == #modify) and (original_current_object != undefined)) then
+            (
+                modPanel.setCurrentObject original_current_object
+                subObjectLevel = original_subobject_level
+            )
+        )
+        catch
+        (
+        )
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Selects every open border on the current Border Check source.
+    Temporary Edit Poly fallback is converted into Poly Select and removed; final display is Border level 3.
     */
     function selectAllBorders =
     (
-        selected_nodes = selection as array
-        processed_count = 0
-        total_border_edges = 0
+        selected_nodes = for node in (selection as array) where isValidNode node and superClassOf node == GeometryClass collect node
 
         if selected_nodes.count == 0 then return undefined
 
-        ensureCreatePanelMode()
+        node = selected_nodes[1]
+        adapter = getBorderCheckAdapter node
 
-        for node in selected_nodes do
+        if adapter == undefined then return undefined
+
+        border_edges = getVisibleBorderEdges node adapter
+        selection_written = false
+
+        if adapter[3] == true then
         (
-            if isValidNode node and superClassOf node == GeometryClass then
+            poly_select_modifier = moveTemporaryBorderSelectionToPolySelect node adapter border_edges
+
+            if poly_select_modifier != undefined then
             (
-                adapter = getGeometryAdapter node
-                border_edges = getVisibleBorderEdges node adapter
+                selection_written = activateBorderPolySelect node poly_select_modifier subobject_level:3
+            )
+        )
+        else if adapter[1] == #editable_poly then
+        (
+            try
+            (
+                polyop.setEdgeSelection (adapter[2]) border_edges
+                selection_written = ((polyop.getEdgeSelection (adapter[2])) == border_edges)
 
-                if adapter != undefined and adapter.count >= 2 and adapter[1] == #edit_poly and adapter[2] != undefined then
+                if selection_written then
                 (
-                    geometry_source = adapter[2]
-                    ensureEditPolyPrimaryNode node geometry_source
-                    geometry_source.useStackSelection = false
-
-                    if ((EditPolyMod.GetEPolySelLevel geometry_source) != #Edge) then
-                    (
-                        EditPolyMod.SetEPolySelLevel geometry_source #Edge
-                    )
-
-                    EditPolyMod.SetSelection geometry_source #Edge border_edges node:node
-                    processed_count += 1
-                    total_border_edges += border_edges.numberSet
+                    selection_written = activateBorderCheckAdapter node adapter subobject_level:3
                 )
+            )
+            catch
+            (
+                selection_written = false
+            )
+        )
+        else if adapter[1] == #edit_poly then
+        (
+            geometry_source = adapter[2]
+
+            try
+            (
+                ensureEditPolyPrimaryNode node geometry_source
+                geometry_source.useStackSelection = false
+                geometry_source.showCage = off
+                EditPolyMod.SetEPolySelLevel geometry_source #Border
+                EditPolyMod.SetSelection geometry_source #Edge border_edges node:node
+                selection_written = ((EditPolyMod.GetSelection geometry_source #Edge node:node) == border_edges)
+
+                if selection_written then
+                (
+                    selection_written = activateBorderCheckAdapter node adapter subobject_level:3
+                )
+            )
+            catch
+            (
+                selection_written = false
             )
         )
 
-        if processed_count == 0 then return undefined
-
-        ensureCreatePanelMode()
-        completeRedraw()
-        format "Border Select All: stored % open-border edge(s) on % object(s); Create panel kept active.\n" total_border_edges processed_count
-
-        total_border_edges
+        if selection_written then
+        (
+            completeRedraw()
+            format "Border Select All: selected % open-border edge(s) on %.\n" border_edges.numberSet node.name
+            border_edges.numberSet
+        )
+        else
+        (
+            undefined
+        )
         -- return
     ),
 
@@ -2930,8 +3333,27 @@ struct StraightEdgeFixer_v
     ),
 
     /*
+    Returns true when two world-Z centers belong to the same horizontal row.
+    Rows distance is the maximum allowed world-space Z separation.
+    */
+    function isWithinRowDistance target_z reference_z rows_distance =
+    (
+        result_value = false
+
+        if (rows_distance > 0.0) then
+        (
+            result_value = (abs(target_z - reference_z) <= rows_distance)
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
     Finds the nearest visible straight reference whose direction is within Angle.
-    No Z-position cutoff is used; horizontal and vertical fallback use the same angle rule.
+    Horizontal fallback also requires the reference center to be inside Rows distance in world Z.
+    Vertical fallback keeps the existing angle-only behavior.
     */
     function findAngleReference node adapter target_edge check_type tolerance angle_threshold =
     (
@@ -2948,8 +3370,14 @@ struct StraightEdgeFixer_v
                 (
                     reference_center = getEdgeCenterWorld node adapter reference_edge
                     parallel_angle = getParallelAngle node adapter target_edge reference_edge
+                    row_distance_ok = true
 
-                    if ((reference_center != undefined) and (parallel_angle <= angle_threshold)) then
+                    if ((check_type == #horizontal) and (reference_center != undefined)) then
+                    (
+                        row_distance_ok = isWithinRowDistance target_center.z reference_center.z tolerance
+                    )
+
+                    if ((reference_center != undefined) and (parallel_angle <= angle_threshold) and row_distance_ok) then
                     (
                         spatial_distance = distance target_center reference_center
 
@@ -3295,10 +3723,906 @@ struct StraightEdgeFixer_v
 
 
     /*
-    Fixes every currently selected edge for the requested direction.
-    In Vertex sub-object mode, Vertical moves selected vertices to the unselected endpoint XY.
+    Returns true when one visible edge belongs to the requested directional loop family.
+    Exact target edges and skewed/sloped edges inside Angle are both included for cluster discovery.
     */
-    function fixSelectedDirectionEdges check_type tolerance:0.01 angle_threshold:45.0 =
+    function isDirectionLoopEdge node adapter edge_id check_type angle_threshold =
+    (
+        result_value = false
+        deviations = getEdgeAxisDeviation node adapter edge_id
+
+        if ((deviations != undefined) and (isEdgeVisible node adapter edge_id)) then
+        (
+            if check_type == #vertical then
+            (
+                result_value = (deviations[2] <= angle_threshold)
+            )
+            else if check_type == #horizontal then
+            (
+                result_value = (deviations[1] <= angle_threshold)
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Collects every visible edge in the requested direction family before any geometry is moved.
+    This frozen edge set lets selected skewed/sloped edges discover exact reference segments on the same loop.
+    */
+    function getDirectionLoopEdges node adapter check_type angle_threshold =
+    (
+        loop_edges = #{}
+        edge_count = getEdgeCount node adapter
+
+        for edge_id = 1 to edge_count do
+        (
+            if isDirectionLoopEdge node adapter edge_id check_type angle_threshold then
+            (
+                loop_edges[edge_id] = true
+            )
+        )
+
+        loop_edges
+        -- return
+    ),
+
+
+    /*
+    Returns loop-family edges incident to one vertex.
+    Only edges from the frozen loop-family set are returned.
+    */
+    function getLoopEdgesAtVertex node adapter loop_edges vertex_id =
+    (
+        result_edges = #{}
+        incident_edges = getVertexIncidentEdges node adapter vertex_id
+
+        for edge_id in incident_edges do
+        (
+            if loop_edges[edge_id] then
+            (
+                result_edges[edge_id] = true
+            )
+        )
+
+        result_edges
+        -- return
+    ),
+
+
+    /*
+    Builds one logical direction-loop chain from a seed edge.
+    Traversal continues through degree-two vertices and stops at borders/endpoints or direction-family junctions.
+    */
+    function buildDirectionLoopCluster node adapter seed_edge loop_edges =
+    (
+        cluster_edges = #{}
+
+        if not loop_edges[seed_edge] then return cluster_edges
+
+        pending_edges = #(seed_edge)
+
+        while pending_edges.count > 0 do
+        (
+            edge_id = pending_edges[1]
+            deleteItem pending_edges 1
+
+            if not cluster_edges[edge_id] then
+            (
+                cluster_edges[edge_id] = true
+                edge_verts = getEdgeVertIds node adapter edge_id
+
+                if edge_verts.count == 2 then
+                (
+                    for vertex_id in edge_verts do
+                    (
+                        vertex_loop_edges = getLoopEdgesAtVertex node adapter loop_edges vertex_id
+
+                        /*
+                        A T-junction is an effective border when three or more
+                        direction-family branches meet. A two-edge continuation
+                        passes through real borders and wall corners.
+                        */
+                        if vertex_loop_edges.numberSet <= 2 then
+                        (
+                            for next_edge in vertex_loop_edges do
+                            (
+                                if (not cluster_edges[next_edge]) and ((findItem pending_edges next_edge) == 0) then
+                                (
+                                    append pending_edges next_edge
+                                )
+                            )
+                        )
+                    )
+                )
+            )
+        )
+
+        cluster_edges
+        -- return
+    ),
+
+
+    /*
+    Returns all unique vertices used by one edge set.
+    The result is a BitArray so cluster membership stays stable during later movement.
+    */
+    function getEdgeSetVertices node adapter edge_set =
+    (
+        vertex_set = #{}
+
+        for edge_id in edge_set do
+        (
+            edge_verts = getEdgeVertIds node adapter edge_id
+
+            if edge_verts.count == 2 then
+            (
+                vertex_set[edge_verts[1]] = true
+                vertex_set[edge_verts[2]] = true
+            )
+        )
+
+        vertex_set
+        -- return
+    ),
+
+
+    /*
+    Intersects one full logical loop with the user's original selected-edge set.
+    Only these selected edges are allowed to change geometry.
+    */
+    function getSelectedClusterEdges cluster_edges selected_edges =
+    (
+        selected_cluster_edges = #{}
+
+        for edge_id in cluster_edges do
+        (
+            if selected_edges[edge_id] then
+            (
+                selected_cluster_edges[edge_id] = true
+            )
+        )
+
+        selected_cluster_edges
+        -- return
+    ),
+
+
+    /*
+    Finds endpoint vertices of one logical loop chain.
+    Degree-one vertices include normal borders and junctions where traversal intentionally stopped.
+    */
+    function getLoopEndpointVertices node adapter cluster_edges =
+    (
+        endpoint_vertices = #{}
+        cluster_vertices = getEdgeSetVertices node adapter cluster_edges
+
+        for vertex_id in cluster_vertices do
+        (
+            incident_count = 0
+            incident_edges = getVertexIncidentEdges node adapter vertex_id
+
+            for edge_id in incident_edges do
+            (
+                if cluster_edges[edge_id] then
+                (
+                    incident_count += 1
+                )
+            )
+
+            if incident_count == 1 then
+            (
+                endpoint_vertices[vertex_id] = true
+            )
+        )
+
+        endpoint_vertices
+        -- return
+    ),
+
+
+    /*
+    Finds wall-corner vertices on a closed direction loop.
+    A corner is a degree-two loop vertex whose two loop edges do not continue on one straight line.
+    */
+    function getLoopCornerVertices node adapter cluster_edges corner_angle:1.0 =
+    (
+        corner_vertices = #{}
+        cluster_vertices = getEdgeSetVertices node adapter cluster_edges
+
+        for vertex_id in cluster_vertices do
+        (
+            incident_cluster_edges = #()
+            incident_edges = getVertexIncidentEdges node adapter vertex_id
+
+            for edge_id in incident_edges do
+            (
+                if cluster_edges[edge_id] then
+                (
+                    append incident_cluster_edges edge_id
+                )
+            )
+
+            if incident_cluster_edges.count == 2 then
+            (
+                parallel_angle = getParallelAngle node adapter incident_cluster_edges[1] incident_cluster_edges[2]
+
+                if parallel_angle > corner_angle then
+                (
+                    corner_vertices[vertex_id] = true
+                )
+            )
+        )
+
+        corner_vertices
+        -- return
+    ),
+
+
+    /*
+    Returns the lowest world-Z vertex from a BitArray.
+    Vertex ID breaks equal-Z ties so anchor choice stays deterministic.
+    */
+    function getLowestClusterVertex node adapter vertex_set =
+    (
+        best_vertex = 0
+        best_position = undefined
+
+        for vertex_id in vertex_set do
+        (
+            vertex_position = getVertexWorldPosition node adapter vertex_id
+
+            if vertex_position != undefined then
+            (
+                if ((best_position == undefined) or
+                    (vertex_position.z < best_position.z) or
+                    ((abs(vertex_position.z - best_position.z) <= 0.000001) and (vertex_id < best_vertex))) then
+                (
+                    best_vertex = vertex_id
+                    best_position = vertex_position
+                )
+            )
+        )
+
+        #(best_vertex, best_position)
+        -- return
+    ),
+
+
+    /*
+    Returns the highest world-Z vertex from a BitArray.
+    Vertex ID breaks equal-Z ties so the opposite endpoint is deterministic.
+    */
+    function getHighestClusterVertex node adapter vertex_set =
+    (
+        best_vertex = 0
+        best_position = undefined
+
+        for vertex_id in vertex_set do
+        (
+            vertex_position = getVertexWorldPosition node adapter vertex_id
+
+            if vertex_position != undefined then
+            (
+                if ((best_position == undefined) or
+                    (vertex_position.z > best_position.z) or
+                    ((abs(vertex_position.z - best_position.z) <= 0.000001) and (vertex_id > best_vertex))) then
+                (
+                    best_vertex = vertex_id
+                    best_position = vertex_position
+                )
+            )
+        )
+
+        #(best_vertex, best_position)
+        -- return
+    ),
+
+
+    /*
+    Returns the lowest preserved manually selected vertex belonging to one logical loop.
+    Multiple selected vertices on the same loop therefore resolve to the bottom selected vertex.
+    */
+    function getManualLoopAnchor node adapter cluster_vertices preserved_vertex_selection =
+    (
+        manual_vertices = #{}
+
+        for vertex_id in cluster_vertices do
+        (
+            if preserved_vertex_selection[vertex_id] then
+            (
+                manual_vertices[vertex_id] = true
+            )
+        )
+
+        getLowestClusterVertex node adapter manual_vertices
+        -- return
+    ),
+
+
+    /*
+    Returns true when one edge is truly horizontal or vertical at zero angular tolerance.
+    Exact segments are automatic alignment references and never need to be selected.
+    */
+    function isExactDirectionEdge node adapter edge_id check_type exact_epsilon:0.000001 =
+    (
+        result_value = false
+        deviations = getEdgeAxisDeviation node adapter edge_id
+
+        if deviations != undefined then
+        (
+            if check_type == #vertical then
+            (
+                result_value = (deviations[2] <= exact_epsilon)
+            )
+            else if check_type == #horizontal then
+            (
+                result_value = (deviations[1] <= exact_epsilon)
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Returns true when one effective loop endpoint touches a truly aligned loop edge.
+    Real borders, virtual corner endpoints and junction endpoints use the same test.
+    */
+    function endpointHasExactDirectionEdge node adapter cluster_edges vertex_id check_type exact_epsilon:0.000001 =
+    (
+        result_value = false
+        incident_edges = getVertexIncidentEdges node adapter vertex_id
+
+        for edge_id in incident_edges while (not result_value) do
+        (
+            if cluster_edges[edge_id] then
+            (
+                result_value = isExactDirectionEdge node adapter edge_id check_type exact_epsilon:exact_epsilon
+            )
+        )
+
+        result_value
+        -- return
+    ),
+
+
+    /*
+    Compares two candidate loop-origin positions on the controlled alignment coordinate.
+    Vertical compares XY; Horizontal compares Z.
+    */
+    function loopTargetPositionsMatch point_a point_b check_type match_tolerance:0.0001 =
+    (
+        if point_a == undefined or point_b == undefined then return false
+
+        if check_type == #vertical then
+        (
+            ((abs(point_a.x - point_b.x)) <= match_tolerance) and
+            ((abs(point_a.y - point_b.y)) <= match_tolerance)
+        )
+        else if check_type == #horizontal then
+        (
+            (abs(point_a.z - point_b.z)) <= match_tolerance
+        )
+        else
+        (
+            false
+        )
+        -- return
+    ),
+
+
+    /*
+    Returns the controlled coordinate represented by one truly aligned edge.
+    The Point3 stores XY for Vertical and Z for Horizontal so one target type serves both modes.
+    */
+    function getExactDirectionEdgeTarget node adapter edge_id check_type exact_epsilon:0.000001 =
+    (
+        target_position = undefined
+
+        if isExactDirectionEdge node adapter edge_id check_type exact_epsilon:exact_epsilon then
+        (
+            edge_verts = getEdgeVertIds node adapter edge_id
+
+            if edge_verts.count == 2 then
+            (
+                point_a = getVertexWorldPosition node adapter edge_verts[1]
+                point_b = getVertexWorldPosition node adapter edge_verts[2]
+
+                if point_a != undefined and point_b != undefined then
+                (
+                    if check_type == #vertical then
+                    (
+                        target_position = [
+                            (point_a.x + point_b.x) * 0.5,
+                            (point_a.y + point_b.y) * 0.5,
+                            amin point_a.z point_b.z
+                        ]
+                    )
+                    else if check_type == #horizontal then
+                    (
+                        target_position = [
+                            0.0,
+                            0.0,
+                            (point_a.z + point_b.z) * 0.5
+                        ]
+                    )
+                )
+            )
+        )
+
+        target_position
+        -- return
+    ),
+
+
+    /*
+    Finds the most-used truly aligned coordinate anywhere on one logical loop.
+    Equal-count ties use the lower world-Z occurrence and then the smaller edge ID.
+    */
+    function getDominantExactLoopTarget node adapter cluster_edges check_type exact_epsilon:0.000001 match_tolerance:0.0001 =
+    (
+        groups = #()
+
+        for edge_id in cluster_edges do
+        (
+            edge_target = getExactDirectionEdgeTarget node adapter edge_id check_type exact_epsilon:exact_epsilon
+
+            if edge_target != undefined then
+            (
+                group_index = 0
+
+                for candidate_index = 1 to groups.count while group_index == 0 do
+                (
+                    if loopTargetPositionsMatch groups[candidate_index][1] edge_target check_type match_tolerance:match_tolerance then
+                    (
+                        group_index = candidate_index
+                    )
+                )
+
+                if group_index == 0 then
+                (
+                    append groups #(edge_target, 1, edge_target.z, edge_id)
+                )
+                else
+                (
+                    group_record = groups[group_index]
+                    group_record[2] = group_record[2] + 1
+                    group_record[3] = amin group_record[3] edge_target.z
+                    group_record[4] = amin group_record[4] edge_id
+                    groups[group_index] = group_record
+                )
+            )
+        )
+
+        best_target = undefined
+        best_count = 0
+        best_z = 1.0e30
+        best_edge = 2147483647
+
+        for group_record in groups do
+        (
+            if ((group_record[2] > best_count) or
+                ((group_record[2] == best_count) and (group_record[3] < best_z)) or
+                ((group_record[2] == best_count) and (abs(group_record[3] - best_z) <= 0.000001) and (group_record[4] < best_edge))) then
+            (
+                best_target = group_record[1]
+                best_count = group_record[2]
+                best_z = group_record[3]
+                best_edge = group_record[4]
+            )
+        )
+
+        #(best_target, best_count)
+        -- return
+    ),
+
+
+    /*
+    Chooses one hard alignment origin for a logical loop using the redesigned priority rules.
+    Priority is manual vertex, bottom clean end, top clean end, matching ends, dominant exact segments, then bottom vertex.
+    */
+    function getDirectionLoopTarget node adapter cluster_edges preserved_vertex_selection check_type exact_epsilon:0.000001 match_tolerance:0.0001 =
+    (
+        cluster_vertices = getEdgeSetVertices node adapter cluster_edges
+        manual_anchor = getManualLoopAnchor node adapter cluster_vertices preserved_vertex_selection
+
+        if manual_anchor[1] > 0 and manual_anchor[2] != undefined then
+        (
+            return #(manual_anchor[2], #manualVertex, manual_anchor[1])
+        )
+
+        effective_endpoints = getLoopEndpointVertices node adapter cluster_edges
+
+        /*
+        A closed loop has no true border endpoint.
+        Wall corners become virtual borders without splitting the logical loop.
+        */
+        if effective_endpoints.numberSet == 0 then
+        (
+            effective_endpoints = getLoopCornerVertices node adapter cluster_edges
+        )
+
+        if effective_endpoints.numberSet == 0 then
+        (
+            effective_endpoints = copy cluster_vertices
+        )
+
+        bottom_end = getLowestClusterVertex node adapter effective_endpoints
+        top_end = getHighestClusterVertex node adapter effective_endpoints
+
+        if bottom_end[1] > 0 and endpointHasExactDirectionEdge node adapter cluster_edges bottom_end[1] check_type exact_epsilon:exact_epsilon then
+        (
+            return #(bottom_end[2], #bottomExactEnd, bottom_end[1])
+        )
+
+        if top_end[1] > 0 and top_end[1] != bottom_end[1] and
+            endpointHasExactDirectionEdge node adapter cluster_edges top_end[1] check_type exact_epsilon:exact_epsilon then
+        (
+            return #(top_end[2], #topExactEnd, top_end[1])
+        )
+
+        if bottom_end[2] != undefined and top_end[2] != undefined and
+            loopTargetPositionsMatch bottom_end[2] top_end[2] check_type match_tolerance:match_tolerance then
+        (
+            return #(bottom_end[2], #matchingEnds, bottom_end[1])
+        )
+
+        dominant_target = getDominantExactLoopTarget node adapter cluster_edges check_type exact_epsilon:exact_epsilon match_tolerance:match_tolerance
+
+        if dominant_target[1] != undefined then
+        (
+            return #(dominant_target[1], #dominantExact, 0)
+        )
+
+        bottom_vertex = getLowestClusterVertex node adapter cluster_vertices
+
+        if bottom_vertex[1] > 0 and bottom_vertex[2] != undefined then
+        (
+            return #(bottom_vertex[2], #bottomFallback, bottom_vertex[1])
+        )
+
+        undefined
+        -- return
+    ),
+
+
+    /*
+    Builds independent logical loop clusters from the user's selected edges.
+    Junctions split direction-family branches; corners and ordinary borders remain part of the same continuous loop.
+    */
+    function buildSelectedDirectionLoopClusters node adapter selected_edges check_type angle_threshold =
+    (
+        clusters = #()
+        assigned_selected_edges = #{}
+        loop_edges = getDirectionLoopEdges node adapter check_type angle_threshold
+
+        for seed_edge in selected_edges do
+        (
+            if (not assigned_selected_edges[seed_edge]) and loop_edges[seed_edge] then
+            (
+                cluster_edges = buildDirectionLoopCluster node adapter seed_edge loop_edges
+                selected_cluster_edges = getSelectedClusterEdges cluster_edges selected_edges
+
+                if selected_cluster_edges.numberSet > 0 then
+                (
+                    for edge_id in selected_cluster_edges do
+                    (
+                        assigned_selected_edges[edge_id] = true
+                    )
+
+                    append clusters #(cluster_edges, selected_cluster_edges)
+                )
+            )
+        )
+
+        #(clusters, assigned_selected_edges, loop_edges)
+        -- return
+    ),
+
+
+    /*
+    Realigns selected vertices from one logical loop to one frozen target line or plane.
+    Vertical changes XY only; Horizontal changes Z only; all selected-edge targets are computed before any move.
+    */
+    function alignSelectedDirectionLoopCluster node adapter cluster_edges selected_cluster_edges preserved_vertex_selection check_type exact_epsilon:0.000001 =
+    (
+        failed_vertices = #{}
+        fixed_edges = 0
+        cluster_target = getDirectionLoopTarget node adapter cluster_edges preserved_vertex_selection check_type exact_epsilon:exact_epsilon
+
+        if cluster_target == undefined then
+        (
+            failed_vertices = getEdgeSetVertices node adapter selected_cluster_edges
+            return #(fixed_edges, failed_vertices, #noTarget)
+        )
+
+        target_position = cluster_target[1]
+        target_source = cluster_target[2]
+        move_vertices = getEdgeSetVertices node adapter selected_cluster_edges
+        move_records = #()
+
+        /*
+        Freeze every requested target before changing the first vertex.
+        This prevents earlier moves from influencing later decisions in the same loop.
+        */
+        for vertex_id in move_vertices do
+        (
+            original_position = getVertexWorldPosition node adapter vertex_id
+
+            if original_position != undefined then
+            (
+                if check_type == #vertical then
+                (
+                    final_position = [target_position.x, target_position.y, original_position.z]
+                )
+                else
+                (
+                    final_position = [original_position.x, original_position.y, target_position.z]
+                )
+
+                append move_records #(vertex_id, final_position)
+            )
+            else
+            (
+                failed_vertices[vertex_id] = true
+            )
+        )
+
+        if failed_vertices.numberSet == 0 then
+        (
+            for move_record in move_records do
+            (
+                if not (setVertexWorldPosition node adapter move_record[1] move_record[2]) then
+                (
+                    failed_vertices[move_record[1]] = true
+                )
+            )
+        )
+
+        if failed_vertices.numberSet == 0 then
+        (
+            for edge_id in selected_cluster_edges do
+            (
+                deviations = getEdgeAxisDeviation node adapter edge_id
+                edge_valid = false
+
+                if deviations != undefined then
+                (
+                    if check_type == #vertical then
+                    (
+                        edge_valid = (deviations[2] <= exact_epsilon)
+                    )
+                    else if check_type == #horizontal then
+                    (
+                        edge_valid = (deviations[1] <= exact_epsilon)
+                    )
+                )
+
+                if edge_valid then
+                (
+                    fixed_edges += 1
+                )
+                else
+                (
+                    edge_verts = getEdgeVertIds node adapter edge_id
+
+                    if edge_verts.count == 2 then
+                    (
+                        failed_vertices[edge_verts[1]] = true
+                        failed_vertices[edge_verts[2]] = true
+                    )
+                )
+            )
+        )
+
+        #(fixed_edges, failed_vertices, target_source)
+        -- return
+    ),
+
+
+    /*
+    Tests anchor priority and logical-loop clustering on simple Editable Poly boxes.
+    It verifies lowest manual anchor priority plus closed horizontal traversal around wall corners.
+    */
+    function testDirectionLoopClusterRealignment =
+    (
+        test_passed = true
+        vertical_node = undefined
+        horizontal_node = undefined
+
+        try
+        (
+            vertical_node = box length:10.0 width:10.0 height:30.0 heightsegs:3
+            convertToPoly vertical_node
+            vertical_adapter = #(#editable_poly, vertical_node.baseObject, false)
+            vertical_loop_edges = getDirectionLoopEdges vertical_node vertical_adapter #vertical 10.0
+            vertical_seed = 0
+
+            for edge_id in vertical_loop_edges do
+            (
+                if vertical_seed == 0 then
+                (
+                    vertical_seed = edge_id
+                )
+            )
+
+            vertical_cluster = buildDirectionLoopCluster vertical_node vertical_adapter vertical_seed vertical_loop_edges
+            vertical_vertices = getEdgeSetVertices vertical_node vertical_adapter vertical_cluster
+            low_vertex = getLowestClusterVertex vertical_node vertical_adapter vertical_vertices
+            high_vertex = getHighestClusterVertex vertical_node vertical_adapter vertical_vertices
+            manual_selection = #{}
+
+            if low_vertex[1] > 0 and high_vertex[1] > 0 then
+            (
+                manual_selection[low_vertex[1]] = true
+                manual_selection[high_vertex[1]] = true
+                manual_anchor = getManualLoopAnchor vertical_node vertical_adapter vertical_vertices manual_selection
+                test_passed = test_passed and (manual_anchor[1] == low_vertex[1])
+            )
+            else
+            (
+                test_passed = false
+            )
+
+            horizontal_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly horizontal_node
+            horizontal_adapter = #(#editable_poly, horizontal_node.baseObject, false)
+            horizontal_loop_edges = getDirectionLoopEdges horizontal_node horizontal_adapter #horizontal 5.0
+            horizontal_seed = 0
+
+            for edge_id in horizontal_loop_edges do
+            (
+                if horizontal_seed == 0 then
+                (
+                    horizontal_seed = edge_id
+                )
+            )
+
+            horizontal_cluster = buildDirectionLoopCluster horizontal_node horizontal_adapter horizontal_seed horizontal_loop_edges
+            horizontal_endpoints = getLoopEndpointVertices horizontal_node horizontal_adapter horizontal_cluster
+            horizontal_corners = getLoopCornerVertices horizontal_node horizontal_adapter horizontal_cluster
+
+            test_passed = test_passed and (horizontal_cluster.numberSet >= 4)
+            test_passed = test_passed and (horizontal_endpoints.numberSet == 0)
+            test_passed = test_passed and (horizontal_corners.numberSet >= 4)
+        )
+        catch
+        (
+            test_passed = false
+        )
+
+        if ((vertical_node != undefined) and (isValidNode vertical_node)) then delete vertical_node
+        if ((horizontal_node != undefined) and (isValidNode horizontal_node)) then delete horizontal_node
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Realigns only currently selected edges after grouping them into logical vertical/horizontal loop clusters.
+    Hidden vertex selection is preserved as manual hard anchors; the lowest selected vertex wins on each loop.
+    */
+    function fixSelectedDirectionEdges check_type tolerance:0.01 angle_threshold:undefined =
+    (
+        selected_nodes = selection as array
+        object_results = #()
+        total_fixed_edges = 0
+        has_failed_edges = false
+        failure_report = ""
+        settings_data = loadSettings()
+        resolved_angle_threshold = if angle_threshold == undefined then settings_data[3] else angle_threshold
+        exact_epsilon = 0.000001
+
+        if selected_nodes.count == 0 then
+        (
+            messageBox "Select at least one geometry object." title:"Straight Edge Fixer"
+        )
+        else
+        (
+            undo "Fix Selected Direction Loops" on
+            (
+                for node in selected_nodes do
+                (
+                    if isValidNode node and (superClassOf node == GeometryClass) then
+                    (
+                        adapter = getGeometryAdapter node
+                        original_edge_selection = getEdgeSelection node adapter
+                        original_vertex_selection = getVertexSelection node adapter
+                        failed_vertices = #{}
+                        cluster_result = buildSelectedDirectionLoopClusters \
+                            node adapter original_edge_selection check_type resolved_angle_threshold
+                        clusters = cluster_result[1]
+                        assigned_selected_edges = cluster_result[2]
+
+                        /*
+                        Selected edges outside the requested Angle family cannot belong to a valid loop cluster.
+                        Keep them selected and report their vertices as failed without moving them.
+                        */
+                        for edge_id in original_edge_selection do
+                        (
+                            if not assigned_selected_edges[edge_id] then
+                            (
+                                edge_verts = getEdgeVertIds node adapter edge_id
+
+                                if edge_verts.count == 2 then
+                                (
+                                    failed_vertices[edge_verts[1]] = true
+                                    failed_vertices[edge_verts[2]] = true
+                                )
+                            )
+                        )
+
+                        for cluster_record in clusters do
+                        (
+                            cluster_edges = cluster_record[1]
+                            selected_cluster_edges = cluster_record[2]
+                            alignment_result = alignSelectedDirectionLoopCluster \
+                                node \
+                                adapter \
+                                cluster_edges \
+                                selected_cluster_edges \
+                                original_vertex_selection \
+                                check_type \
+                                exact_epsilon:exact_epsilon
+
+                            total_fixed_edges += alignment_result[1]
+
+                            for failed_vertex in alignment_result[2] do
+                            (
+                                failed_vertices[failed_vertex] = true
+                            )
+
+                            if not batch_quiet then
+                            (
+                                format "Straight Edge Fixer loop: node:% mode:% selectedEdges:% loopEdges:% target:%\n" \
+                                    node.name \
+                                    check_type \
+                                    selected_cluster_edges.numberSet \
+                                    cluster_edges.numberSet \
+                                    alignment_result[3]
+                            )
+                        )
+
+                        /*
+                        setVertexWorldPosition temporarily changes Edit Poly Vertex selection.
+                        Restore the user's preserved manual anchor selection before restoring Edge mode.
+                        */
+                        setVertexSelection node adapter original_vertex_selection
+                        set_selection_result = setCheckerEdgeSelection node adapter original_edge_selection
+
+                        if failed_vertices.numberSet > 0 then
+                        (
+                            has_failed_edges = true
+                            failure_report += node.name + ": " + (bitIdsToString failed_vertices) + "\n"
+                        )
+
+                        append object_results #(node, adapter, original_edge_selection, original_vertex_selection, failed_vertices, set_selection_result)
+                    )
+                )
+            )
+
+            completeRedraw()
+
+            if has_failed_edges then
+            (
+                messageBox ("Unable to realign selected loop edges with vertices:\n\n" + failure_report) title:"Straight Edge Fixer"
+            )
+            else
+            (
+                format "Straight Edge Fixer: realigned % selected % edge(s) by logical loop cluster.\n" total_fixed_edges check_type
+            )
+        )
+
+        #(total_fixed_edges, has_failed_edges)
+        -- return
+    ),
+
+
     (
         selected_nodes = selection as array
         object_results = #()
@@ -3960,6 +5284,50 @@ struct StraightEdgeFixer_v
     ),
 
     /*
+    Returns whether the standalone Straight Edge Fixer dialog should open for this load context.
+    Bundled Wall-Fixer loads stay headless, while directly running Straight-Edge-Fixer.ms still opens the dialog.
+    */
+    function shouldAutoOpenDialog runtime_mode source_file_name =
+    (
+        normalized_source_name = ""
+
+        if source_file_name != undefined then
+        (
+            try
+            (
+                normalized_source_name = toLower (filenameFromPath source_file_name)
+            )
+            catch
+            (
+                normalized_source_name = ""
+            )
+        )
+
+        (runtime_mode != #bundled) or (normalized_source_name == "straight-edge-fixer.ms")
+        -- return
+    ),
+
+
+    /*
+    Verifies bundled Wall-Fixer loading stays headless while direct standalone loading still opens the dialog.
+    Covers the case where Wall-Fixer was already loaded before the standalone file is run.
+    */
+    function testAutoOpenDialogPolicy =
+    (
+        bundled_ok = not (shouldAutoOpenDialog #bundled "C:\\Tools\\Wall-Fixer.ms")
+        standalone_ok = shouldAutoOpenDialog undefined "C:\\Tools\\Straight-Edge-Fixer.ms"
+        standalone_after_bundle_ok = shouldAutoOpenDialog #bundled "C:\\Tools\\Straight-Edge-Fixer.ms"
+        test_passed = bundled_ok and standalone_ok and standalone_after_bundle_ok
+
+        format "Straight Edge Fixer dialog auto-open policy: bundled:% standalone:% standalone-after-bundle:% => %\n" \
+            bundled_ok standalone_ok standalone_after_bundle_ok test_passed
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
     Verifies undefined component-selection reads are normalized to empty BitArrays.
     Prevents mapped-iteration crashes when an Edit Poly component-selection read is unavailable.
     */
@@ -3976,6 +5344,23 @@ struct StraightEdgeFixer_v
 
         format "EDGE FIXER undefined selection safety: count:% edges:% verts:% => %\n" \
             empty_count empty_adapter_selection empty_vertex_selection test_passed
+
+        test_passed
+        -- return
+    ),
+
+
+    /*
+    Tests Rows distance as the horizontal same-row cutoff.
+    Inside and boundary values qualify; values above the option do not.
+    */
+    function testHorizontalReferenceRowDistance =
+    (
+        test_passed = true
+        test_passed = test_passed and (isWithinRowDistance 10.0 10.005 0.01)
+        test_passed = test_passed and (isWithinRowDistance 10.0 10.01 0.01)
+        test_passed = test_passed and (not (isWithinRowDistance 10.0 10.0101 0.01))
+        test_passed = test_passed and (not (isWithinRowDistance 10.0 10.0 0.0))
 
         test_passed
         -- return
@@ -4031,6 +5416,7 @@ struct StraightEdgeFixer_v
         single_modifier_ok = testSingleStraightEdgeFixerModifier()
         live_topology_ok = testStraightEdgeFixerLiveTopology()
         undefined_selection_ok = testUndefinedSelectionSafety()
+        row_distance_ok = testHorizontalReferenceRowDistance()
         test_passed = stable_modes_ok and
             exact_vertical_ok and
             skewed_vertical_ok and
@@ -4041,10 +5427,11 @@ struct StraightEdgeFixer_v
             persistence_ok and
             single_modifier_ok and
             live_topology_ok and
-            undefined_selection_ok
+            undefined_selection_ok and
+            row_distance_ok
 
-        format "EDGE FIXER Checkers regression: stableModes:% exactV:% skewV:% tinyV:% exactH:% skewH:% tinyAngle:% persistence:% singleModifier:% liveTopology:% undefinedSelection:% => %\n" \
-            stable_modes_ok exact_vertical_ok skewed_vertical_ok tiny_vertical_ok exact_horizontal_ok skewed_horizontal_ok tiny_angle_ok persistence_ok single_modifier_ok live_topology_ok undefined_selection_ok test_passed
+        format "EDGE FIXER Checkers regression: stableModes:% exactV:% skewV:% tinyV:% exactH:% skewH:% tinyAngle:% persistence:% singleModifier:% liveTopology:% undefinedSelection:% rowDistance:% => %\n" \
+            stable_modes_ok exact_vertical_ok skewed_vertical_ok tiny_vertical_ok exact_horizontal_ok skewed_horizontal_ok tiny_angle_ok persistence_ok single_modifier_ok live_topology_ok undefined_selection_ok row_distance_ok test_passed
 
         if original_selection.count > 0 then
         (
@@ -4596,12 +5983,17 @@ struct StraightEdgeFixer_v
 
 StraightEdgeFixer = StraightEdgeFixer_v()
 
-try
+straight_edge_fixer_auto_open_dialog = StraightEdgeFixer.shouldAutoOpenDialog wall_fixer_runtime_mode (getSourceFileName())
+
+if straight_edge_fixer_auto_open_dialog then
 (
-    destroyDialog straightEdgeFixer_ui
-)
-catch
-(
+    try
+    (
+        destroyDialog straightEdgeFixer_ui
+    )
+    catch
+    (
+    )
 )
 
 rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
@@ -4624,10 +6016,10 @@ rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
     spinner spn_angle_threshold "" pos:[64,170] width:58 height:18 range:[0.0,45.0,45.0] type:#float scale:1.0 tooltip:"Maximum direction deviation in degrees."
     label lbl_angle_units "°" pos:[124,172] width:16 height:18
 
-    button btn_check_horizontal "CHECK HORIZONTAL" pos:[18,198] width:127 height:42 tooltip:"LMB: select visible edges whose deviation from horizontal is greater than Angle.\n\nRMB: straighten currently selected horizontal-direction error edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
+    button btn_check_horizontal "CHECK HORIZONTAL" pos:[18,198] width:127 height:42 tooltip:"LMB: select visible edges whose deviation from horizontal is greater than Angle.\n\nRMB: straighten currently selected horizontal-direction error edges. Reference priority: straight neighbor, then nearest straight edge inside Rows distance on the same level. Failed vertices are selected automatically."
     button btn_check_vertical "CHECK VERTICAL" pos:[155,198] width:127 height:42 tooltip:"LMB: select visible edges whose deviation from vertical is greater than Angle.\n\nRMB: straighten currently selected vertical-direction error edges. Reference priority: straight neighbor, then nearest straight edge on the same level. Failed vertices are selected automatically."
 
-    button btn_border_check "BORDER CHECK" pos:[18,248] width:264 height:28 tooltip:"Select visible border edges with an unwelded/overlapping local-Z seam, a reflex corner above 180 degrees, or a 360-degree backtracking border. Backtracking does not require the remote vertices to share position."
+    button btn_border_check "BORDER CHECK" pos:[18,248] width:264 height:28 tooltip:"Select invalid border edges on the active/top Edit Poly. A new Edit Poly is added only when the top modifier is not Edit Poly."
 
     button btn_align "STRAIGHT EDGE FIXER" pos:[8,302] width:284 height:38 tooltip:"Detect repeated horizontal edge rows and align nearby horizontal edges to TOP, BOTTOM, or CENTER target Z."
 
@@ -4714,5 +6106,8 @@ rollout straightEdgeFixer_ui "Straight Edge Fixer 0.2" width:300
     )
 )
 
-dialog_position = StraightEdgeFixer.loadDialogPosition()
-createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #style_sysmenu, #style_toolwindow)
+if straight_edge_fixer_auto_open_dialog then
+(
+    dialog_position = StraightEdgeFixer.loadDialogPosition()
+    createDialog straightEdgeFixer_ui pos:dialog_position style:#(#style_titlebar, #style_sysmenu, #style_toolwindow)
+)
