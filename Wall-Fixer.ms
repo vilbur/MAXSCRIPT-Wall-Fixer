@@ -1,6 +1,6 @@
 /*
-Wall-Fixer Bundled Loader 1.064
-Project version 1.086.
+Wall-Fixer Bundled Loader 1.065
+Project version 1.087.
 
 
 
@@ -16,8 +16,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_loader_file_version = "1.064"
-global wall_fixer_loader_tool_version = 1.086
+global wall_fixer_loader_file_version = "1.065"
+global wall_fixer_loader_tool_version = 1.087
 global wall_fixer_runtime_mode = #bundled
 global wall_fixer_launcher_path = getSourceFileName()
 
@@ -2191,7 +2191,7 @@ struct WMCWallSlicePipeline
 
 
 /*
-Wall-Fixer Core 0.904
+Wall-Fixer Core 0.905
 Main WallFixer_v implementation and persistent runtime instance.
 Load through Wall-Fixer.ms during normal development.
 */
@@ -2200,8 +2200,8 @@ global WallFixerVersion
 global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global wall_fixer_core_file_version = "0.904"
-global wall_fixer_core_tool_version = 1.086
+global wall_fixer_core_file_version = "0.905"
+global wall_fixer_core_tool_version = 1.087
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -11439,7 +11439,7 @@ struct WallFixer_v
         try(slice_mod_tm = getModContextTM node slice_mod)catch(slice_mod_tm = undefined)
 
         /*
-        Slice Force collapses the incoming stack once before adding object-space Slice modifiers.
+        Slice Force preserves the existing stack and adds object-space Slice modifiers above it.
         Identity is a safe fallback when the modifier context transform is unavailable.
         */
         if slice_mod_tm == undefined then slice_mod_tm = matrix3 1
@@ -12908,25 +12908,66 @@ struct WallFixer_v
 
 
     /*
-    Collapses the evaluated incoming stack exactly once at Slice Force start.
-    The operation does not write object, Vertex, Edge, or Face selections and does not change command-panel context.
+    Ensures Slice Force has an Editable Poly base without destroying the existing modifier stack.
+    If the base is not Editable Poly, a temporary bottom Edit Poly is inserted and only the base through that Edit Poly is collapsed.
     */
     function prepareSliceForceBaseObject node =
     (
         if node == undefined or not(isValidNode node) then return false
 
         local prepared = false
+        local preserved_stack_mods = #()
+
         try
         (
-            convertToPoly node
+            for stack_mod in node.modifiers do append preserved_stack_mods stack_mod
+
+            if classOf node.baseObject != Editable_Poly then
+            (
+                local base_edit_poly = Edit_Poly()
+                local original_modifier_count = preserved_stack_mods.count
+
+                if original_modifier_count > 0 then
+                (
+                    addModifier node base_edit_poly before:original_modifier_count
+                )
+                else
+                (
+                    addModifier node base_edit_poly
+                )
+
+                local collapse_index = 0
+                for stack_index = 1 to node.modifiers.count while collapse_index == 0 do
+                (
+                    if node.modifiers[stack_index] == base_edit_poly then collapse_index = stack_index
+                )
+
+                if collapse_index == 0 then throw "Slice Force could not place the base Edit Poly above the source object."
+
+                update node
+
+                if not(maxOps.CollapseNodeTo node collapse_index true) then
+                (
+                    throw "Slice Force could not collapse the source object to the base Edit Poly."
+                )
+            )
 
             if classOf node.baseObject == Editable_Poly then
             (
                 try(polyop.fillInMesh node.baseObject)catch()
             )
 
-            update node
-            prepared = classOf node.baseObject == Editable_Poly and node.modifiers.count == 0
+            local stack_preserved = node.modifiers.count == preserved_stack_mods.count
+
+            if stack_preserved then
+            (
+                for stack_index = 1 to preserved_stack_mods.count while stack_preserved do
+                (
+                    if node.modifiers[stack_index] != preserved_stack_mods[stack_index] then stack_preserved = false
+                )
+            )
+
+            prepared = classOf node.baseObject == Editable_Poly and stack_preserved
         )
         catch
         (
@@ -12967,7 +13008,7 @@ struct WallFixer_v
 
 
     /*
-    Validates the baked Slice Force base before real Slice modifiers are added.
+    Validates the Editable Poly Slice Force base before real Slice modifiers are added.
     Kept under the legacy helper name for compatibility; it never reads or writes component selection.
     */
     function prepareSliceForceBaseSelections node =
@@ -12997,7 +13038,7 @@ struct WallFixer_v
 
         if not(prepareSliceForceBaseSelections node) then
         (
-            last_slice_error = "Slice Force prebuild [base geometry]: baked Editable Poly geometry is unavailable."
+            last_slice_error = "Slice Force prebuild [base geometry]: Editable Poly base geometry is unavailable."
             return slice_mods
         )
 
@@ -13125,7 +13166,7 @@ struct WallFixer_v
 
     /*
     Legacy post-Force collapse helper is intentionally disabled.
-    Slice Force may collapse only once at startup through prepareSliceForceBaseObject.
+    Slice Force never collapses generated Slice modifiers; base conversion is handled separately by prepareSliceForceBaseObject.
     */
     function collapseSliceForceObject node =
     (
@@ -13417,15 +13458,80 @@ struct WallFixer_v
 
 
     /*
-    Tests the current Force policy: one initial collapse is allowed and generated Slice modifiers remain live afterward.
+    Tests the current Force policy: existing modifier stacks are preserved and generated Slice modifiers remain live afterward.
     */
     function testSliceForcePostCollapseCleanupPolicy =
     (
-        local collapses_once_at_start = true
+        local preserves_existing_stack = true
+        local base_conversion_only_when_required = true
         local collapses_after_slicing = false
         local force_keeps_slice_mods = true
 
-        collapses_once_at_start and force_keeps_slice_mods and not collapses_after_slicing
+        preserves_existing_stack and base_conversion_only_when_required and force_keeps_slice_mods and not collapses_after_slicing
+        -- return
+    ),
+
+
+    /*
+    Tests Slice Force base normalization while preserving modifiers needed for a second slicing direction.
+    Editable Poly bases stay untouched; non-Poly bases collapse only through a temporary bottom Edit Poly.
+    */
+    function testSliceForceBasePreparationPolicy =
+    (
+        local poly_node = undefined
+        local primitive_node = undefined
+        local passed = false
+
+        try
+        (
+            poly_node = box length:10.0 width:10.0 height:10.0
+            convertToPoly poly_node
+
+            local existing_vertical_slice = SliceModifier()
+            existing_vertical_slice.name = "SLICE VERTICAL"
+            addModifier poly_node existing_vertical_slice
+
+            local poly_prepared = prepareSliceForceBaseObject poly_node
+            local poly_stack_preserved = 
+                poly_prepared and
+                classOf poly_node.baseObject == Editable_Poly and
+                poly_node.modifiers.count == 1 and
+                poly_node.modifiers[1] == existing_vertical_slice
+
+            local horizontal_task = #(1, #horizontal, 0, [0,0,0], [0,0,1], #{}, #{}, 0.0, undefined, [0,0,0], 0)
+            local horizontal_slice_mods = createSliceForceModifierStack poly_node #(horizontal_task)
+            local second_direction_preserved = 
+                horizontal_slice_mods.count == 1 and
+                poly_node.modifiers.count == 2 and
+                poly_node.modifiers[1] == horizontal_slice_mods[1] and
+                poly_node.modifiers[2] == existing_vertical_slice
+
+            primitive_node = box length:10.0 width:10.0 height:10.0
+
+            local preserved_bend = Bend()
+            local preserved_taper = Taper()
+            addModifier primitive_node preserved_bend
+            addModifier primitive_node preserved_taper
+
+            local primitive_prepared = prepareSliceForceBaseObject primitive_node
+            local primitive_stack_preserved = 
+                primitive_prepared and
+                classOf primitive_node.baseObject == Editable_Poly and
+                primitive_node.modifiers.count == 2 and
+                primitive_node.modifiers[1] == preserved_taper and
+                primitive_node.modifiers[2] == preserved_bend
+
+            passed = poly_stack_preserved and second_direction_preserved and primitive_stack_preserved
+        )
+        catch
+        (
+            passed = false
+        )
+
+        try(if poly_node != undefined and isValidNode poly_node then delete poly_node)catch()
+        try(if primitive_node != undefined and isValidNode primitive_node then delete primitive_node)catch()
+
+        passed
         -- return
     ),
 
@@ -14602,8 +14708,8 @@ struct WallFixer_v
 
 
     /*
-    Captures selected Slice Force vertex positions before the incoming stack is baked.
-    Only Vertex sub-object mode is considered; positions are stored in world space so the later Editable Poly conversion cannot erase the requested slice location.
+    Captures selected Slice Force vertex positions before any required base-object normalization.
+    Only Vertex sub-object mode is considered; positions are stored in world space so a required base Edit Poly collapse cannot erase the requested slice location.
     */
     function captureSliceForceSelectedVertexPositions node match_tolerance:0.001 =
     (
@@ -15210,7 +15316,7 @@ struct WallFixer_v
 
     /*
     Runs Slice Force as a direct prebuilt-modifier-stack workflow.
-    Each wall is collapsed exactly once at startup; object/component selections and command-panel context are never changed.
+    Existing modifier stacks are preserved; only a non-Editable-Poly base is normalized through a bottom Edit Poly collapse.
     Plain LMB/RMB derives only interior WORLD-axis planes, skips four-vertex walls, and never creates a center fallback slice.
     */
     function debugSliceSelectedWallsForceInternal cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 include_t_junctions:false t_junction_only:false progress_callback:undefined =
@@ -15246,8 +15352,8 @@ struct WallFixer_v
         )
 
         /*
-        Phase 1: bake each incoming stack, analyze its final Editable Poly once,
-        and cache every unique physical Force plane before creating any slice modifier.
+        Phase 1: preserve each incoming stack, ensure an Editable Poly base,
+        and cache every unique physical Force plane before creating any Slice modifier.
         */
         for node_index = 1 to selected_nodes.count do
         (
@@ -15261,7 +15367,7 @@ struct WallFixer_v
             (
                 if node_ok and not(prepareSliceForceBaseObject node) then
                 (
-                    node_error = node.name + ": could not apply the incoming modifier stack to Editable Poly."
+                    node_error = node.name + ": could not prepare an Editable Poly base while preserving the existing modifier stack."
                     node_ok = false
                 )
 
@@ -15336,7 +15442,7 @@ struct WallFixer_v
                         )
                         else
                         (
-                            node_error = node.name + ": Slice Force could not build a WORLD-axis Slice task from " + (if use_selected_vertex_override then "the selected vertices." else "the baked Editable Poly vertices.")
+                            node_error = node.name + ": Slice Force could not build a WORLD-axis Slice task from " + (if use_selected_vertex_override then "the selected vertices." else "the Editable Poly base vertices.")
                         )
                         node_ok = false
                     )
@@ -15543,7 +15649,7 @@ struct WallFixer_v
 
     /*
     Runs optimized Slice Force.
-    Anchor analysis happens once on the baked Editable Poly; all unique-plane modifiers are created before any slice is committed.
+    Anchor analysis happens once on the Editable Poly base while the existing modifier stack is preserved; all unique-plane modifiers are created before final evaluation.
     */
     function debugSliceSelectedWallsForce cut_mode:#all slice_plane_mode:#nextVert angle_threshold:5.0 planar_tolerance:1.0 slice_precision:0.01 cleanup_edges:true display_hidden_edges:undefined double_side:undefined include_t_junctions:false t_junction_only:false progress_callback:undefined quiet:false =
     (
