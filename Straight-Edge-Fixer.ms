@@ -1,5 +1,5 @@
 ﻿/*
-Straight Edge Fixer 0.54
+Straight Edge Fixer 0.58
 Detects repeated horizontal edge rows and aligns nearby horizontal edges to them.
 */
 
@@ -9,8 +9,8 @@ global wall_fixer_runtime_mode
 global straight_edge_fixer_auto_open_dialog
 global wall_fixer_version_system
 global wall_fixer_version_epoch
-global straight_edge_fixer_file_version = "0.54"
-global straight_edge_fixer_tool_version = 1.0649
+global straight_edge_fixer_file_version = "0.58"
+global straight_edge_fixer_tool_version = 1.0689
 
 /*
 Registers this file's shared Wall-Fixer tool version.
@@ -4136,19 +4136,21 @@ struct StraightEdgeFixer_v
                 (
                     if check_type == #vertical then
                     (
-                        target_position = [
-                            (point_a.x + point_b.x) * 0.5,
-                            (point_a.y + point_b.y) * 0.5,
-                            amin point_a.z point_b.z
-                        ]
+                        target_x = (point_a.x + point_b.x) * 0.5
+                        target_y = (point_a.y + point_b.y) * 0.5
+                        target_z = point_a.z
+
+                        if point_b.z < target_z then
+                        (
+                            target_z = point_b.z
+                        )
+
+                        target_position = point3 target_x target_y target_z
                     )
                     else if check_type == #horizontal then
                     (
-                        target_position = [
-                            0.0,
-                            0.0,
-                            (point_a.z + point_b.z) * 0.5
-                        ]
+                        target_z = (point_a.z + point_b.z) * 0.5
+                        target_position = point3 0.0 0.0 target_z
                     )
                 )
             )
@@ -4622,100 +4624,6 @@ struct StraightEdgeFixer_v
         -- return
     ),
 
-
-    (
-        selected_nodes = selection as array
-        object_results = #()
-        total_fixed_edges = 0
-        has_failed_edges = false
-        failure_report = ""
-        use_vertex_vertical_mode = (check_type == #vertical and subObjectLevel == 1)
-
-        if (selected_nodes.count == 0) then
-        (
-            messageBox "Select at least one geometry object." title:"Straight Edge Fixer"
-        )
-        else
-        (
-            undo "Fix Selected Direction Edges" on
-            (
-                for node in selected_nodes do
-                (
-                    if (isValidNode node and (superClassOf node == GeometryClass)) then
-                    (
-                        adapter = getGeometryAdapter node
-                        original_edge_selection = getEdgeSelection node adapter
-                        failed_vertices = #{}
-
-                        if use_vertex_vertical_mode then
-                        (
-                            original_vertex_selection = getVertexSelection node adapter
-                            vertex_result = fixSelectedVerticalVertices                                 node                                 adapter                                 original_vertex_selection                                 tolerance:tolerance                                 angle_threshold:angle_threshold
-
-                            total_fixed_edges += vertex_result[1]
-                            failed_vertices = vertex_result[2]
-                        )
-                        else
-                        (
-                            for edge_id in original_edge_selection do
-                            (
-                                if (fixSelectedDirectionEdge node adapter edge_id check_type tolerance:tolerance angle_threshold:angle_threshold) then
-                                (
-                                    total_fixed_edges += 1
-                                )
-                                else
-                                (
-                                    failed_edge_verts = getEdgeVertIds node adapter edge_id
-
-                                    if (failed_edge_verts.count == 2) then
-                                    (
-                                        failed_vertices[failed_edge_verts[1]] = true
-                                        failed_vertices[failed_edge_verts[2]] = true
-                                    )
-                                )
-                            )
-                        )
-
-                        if (failed_vertices.numberSet > 0) then
-                        (
-                            has_failed_edges = true
-                            failure_report += node.name + ": " + (bitIdsToString failed_vertices) + "\n"
-                        )
-
-                        append object_results #(node, adapter, original_edge_selection, failed_vertices)
-                    )
-                )
-            )
-
-            if (has_failed_edges) then
-            (
-                for object_result in object_results do
-                (
-                    setVertexSelection object_result[1] object_result[2] object_result[4]
-                )
-
-                ensureCreatePanelMode()
-                completeRedraw()
-
-                messageBox ("Unable to fix selected edges with vertices:\n\n" + failure_report) title:"Straight Edge Fixer"
-            )
-            else
-            (
-                for object_result in object_results do
-                (
-                    setEdgeSelection object_result[1] object_result[2] object_result[3]
-                )
-
-                ensureCreatePanelMode()
-                completeRedraw()
-
-                format "Straight Edge Fixer: fixed % selected % edge(s). Create panel kept active.\n" total_fixed_edges check_type
-            )
-        )
-
-        #(total_fixed_edges, has_failed_edges)
-        -- return
-    ),
 
 
     /*

@@ -1,5 +1,5 @@
 /*
-Wall-Fixer UI 0.991
+Wall-Fixer UI 0.992
 First redesigned workflow UI using the current Wall-Fixer Core/Pipeline and Straight Edge Fixer logic.
 */
 
@@ -9,8 +9,8 @@ global WallFixerRollout
 global wall_fixer_version_system
 global wall_fixer_version_epoch
 global wall_fixer_launcher_path
-global wall_fixer_ui_file_version = "0.991"
-global wall_fixer_ui_tool_version = 1.0609
+global wall_fixer_ui_file_version = "0.992"
+global wall_fixer_ui_tool_version = 1.084
 
 
 /*
@@ -810,6 +810,17 @@ saved_outer_options_rolled_up = wallFixerReadIniBool "Rollouts" "GetOuterWallsOp
 
 
 /*
+Formats Wall-Fixer project versions with exactly three decimal places.
+Keeps version display aligned with the shared 0.001 increment scheme.
+*/
+function wallFixerFormatVersion3 version_value =
+(
+    formattedPrint (version_value as float) format:".3f"
+    -- return
+)
+
+
+/*
 Refreshes the Wall-Fixer dialog title from the resolved global project version.
 Call this after CUI registration or docking because those operations can repaint the caption.
 */
@@ -819,12 +830,31 @@ function wallFixerRefreshDialogTitle =
     (
         try
         (
-            WallFixerRollout.title = ("Wall-Fixer " + (WallFixerVersion as string))
+            WallFixerRollout.title = ("Wall-Fixer " + (wallFixerFormatVersion3 WallFixerVersion))
         )
         catch
         (
         )
     )
+    -- return
+)
+
+
+/*
+Tests that project versions are always displayed with exactly three decimals.
+Covers trailing zeros and normalization of an old four-decimal value.
+*/
+function testWallFixerVersionFormatting =
+(
+    test_ok = true
+
+    test_ok = test_ok and ((wallFixerFormatVersion3 1.084) == "1.084")
+    test_ok = test_ok and ((wallFixerFormatVersion3 1.09) == "1.090")
+    test_ok = test_ok and ((wallFixerFormatVersion3 1.0839) == "1.084")
+
+    format "Wall-Fixer 3-decimal version formatting: %\n" (if test_ok then "PASS" else "FAILED")
+
+    test_ok
     -- return
 )
 
@@ -839,7 +869,7 @@ function testWallFixerDialogTitle =
 
     if WallFixerVersion != undefined and WallFixerRollout != undefined then
     (
-        expected_title = ("Wall-Fixer " + (WallFixerVersion as string))
+        expected_title = ("Wall-Fixer " + (wallFixerFormatVersion3 WallFixerVersion))
         actual_title = undefined
 
         wallFixerRefreshDialogTitle()
